@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/alecthomas/kong"
 	"github.com/kevin-cantwell/folddb/internal/engine"
 	"github.com/kevin-cantwell/folddb/internal/format"
 	"github.com/kevin-cantwell/folddb/internal/sink"
@@ -22,6 +23,101 @@ import (
 // Version is set at build time via -ldflags.
 var Version = "dev"
 
+// CLI defines the Kong command structure for folddb.
+type CLI struct {
+	// Default command: execute SQL
+	Query QueryCmd `cmd:"" default:"withargs" help:"Execute a SQL query."`
+
+	// Subcommands
+	Schema  SchemaCmd  `cmd:"" help:"Print schema for a source."`
+	State_  StateCmd   `cmd:"" name:"state" help:"Manage checkpoint state."`
+	Version VersionCmd `cmd:"" help:"Print version."`
+}
+
+// QueryCmd is the default command that executes SQL queries.
+type QueryCmd struct {
+	// Positional SQL argument
+	SQL  string `arg:"" optional:"" help:"SQL query to execute."`
+	File string `short:"f" type:"existingfile" help:"Read SQL from file."`
+
+	// Output
+	State   string        `help:"Write state to SQLite file." placeholder:"FILE"`
+	Limit   int           `help:"Max output records (0=unlimited)." default:"0"`
+	Timeout time.Duration `help:"Terminate after duration." default:"0s"`
+
+	// Streaming
+	Stateful           bool          `help:"Enable persistent checkpoints."`
+	StateDir           string        `help:"Checkpoint directory." default:"~/.folddb/state"`
+	CheckpointInterval time.Duration `help:"Checkpoint flush interval." default:"5s"`
+
+	// Debug
+	DeadLetter string `help:"Route errors to NDJSON file." placeholder:"FILE" name:"dead-letter"`
+	DryRun     bool   `help:"Print query plan without executing." name:"dry-run"`
+	Explain    bool   `help:"Print query plan then execute."`
+}
+
+// SchemaCmd is the "schema" subcommand.
+type SchemaCmd struct {
+	Args []string `arg:"" optional:"" help:"Optional source URI and FORMAT arguments."`
+}
+
+func (c *SchemaCmd) Run() error {
+	return runSchema(c.Args)
+}
+
+// StateCmd is the "state" subcommand with nested subcommands.
+type StateCmd struct {
+	List    StateListCmd    `cmd:"" help:"List checkpointed queries."`
+	Inspect StateInspectCmd `cmd:"" help:"Inspect a checkpoint."`
+	Reset   StateResetCmd   `cmd:"" help:"Reset a checkpoint."`
+}
+
+// StateListCmd lists checkpointed queries.
+type StateListCmd struct{}
+
+func (c *StateListCmd) Run() error {
+	infos, err := engine.ListCheckpoints()
+	if err != nil {
+		return err
+	}
+	if len(infos) == 0 {
+		fmt.Println("No checkpointed queries found.")
+		return nil
+	}
+	for _, info := range infos {
+		fmt.Printf("  %s  last_flush=%s  dir=%s\n", info.Hash, info.Timestamp.Format(time.RFC3339), info.Dir)
+	}
+	return nil
+}
+
+// StateInspectCmd inspects a specific checkpoint.
+type StateInspectCmd struct {
+	Hash string `arg:"" help:"Query hash to inspect."`
+}
+
+func (c *StateInspectCmd) Run() error {
+	// TODO: implement detailed inspection
+	fmt.Printf("Inspect checkpoint %s (not yet implemented)\n", c.Hash)
+	return nil
+}
+
+// StateResetCmd resets a specific checkpoint.
+type StateResetCmd struct {
+	Hash string `arg:"" help:"Query hash to reset."`
+}
+
+func (c *StateResetCmd) Run() error {
+	return engine.ResetCheckpoint(c.Hash)
+}
+
+// VersionCmd prints the version.
+type VersionCmd struct{}
+
+func (c *VersionCmd) Run() error {
+	fmt.Printf("folddb %s\n", Version)
+	return nil
+}
+
 func main() {
 	if err := run(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -29,96 +125,38 @@ func main() {
 	}
 }
 
-// cliFlags holds parsed CLI flags.
+// cliFlags holds parsed CLI flags, used by execution functions.
 type cliFlags struct {
-	stateful           bool
-	stateDB            string // --state <file.db>
-	stateDir           string // --state-dir
-	checkpointInterval time.Duration
-	deadLetter         string        // --dead-letter <file>
-	dryRun             bool          // --dry-run
-	explain            bool          // --explain
-	timeout            time.Duration // --timeout
-	limit              int           // --limit (CLI-level, 0 = unlimited)
-}
-
-func parseFlags() (cliFlags, []string) {
-	var flags cliFlags
-	flags.checkpointInterval = 5 * time.Second
-
-	args := os.Args[1:]
-	var remaining []string
-
-	for i := 0; i < len(args); i++ {
-		switch args[i] {
-		case "--stateful":
-			flags.stateful = true
-		case "--state":
-			if i+1 < len(args) {
-				i++
-				flags.stateDB = args[i]
-			}
-		case "--state-dir":
-			if i+1 < len(args) {
-				i++
-				flags.stateDir = args[i]
-			}
-		case "--checkpoint-interval":
-			if i+1 < len(args) {
-				i++
-				d, err := engine.ParseDuration(args[i])
-				if err == nil {
-					flags.checkpointInterval = d
-				}
-			}
-		case "--dead-letter":
-			if i+1 < len(args) {
-				i++
-				flags.deadLetter = args[i]
-			}
-		case "--dry-run":
-			flags.dryRun = true
-		case "--explain":
-			flags.explain = true
-		case "--timeout":
-			if i+1 < len(args) {
-				i++
-				d, err := time.ParseDuration(args[i])
-				if err == nil {
-					flags.timeout = d
-				}
-			}
-		case "--limit":
-			if i+1 < len(args) {
-				i++
-				var n int
-				if _, err := fmt.Sscanf(args[i], "%d", &n); err == nil {
-					flags.limit = n
-				}
-			}
-		default:
-			remaining = append(remaining, args[i])
-		}
-	}
-	return flags, remaining
+	stateDB string
 }
 
 func run() error {
-	flags, remaining := parseFlags()
+	var cli CLI
+	ctx := kong.Parse(&cli,
+		kong.Name("folddb"),
+		kong.Description("Execute SQL queries against streaming data sources."),
+		kong.UsageOnError(),
+		kong.Vars{"version": Version},
+	)
 
-	// Check for subcommands
-	if len(remaining) > 0 && remaining[0] == "version" {
-		fmt.Printf("folddb %s\n", Version)
-		return nil
-	}
-	if len(remaining) > 0 && remaining[0] == "schema" {
-		return runSchema(remaining[1:])
-	}
-	if len(remaining) > 0 && remaining[0] == "state" {
-		return runStateCmd(remaining[1:])
+	// Dispatch subcommands via Kong's Run interface
+	switch ctx.Command() {
+	case "schema", "schema <args>":
+		return cli.Schema.Run()
+	case "version":
+		return cli.Version.Run()
+	case "state list":
+		return cli.State_.List.Run()
+	case "state inspect <hash>":
+		return cli.State_.Inspect.Run()
+	case "state reset <hash>":
+		return cli.State_.Reset.Run()
 	}
 
-	sql, err := getSQLFromArgs(remaining)
+	// Default command: execute SQL query
+	q := &cli.Query
+
+	sql, err := getSQL(q)
 	if err != nil {
 		return err
 	}
@@ -131,25 +169,25 @@ func run() error {
 	}
 
 	// Handle --dry-run
-	if flags.dryRun {
+	if q.DryRun {
 		printQueryPlan(stmt)
 		return nil
 	}
 
 	// Handle --explain (print plan then execute)
-	if flags.explain {
+	if q.Explain {
 		printQueryPlan(stmt)
 		fmt.Fprintln(os.Stderr, "---")
 	}
 
 	// Set up context with SIGINT handling
-	ctx, cancel := context.WithCancel(context.Background())
+	runCtx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	// Apply --timeout
-	if flags.timeout > 0 {
+	if q.Timeout > 0 {
 		var timeoutCancel context.CancelFunc
-		ctx, timeoutCancel = context.WithTimeout(ctx, flags.timeout)
+		runCtx, timeoutCancel = context.WithTimeout(runCtx, q.Timeout)
 		defer timeoutCancel()
 	}
 
@@ -174,8 +212,8 @@ func run() error {
 
 	// Open dead letter file if specified
 	var dlWriter *deadLetterWriter
-	if flags.deadLetter != "" {
-		dlWriter, err = newDeadLetterWriter(flags.deadLetter)
+	if q.DeadLetter != "" {
+		dlWriter, err = newDeadLetterWriter(q.DeadLetter)
 		if err != nil {
 			return fmt.Errorf("cannot open dead letter file: %w", err)
 		}
@@ -183,8 +221,8 @@ func run() error {
 	}
 
 	// Merge CLI --limit with SQL LIMIT (CLI takes precedence if set)
-	if flags.limit > 0 {
-		stmt.Limit = &flags.limit
+	if q.Limit > 0 {
+		stmt.Limit = &q.Limit
 	}
 
 	// If SELECT has aggregates but no GROUP BY, create an implicit single group
@@ -195,13 +233,18 @@ func run() error {
 	isAccumulating := stmt.GroupBy != nil
 	isWindowed := stmt.Window != nil
 
+	// Map CLI fields to cliFlags for execution functions
+	flags := cliFlags{
+		stateDB: q.State,
+	}
+
 	// Determine source and build record channel
 	fromURI := ""
 	if stmt.From != nil {
 		fromURI = stmt.From.URI
 	}
 	if fromURI != "" && strings.HasPrefix(fromURI, "kafka://") {
-		return runKafka(ctx, stmt, dec, isAccumulating, isWindowed, flags, dlWriter)
+		return runKafka(runCtx, stmt, dec, isAccumulating, isWindowed, flags, dlWriter)
 	}
 
 	// Reject non-kafka URI schemes that we don't support
@@ -217,52 +260,26 @@ func run() error {
 	// Default: stdin source
 	stdinSrc := &source.Stdin{Reader: os.Stdin}
 	if isWindowed {
-		return runWindowed(ctx, stmt, stdinSrc, dec, flags, dlWriter)
+		return runWindowed(runCtx, stmt, stdinSrc, dec, flags, dlWriter)
 	}
 	if isAccumulating {
-		return runAccumulating(ctx, stmt, stdinSrc, dec, dlWriter)
+		return runAccumulating(runCtx, stmt, stdinSrc, dec, dlWriter)
 	}
-	return runNonAccumulating(ctx, stmt, stdinSrc, dec, dlWriter)
+	return runNonAccumulating(runCtx, stmt, stdinSrc, dec, dlWriter)
 }
 
-func runStateCmd(args []string) error {
-	if len(args) == 0 {
-		fmt.Println("Usage: folddb state list|inspect <hash>|reset <hash>")
-		return nil
-	}
-
-	switch args[0] {
-	case "list":
-		infos, err := engine.ListCheckpoints()
+func getSQL(q *QueryCmd) (string, error) {
+	if q.File != "" {
+		data, err := os.ReadFile(q.File)
 		if err != nil {
-			return err
+			return "", fmt.Errorf("cannot read SQL file: %w", err)
 		}
-		if len(infos) == 0 {
-			fmt.Println("No checkpointed queries found.")
-			return nil
-		}
-		for _, info := range infos {
-			fmt.Printf("  %s  last_flush=%s  dir=%s\n", info.Hash, info.Timestamp.Format(time.RFC3339), info.Dir)
-		}
-		return nil
-
-	case "inspect":
-		if len(args) < 2 {
-			return fmt.Errorf("usage: folddb state inspect <query-hash>")
-		}
-		// TODO: implement detailed inspection
-		fmt.Printf("Inspect checkpoint %s (not yet implemented)\n", args[1])
-		return nil
-
-	case "reset":
-		if len(args) < 2 {
-			return fmt.Errorf("usage: folddb state reset <query-hash>")
-		}
-		return engine.ResetCheckpoint(args[1])
-
-	default:
-		return fmt.Errorf("unknown state subcommand: %s", args[0])
+		return string(data), nil
 	}
+	if q.SQL != "" {
+		return q.SQL, nil
+	}
+	return "", fmt.Errorf("usage: folddb <SQL> or folddb -f <file.sql>")
 }
 
 func runKafka(ctx context.Context, stmt *ast.SelectStatement, dec format.Decoder, isAccumulating, isWindowed bool, flags cliFlags, dl *deadLetterWriter) error {
@@ -707,33 +724,6 @@ func isTTY() bool {
 		return false
 	}
 	return fi.Mode()&os.ModeCharDevice != 0
-}
-
-func getSQL() (string, error) {
-	_, remaining := parseFlags()
-	return getSQLFromArgs(remaining)
-}
-
-func getSQLFromArgs(args []string) (string, error) {
-	// Check for -f flag
-	for i, arg := range args {
-		if arg == "-f" && i+1 < len(args) {
-			data, err := os.ReadFile(args[i+1])
-			if err != nil {
-				return "", fmt.Errorf("cannot read SQL file: %w", err)
-			}
-			return string(data), nil
-		}
-	}
-
-	// First positional argument is the SQL
-	for _, arg := range args {
-		if len(arg) > 0 && arg[0] != '-' {
-			return arg, nil
-		}
-	}
-
-	return "", fmt.Errorf("usage: folddb <SQL> or folddb -f <file.sql>")
 }
 
 // printQueryPlan outputs a human-readable query plan to stderr.
