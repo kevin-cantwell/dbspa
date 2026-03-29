@@ -396,7 +396,7 @@ const examples = [
     title: "Count orders by status (CDC)",
     desc: "Accumulating with Debezium format: live count per status",
     stream: "ecommerce_orders",
-    sql: `SELECT _after->>'status' AS status, COUNT(*) AS count\nFORMAT DEBEZIUM\nGROUP BY status`,
+    sql: `SELECT _after->>'status' AS status, COUNT(*) AS count\nGROUP BY _after->>'status'\nFORMAT DEBEZIUM`,
     accumulating: true,
   },
   {
@@ -410,7 +410,7 @@ const examples = [
     title: "Revenue by region (CDC)",
     desc: "Accumulating SUM over Debezium change events",
     stream: "ecommerce_orders",
-    sql: `SELECT _after->>'region' AS region, SUM((_after->>'amount')::float) AS revenue\nFORMAT DEBEZIUM\nWHERE _op IN ('c', 'u')\nGROUP BY region`,
+    sql: `SELECT _after->>'region' AS region, SUM((_after->>'amount')::float) AS revenue\nWHERE _op IN ('c', 'u')\nGROUP BY _after->>'region'\nFORMAT DEBEZIUM`,
     accumulating: true,
   },
   {

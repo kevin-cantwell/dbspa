@@ -3,6 +3,7 @@ package engine
 import (
 	"fmt"
 	"maps"
+	"os"
 
 	"github.com/kevin-cantwell/folddb/internal/sql/ast"
 )
@@ -25,7 +26,9 @@ func Project(columns []ast.Column, rec Record) (Record, error) {
 
 		val, err := Eval(col.Expr, rec)
 		if err != nil {
-			return Record{}, fmt.Errorf("projection error on column %d: %w", i+1, err)
+			// Emit NULL for failed projections (e.g., bad casts) with a warning
+			fmt.Fprintf(os.Stderr, "Warning: projection error on column %d: %v\n", i+1, err)
+			val = NullValue{}
 		}
 
 		name := col.Alias

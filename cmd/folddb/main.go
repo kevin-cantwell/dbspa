@@ -342,6 +342,8 @@ func runNonAccumulatingFromRecords(ctx context.Context, stmt *ast.SelectStatemen
 	}()
 
 	limit := stmt.Limit
+	distinct := stmt.Distinct
+	seen := make(map[string]struct{})
 	count := 0
 	for {
 		select {
@@ -351,6 +353,13 @@ func runNonAccumulatingFromRecords(ctx context.Context, stmt *ast.SelectStatemen
 			}
 			if limit != nil && count >= *limit {
 				return snk.Close()
+			}
+			if distinct {
+				key := engine.RecordFingerprint(rec)
+				if _, dup := seen[key]; dup {
+					continue
+				}
+				seen[key] = struct{}{}
 			}
 			if err := snk.Write(rec); err != nil {
 				return fmt.Errorf("output error: %w", err)
