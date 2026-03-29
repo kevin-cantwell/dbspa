@@ -2,8 +2,12 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"os/signal"
+	"strings"
+	"syscall"
 
 	"github.com/kevin-cantwell/folddb/internal/engine"
 	"github.com/kevin-cantwell/folddb/internal/format"
@@ -21,6 +25,12 @@ func main() {
 }
 
 func run() error {
+	// Check for subcommands
+	args := os.Args[1:]
+	if len(args) > 0 && args[0] == "schema" {
+		return runSchema(args[1:])
+	}
+
 	sql, err := getSQL()
 	if err != nil {
 		return err
@@ -33,83 +43,201 @@ func run() error {
 		return fmt.Errorf("parse error: %w", err)
 	}
 
-	// Build source
-	src := &source.Stdin{Reader: os.Stdin}
+	// Set up context with SIGINT handling
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		<-sigCh
+		cancel()
+	}()
 
-	// Build decoder
-	dec := &format.JSONDecoder{}
+	// Determine format decoder
+	var formatStr string
+	if stmt.From != nil {
+		formatStr = stmt.From.Format
+	}
+	dec, err := format.NewDecoder(formatStr)
+	if err != nil {
+		return err
+	}
 
 	isAccumulating := stmt.GroupBy != nil
 
-	if isAccumulating {
-		return runAccumulating(stmt, src, dec)
+	// Determine source and build record channel
+	if stmt.From != nil && strings.HasPrefix(stmt.From.URI, "kafka://") {
+		return runKafka(ctx, stmt, dec, isAccumulating)
 	}
-	return runNonAccumulating(stmt, src, dec)
+
+	// Default: stdin source
+	if isAccumulating {
+		return runAccumulating(ctx, stmt, &source.Stdin{Reader: os.Stdin}, dec)
+	}
+	return runNonAccumulating(ctx, stmt, &source.Stdin{Reader: os.Stdin}, dec)
 }
 
-func runNonAccumulating(stmt *ast.SelectStatement, src *source.Stdin, dec *format.JSONDecoder) error {
+func runKafka(ctx context.Context, stmt *ast.SelectStatement, dec format.Decoder, isAccumulating bool) error {
+	cfg, err := source.ParseKafkaURI(stmt.From.URI)
+	if err != nil {
+		return err
+	}
+
+	kafkaSrc := source.NewKafka(ctx, cfg)
+	kafkaCh := kafkaSrc.Read()
+
+	// Build decoded record channel with Kafka virtual columns
+	recordCh := make(chan engine.Record, 256)
+	go func() {
+		defer close(recordCh)
+		for kr := range kafkaCh {
+			if kr.Value == nil {
+				continue // tombstone
+			}
+			recs, err := format.DecodeAll(dec, kr.Value)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
+				continue
+			}
+			recs = format.InjectKafkaVirtuals(recs, kr)
+			for _, rec := range recs {
+				select {
+				case recordCh <- rec:
+				case <-ctx.Done():
+					return
+				}
+			}
+		}
+	}()
+
+	if isAccumulating {
+		return runAccumulatingFromRecords(ctx, stmt, recordCh)
+	}
+	return runNonAccumulatingFromRecords(ctx, stmt, recordCh)
+}
+
+func runNonAccumulating(ctx context.Context, stmt *ast.SelectStatement, src *source.Stdin, dec format.Decoder) error {
+	rawCh := src.Read()
+	recordCh := make(chan engine.Record)
+	go func() {
+		defer close(recordCh)
+		for raw := range rawCh {
+			recs, err := format.DecodeAll(dec, raw)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
+				continue
+			}
+			for _, rec := range recs {
+				select {
+				case recordCh <- rec:
+				case <-ctx.Done():
+					return
+				}
+			}
+		}
+	}()
+	return runNonAccumulatingFromRecords(ctx, stmt, recordCh)
+}
+
+func runNonAccumulatingFromRecords(ctx context.Context, stmt *ast.SelectStatement, recordCh <-chan engine.Record) error {
 	pipeline := &engine.Pipeline{
 		Columns: stmt.Columns,
 		Where:   stmt.Where,
 	}
 
 	snk := &sink.JSONSink{Writer: os.Stdout}
-
-	rawCh := src.Read()
-	recordCh := make(chan engine.Record)
 	outputCh := make(chan engine.Record)
 
-	// Decode goroutine
-	go func() {
-		defer close(recordCh)
-		for raw := range rawCh {
-			rec, err := dec.Decode(raw)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
-				continue
-			}
-			recordCh <- rec
-		}
-	}()
-
-	// Pipeline goroutine
 	go func() {
 		pipeline.Process(recordCh, outputCh)
 	}()
 
-	// Sink (main goroutine)
 	limit := stmt.Limit
 	count := 0
-	for rec := range outputCh {
-		if err := snk.Write(rec); err != nil {
-			return fmt.Errorf("output error: %w", err)
-		}
-		count++
-		if limit != nil && count >= *limit {
-			break
+	for {
+		select {
+		case rec, ok := <-outputCh:
+			if !ok {
+				return snk.Close()
+			}
+			if err := snk.Write(rec); err != nil {
+				return fmt.Errorf("output error: %w", err)
+			}
+			count++
+			if limit != nil && count >= *limit {
+				return snk.Close()
+			}
+		case <-ctx.Done():
+			return snk.Close()
 		}
 	}
-
-	return snk.Close()
 }
 
-func runAccumulating(stmt *ast.SelectStatement, src *source.Stdin, dec *format.JSONDecoder) error {
-	// Parse aggregate columns
+func runAccumulating(ctx context.Context, stmt *ast.SelectStatement, src *source.Stdin, dec format.Decoder) error {
+	rawCh := src.Read()
+	filteredCh := make(chan engine.Record)
+
+	go func() {
+		defer close(filteredCh)
+		for raw := range rawCh {
+			recs, err := format.DecodeAll(dec, raw)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
+				continue
+			}
+			for _, rec := range recs {
+				if stmt.Where != nil {
+					pass, err := engine.Filter(stmt.Where, rec)
+					if err != nil || !pass {
+						continue
+					}
+				}
+				select {
+				case filteredCh <- rec:
+				case <-ctx.Done():
+					return
+				}
+			}
+		}
+	}()
+
+	return runAccumulatingFromFiltered(ctx, stmt, filteredCh)
+}
+
+func runAccumulatingFromRecords(ctx context.Context, stmt *ast.SelectStatement, recordCh <-chan engine.Record) error {
+	filteredCh := make(chan engine.Record)
+	go func() {
+		defer close(filteredCh)
+		for rec := range recordCh {
+			if stmt.Where != nil {
+				pass, err := engine.Filter(stmt.Where, rec)
+				if err != nil || !pass {
+					continue
+				}
+			}
+			select {
+			case filteredCh <- rec:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	return runAccumulatingFromFiltered(ctx, stmt, filteredCh)
+}
+
+func runAccumulatingFromFiltered(ctx context.Context, stmt *ast.SelectStatement, filteredCh <-chan engine.Record) error {
 	aggCols, err := engine.ParseAggColumns(stmt.Columns, stmt.GroupBy)
 	if err != nil {
 		return fmt.Errorf("aggregate setup error: %w", err)
 	}
 
-	// Determine column order for output
 	columnOrder := make([]string, len(aggCols))
 	for i, col := range aggCols {
 		columnOrder[i] = col.Alias
 	}
 
-	// Create aggregate operator
 	aggOp := engine.NewAggregateOp(aggCols, stmt.GroupBy, stmt.Having)
 
-	// Select sink based on whether stdout is a TTY
 	var snk sink.Sink
 	if isTTY() {
 		snk = &sink.TUISink{
@@ -123,49 +251,30 @@ func runAccumulating(stmt *ast.SelectStatement, src *source.Stdin, dec *format.J
 		}
 	}
 
-	rawCh := src.Read()
-	filteredCh := make(chan engine.Record)
 	aggOutCh := make(chan engine.Record)
-
-	// Decode + WHERE filter goroutine
-	go func() {
-		defer close(filteredCh)
-		for raw := range rawCh {
-			rec, err := dec.Decode(raw)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
-				continue
-			}
-			// Apply WHERE filter before aggregation
-			if stmt.Where != nil {
-				pass, err := engine.Filter(stmt.Where, rec)
-				if err != nil || !pass {
-					continue
-				}
-			}
-			filteredCh <- rec
-		}
-	}()
-
-	// Aggregation goroutine
 	go func() {
 		aggOp.Process(filteredCh, aggOutCh)
 	}()
 
-	// Sink (main goroutine)
 	limit := stmt.Limit
 	count := 0
-	for rec := range aggOutCh {
-		if err := snk.Write(rec); err != nil {
-			return fmt.Errorf("output error: %w", err)
-		}
-		count++
-		if limit != nil && count >= *limit {
-			break
+	for {
+		select {
+		case rec, ok := <-aggOutCh:
+			if !ok {
+				return snk.Close()
+			}
+			if err := snk.Write(rec); err != nil {
+				return fmt.Errorf("output error: %w", err)
+			}
+			count++
+			if limit != nil && count >= *limit {
+				return snk.Close()
+			}
+		case <-ctx.Done():
+			return snk.Close()
 		}
 	}
-
-	return snk.Close()
 }
 
 func isTTY() bool {
