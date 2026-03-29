@@ -23,6 +23,9 @@ type AggColumn struct {
 	AggArg ast.Expr
 	// IsStar is true for COUNT(*).
 	IsStar bool
+	// GroupByIdx is the index into the GROUP BY key slice for non-aggregate columns.
+	// -1 if not applicable (aggregate columns).
+	GroupByIdx int
 }
 
 // AggregateOp is the stateful aggregation operator.
@@ -211,7 +214,7 @@ func (op *AggregateOp) processRecord(rec Record, out chan<- Record) {
 func (op *AggregateOp) evalHaving(expr ast.Expr, gs *groupState, rec Record) (Value, error) {
 	switch e := expr.(type) {
 	case *ast.FunctionCall:
-		if isAggregateFunc(e.Name) {
+		if IsAggregateFunc(e.Name) {
 			// Find the matching accumulator
 			funcName := strings.ToUpper(e.Name)
 			for i, col := range op.Columns {
@@ -292,15 +295,16 @@ func (op *AggregateOp) isGroupEmpty(gs *groupState) bool {
 // buildResult constructs the output column map for a group.
 func (op *AggregateOp) buildResult(gs *groupState) map[string]Value {
 	cols := make(map[string]Value, len(op.Columns))
-	keyIdx := 0
 	for i, col := range op.Columns {
 		if col.IsAggregate {
 			cols[col.Alias] = gs.accumulators[i].Result()
 		} else {
-			// GROUP BY key column
-			if keyIdx < len(gs.keyValues) {
-				cols[col.Alias] = gs.keyValues[keyIdx]
-				keyIdx++
+			// GROUP BY key column — use the mapped index
+			idx := col.GroupByIdx
+			if idx >= 0 && idx < len(gs.keyValues) {
+				cols[col.Alias] = gs.keyValues[idx]
+			} else {
+				cols[col.Alias] = NullValue{}
 			}
 		}
 	}
@@ -389,12 +393,13 @@ func ParseAggColumns(columns []ast.Column, groupBy []ast.Expr) ([]AggColumn, err
 		}
 
 		fc, isFunc := col.Expr.(*ast.FunctionCall)
-		if isFunc && isAggregateFunc(fc.Name) {
+		if isFunc && IsAggregateFunc(fc.Name) {
 			ac := AggColumn{
 				Alias:       alias,
 				Expr:        col.Expr,
 				IsAggregate: true,
 				AggFunc:     strings.ToUpper(fc.Name),
+				GroupByIdx:  -1,
 			}
 			if len(fc.Args) == 1 {
 				if _, ok := fc.Args[0].(*ast.StarExpr); ok {
@@ -408,10 +413,15 @@ func ParseAggColumns(columns []ast.Column, groupBy []ast.Expr) ([]AggColumn, err
 			}
 			result = append(result, ac)
 		} else {
-			// Non-aggregate — should be in GROUP BY
+			// Non-aggregate — must be in GROUP BY
+			gbIdx := findGroupByIndex(col.Expr, groupBy)
+			if gbIdx < 0 {
+				return nil, fmt.Errorf("column %q must appear in GROUP BY clause or be used in an aggregate function", alias)
+			}
 			result = append(result, AggColumn{
-				Alias: alias,
-				Expr:  col.Expr,
+				Alias:      alias,
+				Expr:       col.Expr,
+				GroupByIdx: gbIdx,
 			})
 		}
 	}
@@ -419,8 +429,59 @@ func ParseAggColumns(columns []ast.Column, groupBy []ast.Expr) ([]AggColumn, err
 	return result, nil
 }
 
-// isAggregateFunc returns true if the function name is a known aggregate.
-func isAggregateFunc(name string) bool {
+// findGroupByIndex returns the index in groupBy that matches the given expression,
+// or -1 if not found.
+func findGroupByIndex(expr ast.Expr, groupBy []ast.Expr) int {
+	for i, gb := range groupBy {
+		if exprEqual(expr, gb) {
+			return i
+		}
+	}
+	return -1
+}
+
+// exprEqual checks if two AST expressions are structurally equal.
+func exprEqual(a, b ast.Expr) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	switch av := a.(type) {
+	case *ast.ColumnRef:
+		bv, ok := b.(*ast.ColumnRef)
+		return ok && av.Name == bv.Name
+	case *ast.NumberLiteral:
+		bv, ok := b.(*ast.NumberLiteral)
+		return ok && av.Value == bv.Value && av.IsFloat == bv.IsFloat
+	case *ast.StringLiteral:
+		bv, ok := b.(*ast.StringLiteral)
+		return ok && av.Value == bv.Value
+	case *ast.BinaryExpr:
+		bv, ok := b.(*ast.BinaryExpr)
+		return ok && av.Op == bv.Op && exprEqual(av.Left, bv.Left) && exprEqual(av.Right, bv.Right)
+	case *ast.FunctionCall:
+		bv, ok := b.(*ast.FunctionCall)
+		if !ok || av.Name != bv.Name || len(av.Args) != len(bv.Args) {
+			return false
+		}
+		for i := range av.Args {
+			if !exprEqual(av.Args[i], bv.Args[i]) {
+				return false
+			}
+		}
+		return true
+	case *ast.StarExpr:
+		_, ok := b.(*ast.StarExpr)
+		return ok
+	default:
+		return fmt.Sprintf("%#v", a) == fmt.Sprintf("%#v", b)
+	}
+}
+
+// IsAggregateFunc returns true if the function name is a known aggregate.
+func IsAggregateFunc(name string) bool {
 	switch strings.ToUpper(name) {
 	case "COUNT", "SUM", "AVG", "MIN", "MAX", "MEDIAN", "FIRST", "LAST",
 		"ARRAY_AGG", "APPROX_COUNT_DISTINCT":

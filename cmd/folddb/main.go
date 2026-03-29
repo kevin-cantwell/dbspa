@@ -187,6 +187,11 @@ func run() error {
 		stmt.Limit = &flags.limit
 	}
 
+	// If SELECT has aggregates but no GROUP BY, create an implicit single group
+	if stmt.GroupBy == nil && hasAggregateInSelect(stmt.Columns) {
+		stmt.GroupBy = []ast.Expr{}
+	}
+
 	isAccumulating := stmt.GroupBy != nil
 	isWindowed := stmt.Window != nil
 
@@ -344,13 +349,13 @@ func runNonAccumulatingFromRecords(ctx context.Context, stmt *ast.SelectStatemen
 			if !ok {
 				return snk.Close()
 			}
+			if limit != nil && count >= *limit {
+				return snk.Close()
+			}
 			if err := snk.Write(rec); err != nil {
 				return fmt.Errorf("output error: %w", err)
 			}
 			count++
-			if limit != nil && count >= *limit {
-				return snk.Close()
-			}
 		case <-ctx.Done():
 			return snk.Close()
 		}
@@ -451,13 +456,13 @@ func runAccumulatingFromFiltered(ctx context.Context, stmt *ast.SelectStatement,
 			if !ok {
 				return snk.Close()
 			}
+			if limit != nil && count >= *limit {
+				return snk.Close()
+			}
 			if err := snk.Write(rec); err != nil {
 				return fmt.Errorf("output error: %w", err)
 			}
 			count++
-			if limit != nil && count >= *limit {
-				return snk.Close()
-			}
 		case <-ctx.Done():
 			return snk.Close()
 		}
@@ -631,13 +636,13 @@ func runWindowedFromRecords(ctx context.Context, stmt *ast.SelectStatement, reco
 			if !ok {
 				return snk.Close()
 			}
+			if limit != nil && count >= *limit {
+				return snk.Close()
+			}
 			if err := snk.Write(rec); err != nil {
 				return fmt.Errorf("output error: %w", err)
 			}
 			count++
-			if limit != nil && count >= *limit {
-				return snk.Close()
-			}
 		case <-ctx.Done():
 			return snk.Close()
 		}
@@ -848,6 +853,18 @@ func exprString(e ast.Expr) string {
 	default:
 		return fmt.Sprintf("%T", e)
 	}
+}
+
+// hasAggregateInSelect returns true if any column in the SELECT list is an aggregate function.
+func hasAggregateInSelect(columns []ast.Column) bool {
+	for _, col := range columns {
+		if fc, ok := col.Expr.(*ast.FunctionCall); ok {
+			if engine.IsAggregateFunc(fc.Name) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // decodeWithCSVHeader handles CSV header row skipping transparently.

@@ -61,13 +61,13 @@ func runQuery(t *testing.T, sql string, inputLines []string) []map[string]any {
 	limit := stmt.Limit
 	count := 0
 	for rec := range outputCh {
+		if limit != nil && count >= *limit {
+			break
+		}
 		if err := snk.Write(rec); err != nil {
 			t.Fatalf("sink error: %v", err)
 		}
 		count++
-		if limit != nil && count >= *limit {
-			break
-		}
 	}
 
 	// Parse output

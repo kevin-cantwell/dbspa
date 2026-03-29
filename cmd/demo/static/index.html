@@ -1,0 +1,719 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FoldDB Demo</title>
+<style>
+  :root {
+    --bg: #1a1a2e;
+    --surface: #16213e;
+    --surface2: #0f3460;
+    --accent: #e94560;
+    --accent2: #533483;
+    --text: #eee;
+    --text-dim: #8892a4;
+    --green: #4ecca3;
+    --red: #e94560;
+    --yellow: #f0c040;
+    --mono: 'SF Mono', 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+    --sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: var(--sans);
+    background: var(--bg);
+    color: var(--text);
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  header {
+    padding: 16px 24px;
+    border-bottom: 1px solid var(--surface2);
+    display: flex;
+    align-items: baseline;
+    gap: 16px;
+    flex-shrink: 0;
+  }
+
+  header h1 {
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--accent);
+  }
+
+  header .tagline {
+    font-size: 14px;
+    color: var(--text-dim);
+  }
+
+  .layout {
+    display: grid;
+    grid-template-columns: 260px 1fr 1fr;
+    flex: 1;
+    overflow: hidden;
+  }
+
+  .panel {
+    border-right: 1px solid var(--surface2);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .panel:last-child { border-right: none; }
+
+  .panel-header {
+    padding: 12px 16px;
+    font-size: 13px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-dim);
+    border-bottom: 1px solid var(--surface2);
+    flex-shrink: 0;
+    background: var(--surface);
+  }
+
+  .panel-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 12px;
+  }
+
+  /* Streams panel */
+  .stream-card {
+    background: var(--surface);
+    border: 1px solid var(--surface2);
+    border-radius: 6px;
+    padding: 12px;
+    margin-bottom: 10px;
+    cursor: pointer;
+    transition: border-color 0.2s;
+  }
+
+  .stream-card:hover, .stream-card.selected {
+    border-color: var(--accent);
+  }
+
+  .stream-card .name {
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--green);
+    margin-bottom: 4px;
+  }
+
+  .stream-card .desc {
+    font-size: 12px;
+    color: var(--text-dim);
+    margin-bottom: 4px;
+  }
+
+  .stream-card .meta {
+    font-size: 11px;
+    color: var(--text-dim);
+  }
+
+  .stream-card .meta span {
+    background: var(--surface2);
+    padding: 2px 6px;
+    border-radius: 3px;
+    margin-right: 6px;
+  }
+
+  /* Examples panel */
+  .example {
+    background: var(--surface);
+    border: 1px solid var(--surface2);
+    border-radius: 6px;
+    padding: 12px;
+    margin-bottom: 12px;
+  }
+
+  .example-title {
+    font-size: 13px;
+    font-weight: 600;
+    margin-bottom: 4px;
+    color: var(--green);
+  }
+
+  .example-desc {
+    font-size: 12px;
+    color: var(--text-dim);
+    margin-bottom: 8px;
+  }
+
+  .example textarea {
+    width: 100%;
+    font-family: var(--mono);
+    font-size: 12px;
+    background: var(--bg);
+    color: var(--text);
+    border: 1px solid var(--surface2);
+    border-radius: 4px;
+    padding: 8px;
+    resize: vertical;
+    min-height: 60px;
+    line-height: 1.4;
+  }
+
+  .example textarea:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+
+  .example-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 8px;
+    gap: 8px;
+  }
+
+  .example-footer .stream-label {
+    font-size: 11px;
+    color: var(--text-dim);
+  }
+
+  .example-footer select {
+    font-family: var(--mono);
+    font-size: 11px;
+    background: var(--bg);
+    color: var(--text);
+    border: 1px solid var(--surface2);
+    border-radius: 4px;
+    padding: 4px 8px;
+  }
+
+  .btn {
+    font-family: var(--sans);
+    font-size: 12px;
+    font-weight: 600;
+    border: none;
+    border-radius: 4px;
+    padding: 6px 16px;
+    cursor: pointer;
+    transition: opacity 0.2s;
+  }
+
+  .btn:hover { opacity: 0.85; }
+
+  .btn-run {
+    background: var(--green);
+    color: #1a1a2e;
+  }
+
+  .btn-stop {
+    background: var(--red);
+    color: #fff;
+  }
+
+  /* Output panel */
+  .output-controls {
+    padding: 8px 16px;
+    border-bottom: 1px solid var(--surface2);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-shrink: 0;
+    background: var(--surface);
+  }
+
+  .output-controls .stats {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--text-dim);
+    flex: 1;
+  }
+
+  .output-controls label {
+    font-size: 12px;
+    color: var(--text-dim);
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    cursor: pointer;
+  }
+
+  .output-controls input[type="checkbox"] {
+    accent-color: var(--accent);
+  }
+
+  #output-area {
+    flex: 1;
+    overflow-y: auto;
+    padding: 12px;
+    font-family: var(--mono);
+    font-size: 12px;
+    line-height: 1.5;
+    background: var(--bg);
+  }
+
+  /* Non-accumulating: scrolling lines */
+  .output-line {
+    padding: 1px 0;
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+
+  .output-line .op-plus { color: var(--green); }
+  .output-line .op-minus { color: var(--red); }
+
+  /* Accumulating: table */
+  .result-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: var(--mono);
+    font-size: 12px;
+  }
+
+  .result-table th {
+    text-align: left;
+    padding: 6px 12px;
+    border-bottom: 2px solid var(--surface2);
+    color: var(--text-dim);
+    font-weight: 600;
+    position: sticky;
+    top: 0;
+    background: var(--bg);
+  }
+
+  .result-table td {
+    padding: 4px 12px;
+    border-bottom: 1px solid var(--surface2);
+  }
+
+  .result-table tr.flash {
+    animation: flash 0.5s ease-out;
+  }
+
+  @keyframes flash {
+    0% { background: rgba(78, 204, 163, 0.3); }
+    100% { background: transparent; }
+  }
+
+  .status-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 3px;
+    font-size: 11px;
+    font-weight: 600;
+  }
+
+  .status-running {
+    background: rgba(78, 204, 163, 0.2);
+    color: var(--green);
+  }
+
+  .status-stopped {
+    background: rgba(233, 69, 96, 0.2);
+    color: var(--red);
+  }
+
+  .empty-state {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: var(--text-dim);
+    font-size: 14px;
+    text-align: center;
+    padding: 40px;
+    line-height: 1.6;
+  }
+
+  /* Changelog view */
+  .changelog-line {
+    padding: 1px 0;
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+
+  .changelog-line.retract {
+    color: var(--red);
+    opacity: 0.6;
+  }
+
+  .changelog-line.insert {
+    color: var(--green);
+  }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 8px; }
+  ::-webkit-scrollbar-track { background: var(--bg); }
+  ::-webkit-scrollbar-thumb { background: var(--surface2); border-radius: 4px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>FoldDB Demo</h1>
+  <span class="tagline">Streaming SQL with incremental aggregation</span>
+</header>
+
+<div class="layout">
+  <!-- Streams Panel -->
+  <div class="panel">
+    <div class="panel-header">Sample Streams</div>
+    <div class="panel-body" id="streams-panel"></div>
+  </div>
+
+  <!-- Queries Panel -->
+  <div class="panel">
+    <div class="panel-header">Example Queries</div>
+    <div class="panel-body" id="queries-panel"></div>
+  </div>
+
+  <!-- Output Panel -->
+  <div class="panel" style="border-right:none;">
+    <div class="panel-header">Output</div>
+    <div class="output-controls">
+      <span class="stats" id="stats">Ready</span>
+      <label><input type="checkbox" id="raw-toggle"> Raw changelog</label>
+      <button class="btn btn-stop" id="stop-btn" style="display:none" onclick="stopQuery()">Stop</button>
+    </div>
+    <div id="output-area">
+      <div class="empty-state">Select an example query and click Run to start streaming.</div>
+    </div>
+  </div>
+</div>
+
+<script>
+const examples = [
+  {
+    title: "Filter API errors",
+    desc: "Non-accumulating: stream only 4xx/5xx responses",
+    stream: "api_metrics",
+    sql: `SELECT timestamp, endpoint, status_code, latency_ms\nWHERE status_code >= 400`,
+    accumulating: false,
+  },
+  {
+    title: "Count orders by status (CDC)",
+    desc: "Accumulating with Debezium format: live count per status",
+    stream: "ecommerce_orders",
+    sql: `SELECT _after->>'status' AS status, COUNT(*) AS count\nFORMAT DEBEZIUM\nGROUP BY status`,
+    accumulating: true,
+  },
+  {
+    title: "Avg API latency per endpoint (windowed)",
+    desc: "Tumbling 1-minute windows with event time",
+    stream: "api_metrics",
+    sql: `SELECT window_start, endpoint, COUNT(*) AS reqs, AVG(latency_ms) AS avg_lat\nGROUP BY endpoint\nWINDOW TUMBLING '1 minute'\nEVENT TIME BY timestamp`,
+    accumulating: true,
+  },
+  {
+    title: "Revenue by region (CDC)",
+    desc: "Accumulating SUM over Debezium change events",
+    stream: "ecommerce_orders",
+    sql: `SELECT _after->>'region' AS region, SUM((_after->>'amount')::float) AS revenue\nFORMAT DEBEZIUM\nWHERE _op IN ('c', 'u')\nGROUP BY region`,
+    accumulating: true,
+  },
+  {
+    title: "Top pages by unique visitors",
+    desc: "COUNT DISTINCT users per page",
+    stream: "clickstream",
+    sql: `SELECT page, COUNT(DISTINCT user_id) AS unique_visitors, COUNT(*) AS total_actions\nGROUP BY page`,
+    accumulating: true,
+  },
+  {
+    title: "Error rate per endpoint",
+    desc: "Derived error count via CASE expression",
+    stream: "api_metrics",
+    sql: `SELECT endpoint,\n       COUNT(*) AS total,\n       SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END) AS errors\nGROUP BY endpoint`,
+    accumulating: true,
+  },
+];
+
+let eventSource = null;
+let recordCount = 0;
+let startTime = null;
+let isAccumulating = false;
+let showRawChangelog = false;
+let accumulatorState = {}; // key -> row
+let accumulatorColumns = null;
+
+// Render streams panel
+function renderStreams() {
+  const panel = document.getElementById('streams-panel');
+  const streams = [
+    { name: 'ecommerce_orders', desc: 'Debezium CDC events for an orders table', format: 'DEBEZIUM', rate: '~5/s' },
+    { name: 'api_metrics', desc: 'Simulated API request logs', format: 'JSON', rate: '~10/s' },
+    { name: 'clickstream', desc: 'User click/interaction events', format: 'JSON', rate: '~8/s' },
+  ];
+
+  panel.innerHTML = streams.map(s => `
+    <div class="stream-card" data-stream="${s.name}">
+      <div class="name">${s.name}</div>
+      <div class="desc">${s.desc}</div>
+      <div class="meta">
+        <span>${s.format}</span>
+        <span>${s.rate}</span>
+      </div>
+    </div>
+  `).join('');
+}
+
+// Render queries panel
+function renderQueries() {
+  const panel = document.getElementById('queries-panel');
+  panel.innerHTML = examples.map((ex, i) => `
+    <div class="example">
+      <div class="example-title">${ex.title}</div>
+      <div class="example-desc">${ex.desc}</div>
+      <textarea id="sql-${i}" rows="${ex.sql.split('\n').length + 1}">${ex.sql}</textarea>
+      <div class="example-footer">
+        <div>
+          <span class="stream-label">Stream:</span>
+          <select id="stream-${i}">
+            <option value="ecommerce_orders" ${ex.stream === 'ecommerce_orders' ? 'selected' : ''}>ecommerce_orders</option>
+            <option value="api_metrics" ${ex.stream === 'api_metrics' ? 'selected' : ''}>api_metrics</option>
+            <option value="clickstream" ${ex.stream === 'clickstream' ? 'selected' : ''}>clickstream</option>
+          </select>
+        </div>
+        <button class="btn btn-run" onclick="runQuery(${i})">Run</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+function runQuery(idx) {
+  // Stop previous
+  stopQuery();
+
+  const sql = document.getElementById(`sql-${idx}`).value.trim();
+  const stream = document.getElementById(`stream-${idx}`).value;
+  isAccumulating = examples[idx].accumulating;
+  showRawChangelog = document.getElementById('raw-toggle').checked;
+
+  // Reset state
+  recordCount = 0;
+  startTime = Date.now();
+  accumulatorState = {};
+  accumulatorColumns = null;
+
+  const outputArea = document.getElementById('output-area');
+  outputArea.innerHTML = '';
+
+  document.getElementById('stop-btn').style.display = 'inline-block';
+  updateStats();
+
+  // Highlight stream card
+  document.querySelectorAll('.stream-card').forEach(c => c.classList.remove('selected'));
+  const card = document.querySelector(`.stream-card[data-stream="${stream}"]`);
+  if (card) card.classList.add('selected');
+
+  // POST to start
+  fetch('/api/run', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ stream, sql }),
+  }).then(response => {
+    if (!response.ok) {
+      return response.text().then(t => { throw new Error(t); });
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    function pump() {
+      return reader.read().then(({ done, value }) => {
+        if (done) {
+          onStreamEnd();
+          return;
+        }
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop(); // keep incomplete line
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const data = line.slice(6);
+            handleData(data);
+          } else if (line.startsWith('event: done')) {
+            onStreamEnd();
+            return;
+          }
+        }
+        return pump();
+      });
+    }
+
+    // Store abort controller
+    window._activeReader = reader;
+    return pump();
+  }).catch(err => {
+    const outputArea = document.getElementById('output-area');
+    outputArea.innerHTML = `<div class="empty-state" style="color:var(--red);">Error: ${err.message}</div>`;
+  });
+}
+
+function handleData(data) {
+  recordCount++;
+  updateStats();
+
+  const outputArea = document.getElementById('output-area');
+  const rawMode = document.getElementById('raw-toggle').checked;
+
+  if (!isAccumulating || rawMode) {
+    // Scrolling NDJSON lines
+    const div = document.createElement('div');
+    div.className = 'output-line';
+
+    try {
+      const obj = JSON.parse(data);
+      if (obj.op === '+') {
+        div.innerHTML = '<span class="op-plus">+</span> ' + escapeHtml(JSON.stringify(obj));
+        div.className = 'changelog-line insert';
+      } else if (obj.op === '-') {
+        div.innerHTML = '<span class="op-minus">-</span> ' + escapeHtml(JSON.stringify(obj));
+        div.className = 'changelog-line retract';
+      } else {
+        div.textContent = data;
+      }
+    } catch {
+      div.textContent = data;
+    }
+
+    outputArea.appendChild(div);
+
+    // Keep max 500 lines
+    while (outputArea.childElementCount > 500) {
+      outputArea.removeChild(outputArea.firstChild);
+    }
+
+    outputArea.scrollTop = outputArea.scrollHeight;
+  } else {
+    // Accumulating: maintain table
+    try {
+      const obj = JSON.parse(data);
+      processAccumulatingRow(obj);
+      renderAccumulatingTable();
+    } catch {
+      // fallback to raw
+      const div = document.createElement('div');
+      div.className = 'output-line';
+      div.textContent = data;
+      outputArea.appendChild(div);
+      outputArea.scrollTop = outputArea.scrollHeight;
+    }
+  }
+}
+
+function processAccumulatingRow(obj) {
+  const op = obj.op || '+';
+
+  // Extract columns (excluding 'op')
+  if (!accumulatorColumns) {
+    accumulatorColumns = Object.keys(obj).filter(k => k !== 'op');
+  }
+
+  // Build key from non-aggregate columns (heuristic: all string-valued columns)
+  // Better heuristic: use all columns that aren't obviously numeric aggregates
+  const keyCols = accumulatorColumns.filter(c => {
+    const v = obj[c];
+    return typeof v === 'string';
+  });
+  const key = keyCols.length > 0
+    ? keyCols.map(c => String(obj[c])).join('|')
+    : JSON.stringify(obj);
+
+  if (op === '-') {
+    delete accumulatorState[key];
+  } else {
+    accumulatorState[key] = obj;
+  }
+}
+
+function renderAccumulatingTable() {
+  const outputArea = document.getElementById('output-area');
+  const rows = Object.values(accumulatorState);
+
+  if (rows.length === 0 || !accumulatorColumns) {
+    outputArea.innerHTML = '<div class="empty-state">Waiting for data...</div>';
+    return;
+  }
+
+  let html = '<table class="result-table"><thead><tr>';
+  for (const col of accumulatorColumns) {
+    html += `<th>${escapeHtml(col)}</th>`;
+  }
+  html += '</tr></thead><tbody>';
+
+  for (const row of rows) {
+    html += '<tr class="flash">';
+    for (const col of accumulatorColumns) {
+      let val = row[col];
+      if (typeof val === 'number' && !Number.isInteger(val)) {
+        val = val.toFixed(2);
+      }
+      html += `<td>${escapeHtml(String(val ?? ''))}</td>`;
+    }
+    html += '</tr>';
+  }
+  html += '</tbody></table>';
+  outputArea.innerHTML = html;
+}
+
+function updateStats() {
+  const stats = document.getElementById('stats');
+  const elapsed = startTime ? ((Date.now() - startTime) / 1000).toFixed(1) : '0.0';
+  stats.innerHTML = `<span class="status-badge status-running">RUNNING</span> &nbsp; ${recordCount} records &nbsp; ${elapsed}s`;
+}
+
+function onStreamEnd() {
+  const stats = document.getElementById('stats');
+  const elapsed = startTime ? ((Date.now() - startTime) / 1000).toFixed(1) : '0.0';
+  stats.innerHTML = `<span class="status-badge status-stopped">STOPPED</span> &nbsp; ${recordCount} records &nbsp; ${elapsed}s`;
+  document.getElementById('stop-btn').style.display = 'none';
+  document.querySelectorAll('.stream-card').forEach(c => c.classList.remove('selected'));
+}
+
+function stopQuery() {
+  if (window._activeReader) {
+    window._activeReader.cancel();
+    window._activeReader = null;
+  }
+
+  fetch('/api/stop', { method: 'POST' }).catch(() => {});
+  onStreamEnd();
+}
+
+function escapeHtml(s) {
+  const div = document.createElement('div');
+  div.textContent = s;
+  return div.innerHTML;
+}
+
+// Stats timer
+setInterval(() => {
+  if (startTime && window._activeReader) {
+    updateStats();
+  }
+}, 1000);
+
+// Toggle raw changelog
+document.getElementById('raw-toggle').addEventListener('change', () => {
+  showRawChangelog = document.getElementById('raw-toggle').checked;
+  // If accumulating query is running, reset view
+  if (isAccumulating && window._activeReader) {
+    const outputArea = document.getElementById('output-area');
+    if (!showRawChangelog) {
+      renderAccumulatingTable();
+    } else {
+      outputArea.innerHTML = '<div class="empty-state">Switched to raw mode. New records will appear here.</div>';
+    }
+  }
+});
+
+// Init
+renderStreams();
+renderQueries();
+</script>
+</body>
+</html>

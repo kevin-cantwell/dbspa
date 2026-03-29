@@ -588,13 +588,13 @@ func TestCompositeKey(t *testing.T) {
 func TestIsAggregateFunc(t *testing.T) {
 	aggs := []string{"COUNT", "SUM", "AVG", "MIN", "MAX", "FIRST", "LAST", "ARRAY_AGG", "MEDIAN", "APPROX_COUNT_DISTINCT"}
 	for _, name := range aggs {
-		if !isAggregateFunc(name) {
+		if !IsAggregateFunc(name) {
 			t.Errorf("expected %q to be aggregate", name)
 		}
 	}
 	nonAggs := []string{"UPPER", "LOWER", "COALESCE", "TRIM"}
 	for _, name := range nonAggs {
-		if isAggregateFunc(name) {
+		if IsAggregateFunc(name) {
 			t.Errorf("expected %q to NOT be aggregate", name)
 		}
 	}
