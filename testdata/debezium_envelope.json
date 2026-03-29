@@ -1,0 +1,31 @@
+{
+  "payload": {
+    "after": {
+      "created_at": "2026-03-28T10:00:00Z",
+      "customer_id": "CUST-0042",
+      "order_id": "ORD-000001",
+      "price": 29.99,
+      "product": "widget-a",
+      "quantity": 3,
+      "region": "us-east",
+      "status": "pending",
+      "total": 89.97,
+      "updated_at": "2026-03-28T10:00:00Z"
+    },
+    "before": null,
+    "op": "c",
+    "source": {
+      "connector": "postgresql",
+      "db": "testdb",
+      "lsn": 50100,
+      "name": "folddb-test",
+      "schema": "public",
+      "table": "orders",
+      "ts_ms": 1774692000000,
+      "txId": 1001,
+      "version": "2.5.0"
+    },
+    "ts_ms": 1774692000000
+  },
+  "schema": null
+}

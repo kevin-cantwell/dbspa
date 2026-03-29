@@ -1,0 +1,20 @@
+{"valid":true,"name":"alice","value":42}
+{"valid":true,"name":"bob","value":17}
+this is not json at all
+{"valid":true,"name":"charlie","value":99}
+{"unclosed": "brace"
+
+{"valid":true,"name":"diana","value":55}
+[1, 2, 3]
+{"valid":true,"name":"eve","value":33}
+null
+{"valid":true,"name":"frank","value":78}
+{"nested": {"deeply": {"broken":}}}
+{"valid":true,"name":"grace","value":12}
+{"valid":true,"name":"heidi","value":64}
+42
+{"valid":true,"name":"ivan","value":91}
+true
+{"valid":true,"name":"judy","value":45}
+{"missing_value":}
+{"valid":true,"name":"karl","value":28}
