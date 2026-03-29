@@ -2,7 +2,7 @@ VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -ldflags "-X main.Version=$(VERSION)"
 BINARY := folddb
 
-.PHONY: build test test-unit test-integration test-all lint release clean docker-up docker-down testdata
+.PHONY: build test test-unit test-integration test-all verify lint release clean docker-up docker-down testdata
 
 build:
 	go build $(LDFLAGS) -o $(BINARY) ./cmd/folddb
@@ -30,7 +30,10 @@ test-integration: docker-up
 	@echo "Tearing down..."
 	$(MAKE) docker-down
 
-test-all: test-unit test-integration
+test-all: test-unit test-integration verify
+
+verify: build
+	./scripts/verify.sh 10000
 
 docker-up:
 	docker compose up -d

@@ -29,9 +29,10 @@ type CLI struct {
 	Query QueryCmd `cmd:"" default:"withargs" help:"Execute a SQL query."`
 
 	// Subcommands
-	Schema  SchemaCmd  `cmd:"" help:"Print schema for a source."`
-	State_  StateCmd   `cmd:"" name:"state" help:"Manage checkpoint state."`
-	Version VersionCmd `cmd:"" help:"Print version."`
+	Generate GenerateCmd `cmd:"" help:"Generate synthetic data fixtures."`
+	Schema   SchemaCmd   `cmd:"" help:"Print schema for a source."`
+	State_   StateCmd    `cmd:"" name:"state" help:"Manage checkpoint state."`
+	Version  VersionCmd  `cmd:"" help:"Print version."`
 }
 
 // QueryCmd is the default command that executes SQL queries.
@@ -141,6 +142,8 @@ func run() error {
 
 	// Dispatch subcommands via Kong's Run interface
 	switch ctx.Command() {
+	case "generate <dataset>":
+		return cli.Generate.Run()
 	case "schema", "schema <args>":
 		return cli.Schema.Run()
 	case "version":
