@@ -146,10 +146,11 @@ func (s *TUISink) redraw() {
 	// Build the entire frame as a single string to minimize write syscalls
 	var buf strings.Builder
 
-	// Move cursor up to clear previous draw
+	// Move cursor to start of previous draw and clear everything below
 	if s.linesDrawn > 0 {
-		fmt.Fprintf(&buf, "\033[%dA\033[J", s.linesDrawn)
+		fmt.Fprintf(&buf, "\033[%dA", s.linesDrawn) // move up
 	}
+	buf.WriteString("\r\033[J") // carriage return + clear from cursor to end of screen
 
 	var lines int
 
