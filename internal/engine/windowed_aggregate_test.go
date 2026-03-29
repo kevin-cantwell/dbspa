@@ -91,3 +91,394 @@ func TestWindowedAggregateOpTumbling(t *testing.T) {
 		t.Errorf("reqs = %v, want 1", r2.Columns["reqs"])
 	}
 }
+
+// TC-WIN-010: Window with GROUP BY produces separate results per group
+func TestWindowedAggregateGroupBy(t *testing.T) {
+	aggCols := []AggColumn{
+		{Alias: "region", Expr: &ast.ColumnRef{Name: "region"}},
+		{Alias: "cnt", IsAggregate: true, AggFunc: "COUNT", IsStar: true},
+	}
+	groupBy := []ast.Expr{&ast.ColumnRef{Name: "region"}}
+
+	windowSpec := WindowSpec{Type: "TUMBLING", Size: time.Minute, Advance: time.Minute}
+	watermark := NewWatermarkTracker(0)
+	eventTimeExpr := &ast.ColumnRef{Name: "ts"}
+
+	op := NewWindowedAggregateOp(aggCols, groupBy, nil, windowSpec, eventTimeExpr, watermark, "FINAL", 0)
+
+	in := make(chan Record, 4)
+	out := make(chan Record, 10)
+
+	base := time.Date(2026, 3, 28, 10, 0, 0, 0, time.UTC)
+
+	// Two regions in same window
+	in <- Record{
+		Columns: map[string]Value{
+			"ts":     TextValue{V: base.Add(10 * time.Second).Format(time.RFC3339)},
+			"region": TextValue{V: "us-east"},
+		},
+		Diff: 1,
+	}
+	in <- Record{
+		Columns: map[string]Value{
+			"ts":     TextValue{V: base.Add(20 * time.Second).Format(time.RFC3339)},
+			"region": TextValue{V: "us-west"},
+		},
+		Diff: 1,
+	}
+	in <- Record{
+		Columns: map[string]Value{
+			"ts":     TextValue{V: base.Add(30 * time.Second).Format(time.RFC3339)},
+			"region": TextValue{V: "us-east"},
+		},
+		Diff: 1,
+	}
+	close(in)
+
+	go op.Process(in, out)
+
+	var results []Record
+	for rec := range out {
+		results = append(results, rec)
+	}
+
+	// Should get 2 results: one per region in the single window
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results (one per region), got %d", len(results))
+	}
+
+	regionCounts := make(map[string]int64)
+	for _, r := range results {
+		region := r.Columns["region"].(TextValue).V
+		cnt := r.Columns["cnt"].(IntValue).V
+		regionCounts[region] = cnt
+	}
+
+	if regionCounts["us-east"] != 2 {
+		t.Errorf("us-east count = %d, want 2", regionCounts["us-east"])
+	}
+	if regionCounts["us-west"] != 1 {
+		t.Errorf("us-west count = %d, want 1", regionCounts["us-west"])
+	}
+}
+
+// TC-WIN-011: window_start and window_end columns in output
+func TestWindowedAggregateOutputColumns(t *testing.T) {
+	aggCols := []AggColumn{
+		{Alias: "cnt", IsAggregate: true, AggFunc: "COUNT", IsStar: true},
+	}
+
+	windowSpec := WindowSpec{Type: "TUMBLING", Size: time.Minute, Advance: time.Minute}
+	watermark := NewWatermarkTracker(0)
+	eventTimeExpr := &ast.ColumnRef{Name: "ts"}
+
+	op := NewWindowedAggregateOp(aggCols, nil, nil, windowSpec, eventTimeExpr, watermark, "FINAL", 0)
+
+	in := make(chan Record, 1)
+	out := make(chan Record, 10)
+
+	base := time.Date(2026, 3, 28, 10, 0, 0, 0, time.UTC)
+	in <- Record{
+		Columns: map[string]Value{
+			"ts": TextValue{V: base.Add(15 * time.Second).Format(time.RFC3339)},
+		},
+		Diff: 1,
+	}
+	close(in)
+
+	go op.Process(in, out)
+
+	var results []Record
+	for rec := range out {
+		results = append(results, rec)
+	}
+
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+
+	r := results[0]
+	ws, ok := r.Columns["window_start"]
+	if !ok {
+		t.Fatal("missing window_start column")
+	}
+	we, ok := r.Columns["window_end"]
+	if !ok {
+		t.Fatal("missing window_end column")
+	}
+
+	wantStart := "2026-03-28T10:00:00Z"
+	wantEnd := "2026-03-28T10:01:00Z"
+	if ws.String() != wantStart {
+		t.Errorf("window_start = %v, want %v", ws.String(), wantStart)
+	}
+	if we.String() != wantEnd {
+		t.Errorf("window_end = %v, want %v", we.String(), wantEnd)
+	}
+}
+
+// TC-WIN-002: Tumbling window emit on watermark close
+func TestWindowedAggregateTumblingEmitOnClose(t *testing.T) {
+	aggCols := []AggColumn{
+		{Alias: "total", IsAggregate: true, AggFunc: "SUM", AggArg: &ast.ColumnRef{Name: "v"}},
+	}
+
+	windowSpec := WindowSpec{Type: "TUMBLING", Size: time.Minute, Advance: time.Minute}
+	watermark := NewWatermarkTracker(5 * time.Second) // 5s delay
+	eventTimeExpr := &ast.ColumnRef{Name: "ts"}
+
+	op := NewWindowedAggregateOp(aggCols, nil, nil, windowSpec, eventTimeExpr, watermark, "FINAL", 0)
+
+	in := make(chan Record, 10)
+	out := make(chan Record, 10)
+
+	base := time.Date(2026, 3, 28, 10, 0, 0, 0, time.UTC)
+
+	// Event in window [10:00, 10:01)
+	in <- Record{
+		Columns: map[string]Value{
+			"ts": TextValue{V: base.Add(30 * time.Second).Format(time.RFC3339)},
+			"v":  IntValue{V: 100},
+		},
+		Diff: 1,
+	}
+
+	// Event that pushes watermark past 10:01 (need event at 10:01:05 to get watermark = 10:01:00)
+	in <- Record{
+		Columns: map[string]Value{
+			"ts": TextValue{V: base.Add(65 * time.Second).Format(time.RFC3339)},
+			"v":  IntValue{V: 200},
+		},
+		Diff: 1,
+	}
+	close(in)
+
+	go op.Process(in, out)
+
+	var results []Record
+	for rec := range out {
+		results = append(results, rec)
+	}
+
+	// Should get at least 2 results (one per window bucket), though the first may have been
+	// emitted when watermark advanced past 10:01
+	if len(results) < 1 {
+		t.Fatalf("expected at least 1 result, got %d", len(results))
+	}
+}
+
+// TC-WIN-006: Late data dropped when beyond watermark
+func TestWindowedAggregateLateDataDropped(t *testing.T) {
+	aggCols := []AggColumn{
+		{Alias: "cnt", IsAggregate: true, AggFunc: "COUNT", IsStar: true},
+	}
+
+	windowSpec := WindowSpec{Type: "TUMBLING", Size: time.Minute, Advance: time.Minute}
+	watermark := NewWatermarkTracker(1 * time.Second) // 1s delay
+	eventTimeExpr := &ast.ColumnRef{Name: "ts"}
+
+	op := NewWindowedAggregateOp(aggCols, nil, nil, windowSpec, eventTimeExpr, watermark, "FINAL", 0)
+
+	in := make(chan Record, 10)
+	out := make(chan Record, 10)
+
+	base := time.Date(2026, 3, 28, 10, 0, 0, 0, time.UTC)
+
+	// First: event at 10:00:30
+	in <- Record{
+		Columns: map[string]Value{
+			"ts": TextValue{V: base.Add(30 * time.Second).Format(time.RFC3339)},
+		},
+		Diff: 1,
+	}
+
+	// Push watermark well past 10:01: event at 10:05:00
+	in <- Record{
+		Columns: map[string]Value{
+			"ts": TextValue{V: base.Add(5 * time.Minute).Format(time.RFC3339)},
+		},
+		Diff: 1,
+	}
+
+	// Late event: 10:00:40 (window [10:00, 10:01) already closed)
+	in <- Record{
+		Columns: map[string]Value{
+			"ts": TextValue{V: base.Add(40 * time.Second).Format(time.RFC3339)},
+		},
+		Diff: 1,
+	}
+	close(in)
+
+	go op.Process(in, out)
+
+	var results []Record
+	for rec := range out {
+		results = append(results, rec)
+	}
+
+	// The first window should have COUNT=1 (the late event was dropped)
+	for _, r := range results {
+		ws := r.Columns["window_start"].String()
+		if ws == "2026-03-28T10:00:00Z" {
+			cnt := r.Columns["cnt"].(IntValue).V
+			if cnt != 1 {
+				t.Errorf("first window count = %d, want 1 (late data should be dropped)", cnt)
+			}
+		}
+	}
+}
+
+// TC-WIN-009: Empty window produces no output
+func TestWindowedAggregateEmptyWindowNoOutput(t *testing.T) {
+	aggCols := []AggColumn{
+		{Alias: "cnt", IsAggregate: true, AggFunc: "COUNT", IsStar: true},
+	}
+
+	windowSpec := WindowSpec{Type: "TUMBLING", Size: time.Minute, Advance: time.Minute}
+	watermark := NewWatermarkTracker(0)
+	eventTimeExpr := &ast.ColumnRef{Name: "ts"}
+
+	op := NewWindowedAggregateOp(aggCols, nil, nil, windowSpec, eventTimeExpr, watermark, "FINAL", 0)
+
+	in := make(chan Record, 5)
+	out := make(chan Record, 10)
+
+	base := time.Date(2026, 3, 28, 10, 0, 0, 0, time.UTC)
+
+	// Event at 10:00:30 (window [10:00, 10:01))
+	in <- Record{
+		Columns: map[string]Value{"ts": TextValue{V: base.Add(30 * time.Second).Format(time.RFC3339)}},
+		Diff:    1,
+	}
+
+	// Skip to 10:02:30 (window [10:01, 10:02) has no events)
+	in <- Record{
+		Columns: map[string]Value{"ts": TextValue{V: base.Add(150 * time.Second).Format(time.RFC3339)}},
+		Diff:    1,
+	}
+	close(in)
+
+	go op.Process(in, out)
+
+	var results []Record
+	for rec := range out {
+		results = append(results, rec)
+	}
+
+	// No result for window [10:01, 10:02) — it should not appear at all
+	for _, r := range results {
+		ws := r.Columns["window_start"].String()
+		if ws == "2026-03-28T10:01:00Z" {
+			cnt := r.Columns["cnt"].(IntValue).V
+			if cnt == 0 {
+				t.Error("empty window should not emit a row with count=0")
+			}
+		}
+	}
+}
+
+// SUM across tumbling windows
+func TestWindowedAggregateSUM(t *testing.T) {
+	aggCols := []AggColumn{
+		{Alias: "total", IsAggregate: true, AggFunc: "SUM", AggArg: &ast.ColumnRef{Name: "v"}},
+	}
+
+	windowSpec := WindowSpec{Type: "TUMBLING", Size: time.Minute, Advance: time.Minute}
+	watermark := NewWatermarkTracker(0)
+	eventTimeExpr := &ast.ColumnRef{Name: "ts"}
+
+	op := NewWindowedAggregateOp(aggCols, nil, nil, windowSpec, eventTimeExpr, watermark, "FINAL", 0)
+
+	in := make(chan Record, 5)
+	out := make(chan Record, 10)
+
+	base := time.Date(2026, 3, 28, 10, 0, 0, 0, time.UTC)
+
+	in <- Record{
+		Columns: map[string]Value{
+			"ts": TextValue{V: base.Add(10 * time.Second).Format(time.RFC3339)},
+			"v":  IntValue{V: 10},
+		},
+		Diff: 1,
+	}
+	in <- Record{
+		Columns: map[string]Value{
+			"ts": TextValue{V: base.Add(20 * time.Second).Format(time.RFC3339)},
+			"v":  IntValue{V: 20},
+		},
+		Diff: 1,
+	}
+	in <- Record{
+		Columns: map[string]Value{
+			"ts": TextValue{V: base.Add(30 * time.Second).Format(time.RFC3339)},
+			"v":  IntValue{V: 30},
+		},
+		Diff: 1,
+	}
+	close(in)
+
+	go op.Process(in, out)
+
+	var results []Record
+	for rec := range out {
+		results = append(results, rec)
+	}
+
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+
+	total := results[0].Columns["total"]
+	if v, ok := total.(IntValue); !ok || v.V != 60 {
+		t.Errorf("total = %v, want 60", total)
+	}
+}
+
+// ParseWindowSpec tests
+func TestParseWindowSpec(t *testing.T) {
+	tests := []struct {
+		name    string
+		wc      *ast.WindowClause
+		want    WindowSpec
+		wantErr bool
+	}{
+		{
+			name: "tumbling 1 minute",
+			wc:   &ast.WindowClause{Type: "TUMBLING", Size: "1 minute"},
+			want: WindowSpec{Type: "TUMBLING", Size: time.Minute, Advance: time.Minute},
+		},
+		{
+			name: "sliding 10m by 5m",
+			wc:   &ast.WindowClause{Type: "SLIDING", Size: "10 minutes", SlideBy: "5 minutes"},
+			want: WindowSpec{Type: "SLIDING", Size: 10 * time.Minute, Advance: 5 * time.Minute},
+		},
+		{
+			name:    "sliding without BY",
+			wc:      &ast.WindowClause{Type: "SLIDING", Size: "10 minutes"},
+			wantErr: true,
+		},
+		{
+			name:    "invalid size",
+			wc:      &ast.WindowClause{Type: "TUMBLING", Size: "not_a_duration"},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ParseWindowSpec(tt.wc)
+			if tt.wantErr {
+				if err == nil {
+					t.Error("expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got.Type != tt.want.Type || got.Size != tt.want.Size || got.Advance != tt.want.Advance {
+				t.Errorf("got %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}

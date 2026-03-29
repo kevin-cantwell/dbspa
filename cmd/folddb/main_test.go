@@ -798,3 +798,117 @@ func TestE2EGroupByWhereFilter(t *testing.T) {
 		t.Errorf("expected total=40 (WHERE filtered), got %v", last["total"])
 	}
 }
+
+// =====================================================================
+// Non-windowed regression: ensure non-windowed queries still work
+// =====================================================================
+
+func TestE2ENonWindowedRegression(t *testing.T) {
+	tests := []struct {
+		name       string
+		sql        string
+		input      []string
+		wantCount  int
+		checkFirst map[string]any
+	}{
+		{
+			name:      "simple select passthrough",
+			sql:       `SELECT name, age`,
+			input:     []string{`{"name":"alice","age":30}`, `{"name":"bob","age":25}`},
+			wantCount: 2,
+			checkFirst: map[string]any{"name": "alice"},
+		},
+		{
+			name:      "select with where filter",
+			sql:       `SELECT x WHERE x > 2`,
+			input:     []string{`{"x":1}`, `{"x":3}`, `{"x":5}`},
+			wantCount: 2,
+		},
+		{
+			name:      "select star",
+			sql:       `SELECT *`,
+			input:     []string{`{"a":1,"b":2}`},
+			wantCount: 1,
+		},
+		{
+			name:      "empty input produces no output",
+			sql:       `SELECT x`,
+			input:     nil,
+			wantCount: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			results := runQuery(t, tt.sql, tt.input)
+			if len(results) != tt.wantCount {
+				t.Fatalf("expected %d results, got %d", tt.wantCount, len(results))
+			}
+			if tt.checkFirst != nil && len(results) > 0 {
+				for k, want := range tt.checkFirst {
+					if results[0][k] != want {
+						t.Errorf("first result[%q] = %v, want %v", k, results[0][k], want)
+					}
+				}
+			}
+		})
+	}
+}
+
+// =====================================================================
+// E2E GROUP BY regression tests
+// =====================================================================
+
+func TestE2EGroupByRegression(t *testing.T) {
+	tests := []struct {
+		name     string
+		sql      string
+		input    []string
+		wantLast map[string]any // expected last "+" row values
+	}{
+		{
+			name: "SUM basic",
+			sql:  `SELECT g, SUM(v) AS total GROUP BY g`,
+			input: []string{
+				`{"g":"a","v":10}`,
+				`{"g":"a","v":20}`,
+			},
+			wantLast: map[string]any{"g": "a", "total": float64(30)},
+		},
+		{
+			name: "COUNT with multiple groups",
+			sql:  `SELECT g, COUNT(*) AS cnt GROUP BY g`,
+			input: []string{
+				`{"g":"x","v":1}`,
+				`{"g":"y","v":2}`,
+				`{"g":"x","v":3}`,
+			},
+			wantLast: map[string]any{"g": "x", "cnt": float64(2)},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			results := runAggQuery(t, tt.sql, tt.input)
+			if len(results) == 0 {
+				t.Fatal("expected at least one result")
+			}
+
+			// Find last "+" for the expected group
+			var last map[string]any
+			for _, r := range results {
+				if r["op"] == "+" && (tt.wantLast["g"] == nil || r["g"] == tt.wantLast["g"]) {
+					last = r
+				}
+			}
+			if last == nil {
+				t.Fatal("no matching insert found")
+			}
+			for k, want := range tt.wantLast {
+				if last[k] != want {
+					t.Errorf("last[%q] = %v, want %v", k, last[k], want)
+				}
+			}
+		})
+	}
+}
