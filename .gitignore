@@ -1,0 +1,5 @@
+folddb
+demo
+coverage.out
+*.out
+/tmp/
