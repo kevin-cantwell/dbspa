@@ -88,7 +88,11 @@ func (p *Parser) parseSelect() (*ast.SelectStatement, error) {
 
 	// HAVING
 	if p.lex.Peek().Type == lexer.TokenHaving {
+		tok := p.lex.Peek()
 		p.lex.Next()
+		if stmt.GroupBy == nil {
+			return nil, p.errorf(tok, "HAVING requires GROUP BY")
+		}
 		expr, err := p.parseExpr()
 		if err != nil {
 			return nil, err

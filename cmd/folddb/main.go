@@ -204,6 +204,16 @@ func run() error {
 		return runKafka(ctx, stmt, dec, isAccumulating, isWindowed, flags, dlWriter)
 	}
 
+	// Reject non-kafka URI schemes that we don't support
+	if fromURI != "" && !strings.HasPrefix(fromURI, "stdin://") {
+		// Extract the scheme for a helpful error message
+		scheme := fromURI
+		if idx := strings.Index(fromURI, "://"); idx >= 0 {
+			scheme = fromURI[:idx]
+		}
+		return fmt.Errorf("source type %q is not supported in v0. Supported: kafka://, stdin://", scheme)
+	}
+
 	// Default: stdin source
 	stdinSrc := &source.Stdin{Reader: os.Stdin}
 	if isWindowed {

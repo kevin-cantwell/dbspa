@@ -393,6 +393,9 @@ func (a *noopAccumulator) Unmarshal(_ []byte) error  { return nil }
 func ParseAggColumns(columns []ast.Column, groupBy []ast.Expr) ([]AggColumn, error) {
 	var result []AggColumn
 
+	// Track aliases to detect duplicates
+	seenAliases := make(map[string]int) // alias -> count
+
 	for i, col := range columns {
 		alias := col.Alias
 		if alias == "" {
@@ -401,6 +404,21 @@ func ParseAggColumns(columns []ast.Column, groupBy []ast.Expr) ([]AggColumn, err
 		if alias == "" {
 			alias = fmt.Sprintf("col%d", i+1)
 		}
+
+		// Auto-deduplicate aliases by appending _N suffix
+		if count, exists := seenAliases[alias]; exists {
+			newAlias := fmt.Sprintf("%s_%d", alias, count+1)
+			for {
+				if _, taken := seenAliases[newAlias]; !taken {
+					break
+				}
+				count++
+				newAlias = fmt.Sprintf("%s_%d", alias, count+1)
+			}
+			seenAliases[alias] = count + 1
+			alias = newAlias
+		}
+		seenAliases[alias] = 1
 
 		fc, isFunc := col.Expr.(*ast.FunctionCall)
 		if isFunc && IsAggregateFunc(fc.Name) {

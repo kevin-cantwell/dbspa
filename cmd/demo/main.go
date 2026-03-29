@@ -59,7 +59,11 @@ func main() {
 	// API: stop query
 	mux.HandleFunc("/api/stop", handleStop)
 
-	addr := ":8080"
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+	addr := ":" + port
 	log.Printf("Demo server starting on http://localhost%s", addr)
 	if err := http.ListenAndServe(addr, mux); err != nil {
 		log.Fatal(err)

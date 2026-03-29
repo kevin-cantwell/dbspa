@@ -149,6 +149,10 @@ func (a *SumAccumulator) Add(value Value) {
 	}
 	f, ok := valueToFloat(value)
 	if !ok {
+		// Non-numeric value: mark as having received input but don't add to sum.
+		// This ensures the accumulator emits (as NULL) rather than producing no output.
+		a.hasValue = true
+		a.changed = true
 		return
 	}
 	a.prevSum = a.sum

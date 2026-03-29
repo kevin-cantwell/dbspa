@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -53,16 +54,26 @@ func (FloatValue) Type() string     { return "FLOAT" }
 func (FloatValue) IsNull() bool     { return false }
 func (v FloatValue) String() string { return strconv.FormatFloat(v.V, 'f', -1, 64) }
 func (v FloatValue) ToJSON() any {
-	if math.IsInf(v.V, 1) {
-		return "+Inf"
+	if math.IsInf(v.V, 1) || math.IsInf(v.V, -1) || math.IsNaN(v.V) {
+		// NaN and Infinity are not valid JSON numbers; emit null with a warning.
+		fmt.Fprintf(os.Stderr, "Warning: float value %v is not representable in JSON, emitting null\n", v.V)
+		return nil
 	}
-	if math.IsInf(v.V, -1) {
-		return "-Inf"
+	// Use jsonFloat to ensure float values always serialize with a decimal point,
+	// preserving type information (e.g., 123.0 instead of 123).
+	return jsonFloat(v.V)
+}
+
+// jsonFloat is a float64 wrapper that always serializes with a decimal point in JSON.
+type jsonFloat float64
+
+func (f jsonFloat) MarshalJSON() ([]byte, error) {
+	v := float64(f)
+	// If the float is a whole number, format with .0 suffix
+	if v == math.Trunc(v) && !math.IsInf(v, 0) && !math.IsNaN(v) {
+		return []byte(strconv.FormatFloat(v, 'f', 1, 64)), nil
 	}
-	if math.IsNaN(v.V) {
-		return "NaN"
-	}
-	return v.V
+	return []byte(strconv.FormatFloat(v, 'f', -1, 64)), nil
 }
 
 // TextValue represents a UTF-8 string.

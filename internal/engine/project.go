@@ -39,6 +39,19 @@ func Project(columns []ast.Column, rec Record) (Record, error) {
 			name = fmt.Sprintf("col%d", i+1)
 		}
 
+		// Auto-deduplicate: if the name already exists, append _N suffix
+		if _, exists := out.Columns[name]; exists {
+			count := 2
+			for {
+				candidate := fmt.Sprintf("%s_%d", name, count)
+				if _, exists := out.Columns[candidate]; !exists {
+					name = candidate
+					break
+				}
+				count++
+			}
+		}
+
 		out.Columns[name] = val
 	}
 
