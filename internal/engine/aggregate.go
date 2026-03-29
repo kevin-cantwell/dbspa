@@ -122,10 +122,20 @@ func (op *AggregateOp) processRecord(rec Record, out chan<- Record) {
 
 	// Check if any accumulator changed
 	anyChanged := false
+	hasAnyAggregate := false
 	for i, col := range op.Columns {
-		if col.IsAggregate && gs.accumulators[i].HasChanged() {
-			anyChanged = true
+		if col.IsAggregate {
+			hasAnyAggregate = true
+			if gs.accumulators[i].HasChanged() {
+				anyChanged = true
+			}
 		}
+	}
+
+	// If no aggregates (GROUP BY without aggregate functions),
+	// only emit when the group is first created
+	if !hasAnyAggregate {
+		anyChanged = !exists
 	}
 
 	if !anyChanged {
