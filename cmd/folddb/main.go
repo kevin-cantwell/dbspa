@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -405,11 +406,13 @@ func runNonAccumulatingFromRecords(ctx context.Context, stmt *ast.SelectStatemen
 func runAccumulating(ctx context.Context, stmt *ast.SelectStatement, src *source.Stdin, dec format.Decoder, dl *deadLetterWriter) error {
 	rawCh := src.Read()
 	filteredCh := make(chan engine.Record)
+	var inputCount atomic.Int64
 
 	go func() {
 		defer close(filteredCh)
 		var offset int64
 		for raw := range rawCh {
+			inputCount.Add(1)
 			recs, err := decodeWithCSVHeader(dec, raw)
 			if err != nil {
 				handleDeserError(dl, err, raw, offset, 0)
@@ -433,14 +436,16 @@ func runAccumulating(ctx context.Context, stmt *ast.SelectStatement, src *source
 		}
 	}()
 
-	return runAccumulatingFromFiltered(ctx, stmt, filteredCh)
+	return runAccumulatingFromFiltered(ctx, stmt, filteredCh, &inputCount)
 }
 
 func runAccumulatingFromRecords(ctx context.Context, stmt *ast.SelectStatement, recordCh <-chan engine.Record) error {
 	filteredCh := make(chan engine.Record)
+	var inputCount atomic.Int64
 	go func() {
 		defer close(filteredCh)
 		for rec := range recordCh {
+			inputCount.Add(1)
 			if stmt.Where != nil {
 				pass, err := engine.Filter(stmt.Where, rec)
 				if err != nil || !pass {
@@ -454,10 +459,10 @@ func runAccumulatingFromRecords(ctx context.Context, stmt *ast.SelectStatement, 
 			}
 		}
 	}()
-	return runAccumulatingFromFiltered(ctx, stmt, filteredCh)
+	return runAccumulatingFromFiltered(ctx, stmt, filteredCh, &inputCount)
 }
 
-func runAccumulatingFromFiltered(ctx context.Context, stmt *ast.SelectStatement, filteredCh <-chan engine.Record) error {
+func runAccumulatingFromFiltered(ctx context.Context, stmt *ast.SelectStatement, filteredCh <-chan engine.Record, inputCount *atomic.Int64) error {
 	aggCols, err := engine.ParseAggColumns(stmt.Columns, stmt.GroupBy)
 	if err != nil {
 		return fmt.Errorf("aggregate setup error: %w", err)
@@ -476,6 +481,7 @@ func runAccumulatingFromFiltered(ctx context.Context, stmt *ast.SelectStatement,
 			Writer:      os.Stdout,
 			ColumnOrder: columnOrder,
 		}
+		tui.InputCount = inputCount
 		tui.Start()
 		snk = tui
 	} else {

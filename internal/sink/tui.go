@@ -5,6 +5,7 @@ import (
 	"io"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/kevin-cantwell/folddb/internal/engine"
@@ -17,11 +18,15 @@ type TUISink struct {
 	ColumnOrder []string
 	FPS         int // target frames per second (default 15)
 
+	// InputCount can be set to an external counter that the pipeline increments
+	// to track total records read from the source (before filtering).
+	InputCount *atomic.Int64
+
 	mu          sync.Mutex
 	rows        map[string]map[string]engine.Value
 	rowOrder    []string
 	linesDrawn  int
-	recordCount int
+	recordCount int // records that reached the accumulator (after filtering)
 	dirty       bool
 	done        chan struct{}
 	wg          sync.WaitGroup
@@ -195,7 +200,15 @@ func (s *TUISink) redraw() {
 	}
 
 	// Footer
-	fmt.Fprintf(&buf, "(%d groups, %d records processed)\n", len(s.rows), s.recordCount)
+	var inputCount int64
+	if s.InputCount != nil {
+		inputCount = s.InputCount.Load()
+	}
+	if inputCount > 0 {
+		fmt.Fprintf(&buf, "(%d groups | %d matched | %d input)\n", len(s.rows), s.recordCount, inputCount)
+	} else {
+		fmt.Fprintf(&buf, "(%d groups | %d accumulated)\n", len(s.rows), s.recordCount)
+	}
 	lines++
 
 	// Single write to terminal
