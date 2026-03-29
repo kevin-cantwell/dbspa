@@ -187,7 +187,63 @@ func (p *Parser) parseSelect() (*ast.SelectStatement, error) {
 		stmt.Limit = &n
 	}
 
+	// Standalone FORMAT (when no FROM clause, e.g., piped stdin)
+	// This allows: SELECT ... WHERE ... FORMAT CSV
+	if stmt.From == nil && p.lex.Peek().Type == lexer.TokenFormat {
+		src, err := p.parseStandaloneFormat()
+		if err != nil {
+			return nil, err
+		}
+		stmt.From = src
+	}
+
 	return stmt, nil
+}
+
+func (p *Parser) parseStandaloneFormat() (*ast.TableSource, error) {
+	p.lex.Next() // consume FORMAT
+	fmtTok := p.lex.Next()
+	src := &ast.TableSource{Format: strings.ToUpper(fmtTok.Literal)}
+	// Parse optional format options: FORMAT CSV(key=value, ...)
+	if p.lex.Peek().Type == lexer.TokenLParen {
+		p.lex.Next()
+		opts := make(map[string]string)
+		for p.lex.Peek().Type != lexer.TokenRParen && p.lex.Peek().Type != lexer.TokenEOF {
+			keyTok := p.lex.Next()
+			if keyTok.Type != lexer.TokenIdent && !lexer.IsKeyword(keyTok.Type) {
+				return nil, p.errorf(keyTok, "expected option name, got %q", keyTok.Literal)
+			}
+			key := strings.ToLower(keyTok.Literal)
+			if err := p.expect(lexer.TokenEq); err != nil {
+				return nil, err
+			}
+			valTok := p.lex.Next()
+			var val string
+			switch valTok.Type {
+			case lexer.TokenString:
+				val = valTok.Literal
+			case lexer.TokenTrue:
+				val = "true"
+			case lexer.TokenFalse:
+				val = "false"
+			case lexer.TokenInteger:
+				val = valTok.Literal
+			case lexer.TokenIdent:
+				val = valTok.Literal
+			default:
+				return nil, p.errorf(valTok, "expected option value, got %q", valTok.Literal)
+			}
+			opts[key] = val
+			if p.lex.Peek().Type == lexer.TokenComma {
+				p.lex.Next()
+			}
+		}
+		if err := p.expect(lexer.TokenRParen); err != nil {
+			return nil, err
+		}
+		src.FormatOptions = opts
+	}
+	return src, nil
 }
 
 func (p *Parser) parseSelectList() ([]ast.Column, error) {
@@ -250,6 +306,46 @@ func (p *Parser) parseTableSource() (*ast.TableSource, error) {
 		p.lex.Next()
 		fmtTok := p.lex.Next()
 		src.Format = strings.ToUpper(fmtTok.Literal)
+
+		// Parse optional format options: FORMAT CSV(key=value, ...)
+		if p.lex.Peek().Type == lexer.TokenLParen {
+			p.lex.Next()
+			opts := make(map[string]string)
+			for p.lex.Peek().Type != lexer.TokenRParen && p.lex.Peek().Type != lexer.TokenEOF {
+				keyTok := p.lex.Next()
+				if keyTok.Type != lexer.TokenIdent && !lexer.IsKeyword(keyTok.Type) {
+					return nil, p.errorf(keyTok, "expected option name, got %q", keyTok.Literal)
+				}
+				key := strings.ToLower(keyTok.Literal)
+				if err := p.expect(lexer.TokenEq); err != nil {
+					return nil, err
+				}
+				valTok := p.lex.Next()
+				var val string
+				switch valTok.Type {
+				case lexer.TokenString:
+					val = valTok.Literal
+				case lexer.TokenTrue:
+					val = "true"
+				case lexer.TokenFalse:
+					val = "false"
+				case lexer.TokenInteger:
+					val = valTok.Literal
+				case lexer.TokenIdent:
+					val = valTok.Literal
+				default:
+					return nil, p.errorf(valTok, "expected option value, got %q", valTok.Literal)
+				}
+				opts[key] = val
+				if p.lex.Peek().Type == lexer.TokenComma {
+					p.lex.Next()
+				}
+			}
+			if err := p.expect(lexer.TokenRParen); err != nil {
+				return nil, err
+			}
+			src.FormatOptions = opts
+		}
 	}
 
 	return src, nil
@@ -853,14 +949,75 @@ func (p *Parser) expect(tt lexer.TokenType) error {
 
 func (p *Parser) errorf(tok lexer.Token, format string, args ...any) error {
 	msg := fmt.Sprintf(format, args...)
-	return fmt.Errorf("%s: %s", tok.Pos(), msg)
+
+	// Build caret line pointing to the problematic token
+	input := p.lex.Input()
+	lines := strings.Split(input, "\n")
+	lineIdx := tok.Line - 1
+	var caret string
+	if lineIdx >= 0 && lineIdx < len(lines) {
+		srcLine := lines[lineIdx]
+		col := tok.Col - 1
+		if col < 0 {
+			col = 0
+		}
+		pad := strings.Repeat(" ", col)
+		caret = fmt.Sprintf("\n  %s\n  %s^", srcLine, pad)
+	}
+
+	// Check for common typo suggestions
+	suggestion := suggestFix(tok)
+	if suggestion != "" {
+		return fmt.Errorf("%s: %s%s\n  Hint: %s", tok.Pos(), msg, caret, suggestion)
+	}
+
+	return fmt.Errorf("%s: %s%s", tok.Pos(), msg, caret)
+}
+
+// suggestFix returns a suggestion string for common misspellings, or "".
+func suggestFix(tok lexer.Token) string {
+	if tok.Type == lexer.TokenIdent || tok.Type == lexer.TokenIllegal {
+		upper := strings.ToUpper(tok.Literal)
+		suggestions := map[string]string{
+			"FORM":      "Did you mean FROM?",
+			"FOMR":      "Did you mean FROM?",
+			"SLECT":     "Did you mean SELECT?",
+			"SELCT":     "Did you mean SELECT?",
+			"SLELECT":   "Did you mean SELECT?",
+			"WEHRE":     "Did you mean WHERE?",
+			"WHEER":     "Did you mean WHERE?",
+			"GORUP":     "Did you mean GROUP?",
+			"GRUOP":     "Did you mean GROUP?",
+			"GROPU":     "Did you mean GROUP?",
+			"GRUOPBY":   "Did you mean GROUP BY?",
+			"GROUPY":    "Did you mean GROUP BY?",
+			"HAIVNG":    "Did you mean HAVING?",
+			"HVIANG":    "Did you mean HAVING?",
+			"ORDERY":    "Did you mean ORDER BY?",
+			"ODER":      "Did you mean ORDER?",
+			"LMIT":      "Did you mean LIMIT?",
+			"LIMT":      "Did you mean LIMIT?",
+			"WIDNOW":    "Did you mean WINDOW?",
+			"WINODW":    "Did you mean WINDOW?",
+			"DISTICT":   "Did you mean DISTINCT?",
+			"DISTINC":   "Did you mean DISTINCT?",
+			"FORAMT":    "Did you mean FORMAT?",
+			"FROMAT":    "Did you mean FORMAT?",
+			"DEBEZIUIM": "Did you mean DEBEZIUM?",
+		}
+		if s, ok := suggestions[upper]; ok {
+			return s
+		}
+	}
+	return ""
 }
 
 func isClauseKeyword(tt lexer.TokenType) bool {
 	switch tt {
 	case lexer.TokenFrom, lexer.TokenWhere, lexer.TokenGroup, lexer.TokenHaving,
 		lexer.TokenOrder, lexer.TokenLimit, lexer.TokenWindow, lexer.TokenEmit,
-		lexer.TokenEvent, lexer.TokenWatermark, lexer.TokenDeduplicate:
+		lexer.TokenEvent, lexer.TokenWatermark, lexer.TokenDeduplicate,
+		lexer.TokenFormat:
 		return true
 	}
 	return false

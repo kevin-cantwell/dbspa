@@ -39,8 +39,9 @@ type Column struct {
 
 // TableSource represents a FROM clause source.
 type TableSource struct {
-	URI    string // e.g., 'kafka://...' or 'stdin://'
-	Format string // e.g., "DEBEZIUM", "CSV", empty for default
+	URI           string            // e.g., 'kafka://...' or 'stdin://'
+	Format        string            // e.g., "DEBEZIUM", "CSV", empty for default
+	FormatOptions map[string]string // e.g., delimiter=',', header=true, quote='"'
 }
 
 // WindowClause represents a WINDOW specification.

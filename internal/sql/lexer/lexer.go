@@ -72,6 +72,7 @@ const (
 	TokenCapacity
 	TokenFormat
 	TokenDebezium
+	TokenCSV
 	TokenAs
 	TokenAnd
 	TokenOr
@@ -146,6 +147,7 @@ var keywords = map[string]TokenType{
 	"CAPACITY":             TokenCapacity,
 	"FORMAT":               TokenFormat,
 	"DEBEZIUM":             TokenDebezium,
+	"CSV":                  TokenCSV,
 	"AS":                   TokenAs,
 	"AND":                  TokenAnd,
 	"OR":                   TokenOr,
@@ -502,6 +504,11 @@ func isIdentStart(ch rune) bool {
 
 func isIdentPart(ch rune) bool {
 	return ch == '_' || unicode.IsLetter(ch) || unicode.IsDigit(ch)
+}
+
+// Input returns the original SQL input string.
+func (l *Lexer) Input() string {
+	return l.input
 }
 
 // IsKeyword returns true if the token type is a keyword that can also be used
