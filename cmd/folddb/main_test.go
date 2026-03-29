@@ -85,6 +85,182 @@ func runQuery(t *testing.T, sql string, inputLines []string) []map[string]any {
 	return results
 }
 
+// runAggQuery is a test helper for accumulating (GROUP BY) queries.
+// Returns changelog NDJSON output as parsed maps.
+func runAggQuery(t *testing.T, sql string, inputLines []string) []map[string]any {
+	t.Helper()
+
+	p := parser.New(sql)
+	stmt, err := p.Parse()
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+
+	if stmt.GroupBy == nil {
+		t.Fatal("runAggQuery called on non-accumulating query")
+	}
+
+	aggCols, err := engine.ParseAggColumns(stmt.Columns, stmt.GroupBy)
+	if err != nil {
+		t.Fatalf("aggregate setup error: %v", err)
+	}
+
+	columnOrder := make([]string, len(aggCols))
+	for i, col := range aggCols {
+		columnOrder[i] = col.Alias
+	}
+
+	aggOp := engine.NewAggregateOp(aggCols, stmt.GroupBy, stmt.Having)
+
+	dec := &format.JSONDecoder{}
+	var outBuf bytes.Buffer
+	snk := &sink.ChangelogSink{Writer: &outBuf, ColumnOrder: columnOrder}
+
+	filteredCh := make(chan engine.Record)
+	aggOutCh := make(chan engine.Record)
+
+	// Feed input records with WHERE filter
+	go func() {
+		defer close(filteredCh)
+		for _, line := range inputLines {
+			line = strings.TrimSpace(line)
+			if line == "" {
+				continue
+			}
+			rec, err := dec.Decode([]byte(line))
+			if err != nil {
+				t.Errorf("decode error: %v", err)
+				continue
+			}
+			if stmt.Where != nil {
+				pass, err := engine.Filter(stmt.Where, rec)
+				if err != nil || !pass {
+					continue
+				}
+			}
+			filteredCh <- rec
+		}
+	}()
+
+	// Run aggregate
+	go func() {
+		aggOp.Process(filteredCh, aggOutCh)
+	}()
+
+	// Collect output
+	for rec := range aggOutCh {
+		if err := snk.Write(rec); err != nil {
+			t.Fatalf("sink error: %v", err)
+		}
+	}
+
+	// Parse output
+	var results []map[string]any
+	for _, line := range strings.Split(strings.TrimSpace(outBuf.String()), "\n") {
+		if line == "" {
+			continue
+		}
+		var m map[string]any
+		if err := json.Unmarshal([]byte(line), &m); err != nil {
+			t.Fatalf("output parse error: %v\nline: %s", err, line)
+		}
+		results = append(results, m)
+	}
+	return results
+}
+
+func TestE2EGroupByBasic(t *testing.T) {
+	input := []string{
+		`{"status":"pending","amount":100}`,
+		`{"status":"complete","amount":200}`,
+		`{"status":"pending","amount":50}`,
+	}
+	results := runAggQuery(t, `SELECT status, COUNT(*) AS cnt, SUM(amount) AS total GROUP BY status`, input)
+
+	// Expected changelog:
+	// +pending cnt=1 total=100
+	// +complete cnt=1 total=200
+	// -pending cnt=1 total=100
+	// +pending cnt=2 total=150
+	if len(results) != 4 {
+		t.Fatalf("expected 4 changelog lines, got %d: %v", len(results), results)
+	}
+	if results[0]["op"] != "+" || results[0]["status"] != "pending" {
+		t.Errorf("unexpected line 0: %v", results[0])
+	}
+	if results[1]["op"] != "+" || results[1]["status"] != "complete" {
+		t.Errorf("unexpected line 1: %v", results[1])
+	}
+	if results[2]["op"] != "-" || results[2]["status"] != "pending" {
+		t.Errorf("unexpected line 2: %v", results[2])
+	}
+	if results[3]["op"] != "+" || results[3]["status"] != "pending" {
+		t.Errorf("unexpected line 3: %v", results[3])
+	}
+	// Check final pending values
+	if results[3]["cnt"] != float64(2) {
+		t.Errorf("expected cnt=2, got %v", results[3]["cnt"])
+	}
+	if results[3]["total"] != float64(150) {
+		t.Errorf("expected total=150, got %v", results[3]["total"])
+	}
+}
+
+func TestE2EGroupByAvgMinMax(t *testing.T) {
+	input := []string{
+		`{"name":"alice","score":90}`,
+		`{"name":"bob","score":85}`,
+		`{"name":"alice","score":95}`,
+	}
+	results := runAggQuery(t,
+		`SELECT name, AVG(score) AS avg_score, MIN(score) AS min_score, MAX(score) AS max_score GROUP BY name`,
+		input)
+
+	// Last line should be alice with avg=92.5, min=90, max=95
+	last := results[len(results)-1]
+	if last["name"] != "alice" {
+		t.Errorf("expected alice, got %v", last["name"])
+	}
+	if last["avg_score"] != 92.5 {
+		t.Errorf("expected avg 92.5, got %v", last["avg_score"])
+	}
+	if last["min_score"] != float64(90) {
+		t.Errorf("expected min 90, got %v", last["min_score"])
+	}
+	if last["max_score"] != float64(95) {
+		t.Errorf("expected max 95, got %v", last["max_score"])
+	}
+}
+
+func TestE2EGroupByHaving(t *testing.T) {
+	input := []string{
+		`{"city":"nyc","sales":100}`,
+		`{"city":"sf","sales":50}`,
+		`{"city":"nyc","sales":200}`,
+		`{"city":"sf","sales":25}`,
+	}
+	results := runAggQuery(t,
+		`SELECT city, SUM(sales) AS total GROUP BY city HAVING SUM(sales) > 100`,
+		input)
+
+	// Only NYC should appear (total 300 > 100)
+	var inserts []map[string]any
+	for _, r := range results {
+		if r["op"] == "+" {
+			inserts = append(inserts, r)
+		}
+	}
+	if len(inserts) != 1 {
+		t.Fatalf("expected 1 insert, got %d: %v", len(inserts), inserts)
+	}
+	if inserts[0]["city"] != "nyc" {
+		t.Errorf("expected nyc, got %v", inserts[0]["city"])
+	}
+	if inserts[0]["total"] != float64(300) {
+		t.Errorf("expected 300, got %v", inserts[0]["total"])
+	}
+}
+
 func TestE2ESelectWithWhere(t *testing.T) {
 	// TC-PARSER-001
 	input := []string{
