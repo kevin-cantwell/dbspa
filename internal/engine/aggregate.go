@@ -485,6 +485,15 @@ func exprEqual(a, b ast.Expr) bool {
 	case *ast.StarExpr:
 		_, ok := b.(*ast.StarExpr)
 		return ok
+	case *ast.JsonAccessExpr:
+		bv, ok := b.(*ast.JsonAccessExpr)
+		return ok && av.AsText == bv.AsText && exprEqual(av.Left, bv.Left) && exprEqual(av.Key, bv.Key)
+	case *ast.CastExpr:
+		bv, ok := b.(*ast.CastExpr)
+		return ok && av.TypeName == bv.TypeName && exprEqual(av.Expr, bv.Expr)
+	case *ast.UnaryExpr:
+		bv, ok := b.(*ast.UnaryExpr)
+		return ok && av.Op == bv.Op && exprEqual(av.Expr, bv.Expr)
 	default:
 		return fmt.Sprintf("%#v", a) == fmt.Sprintf("%#v", b)
 	}

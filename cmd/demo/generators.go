@@ -56,8 +56,8 @@ func (g *ECommerceGenerator) Run(w io.Writer, done <-chan struct{}) {
 				nextID++
 				activeOrders[o.OrderID] = o
 				event = map[string]interface{}{
-					"_op":    "c",
-					"_after": map[string]interface{}{"order_id": o.OrderID, "customer_id": o.CustomerID, "status": o.Status, "region": o.Region, "amount": o.Amount, "updated_at": now},
+					"op":    "c",
+					"after": map[string]interface{}{"order_id": o.OrderID, "customer_id": o.CustomerID, "status": o.Status, "region": o.Region, "amount": o.Amount, "updated_at": now},
 				}
 			} else if roll < 0.85 {
 				// Update
@@ -78,9 +78,9 @@ func (g *ECommerceGenerator) Run(w io.Writer, done <-chan struct{}) {
 				o.UpdatedAt = now
 				after := map[string]interface{}{"order_id": o.OrderID, "customer_id": o.CustomerID, "status": o.Status, "region": o.Region, "amount": o.Amount, "updated_at": now}
 				event = map[string]interface{}{
-					"_op":     "u",
-					"_before": before,
-					"_after":  after,
+					"op":     "u",
+					"before": before,
+					"after":  after,
 				}
 			} else {
 				// Delete (cancellation)
@@ -90,8 +90,8 @@ func (g *ECommerceGenerator) Run(w io.Writer, done <-chan struct{}) {
 				}
 				delete(activeOrders, o.OrderID)
 				event = map[string]interface{}{
-					"_op":     "d",
-					"_before": map[string]interface{}{"order_id": o.OrderID, "customer_id": o.CustomerID, "status": o.Status, "region": o.Region, "amount": o.Amount, "updated_at": o.UpdatedAt},
+					"op":     "d",
+					"before": map[string]interface{}{"order_id": o.OrderID, "customer_id": o.CustomerID, "status": o.Status, "region": o.Region, "amount": o.Amount, "updated_at": o.UpdatedAt},
 				}
 			}
 
