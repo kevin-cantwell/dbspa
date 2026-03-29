@@ -253,10 +253,8 @@ func TestSumRetractToEmpty(t *testing.T) {
 	a := &SumAccumulator{}
 	a.Add(IntValue{V: 100})
 	a.Retract(IntValue{V: 100})
-	// count drops to 0, should return NULL
-	if !a.Result().IsNull() {
-		t.Errorf("expected NULL when all values retracted, got %v", a.Result())
-	}
+	// spec 12.2: SUM returns running total (0) after full retraction, not NULL
+	assertIntResult(t, a, 0)
 }
 
 // =====================================================================
@@ -454,16 +452,13 @@ func TestTC_ACC_021_SingleElementRetract(t *testing.T) {
 }
 
 // TC-ACC-023: SUM going negative from retractions
-// Note: when count <= 0, SumAccumulator returns NULL per implementation.
-// The internal sum is negative, but Result() gates on count.
+// spec 12.2: SUM is allowed to go negative (mathematically correct).
 func TestTC_ACC_023_SumGoesNegative(t *testing.T) {
 	a := &SumAccumulator{}
 	a.Add(IntValue{V: 5})
 	a.Retract(IntValue{V: 10})
-	// count is 0, so Result returns NULL (count-gated)
-	if !a.Result().IsNull() {
-		t.Errorf("expected NULL when count<=0, got %v", a.Result())
-	}
+	// spec 12.2: SUM returns the running total (-5), not NULL
+	assertIntResult(t, a, -5)
 	// Verify HasChanged is true (retraction did change state)
 	if !a.HasChanged() {
 		t.Error("expected HasChanged after retraction")
@@ -496,14 +491,12 @@ func TestTC_ACC_025_DoubleRetraction(t *testing.T) {
 	cnt.Retract(IntValue{V: 1})
 	assertIntResult(t, cnt, 0) // clamped at 0
 
-	// SUM: count goes to -1, so Result returns NULL (count-gated)
+	// SUM: spec 12.2 — SUM returns running total after retractions, not NULL
 	sum := &SumAccumulator{}
 	sum.Add(IntValue{V: 1})
 	sum.Retract(IntValue{V: 1})
 	sum.Retract(IntValue{V: 1})
-	if !sum.Result().IsNull() {
-		t.Errorf("expected NULL when SUM count<=0, got %v", sum.Result())
-	}
+	assertIntResult(t, sum, -1)
 }
 
 // TC-ACC-026: Insert after all values retracted (group re-created)
@@ -548,14 +541,11 @@ func TestTC_ACC_030_LastWithNulls(t *testing.T) {
 
 // TC-ACC-031: Retraction with mismatched value
 func TestTC_ACC_031_MismatchedRetraction(t *testing.T) {
-	// SUM: count goes to 0 after retract, so Result returns NULL (count-gated)
-	// The internal sum is 10-99=-89, but count=0 means NULL
+	// SUM: spec 12.2 — returns running total even with mismatched retraction
 	sum := &SumAccumulator{}
 	sum.Add(IntValue{V: 10})
 	sum.Retract(IntValue{V: 99})
-	if !sum.Result().IsNull() {
-		t.Errorf("expected NULL (count=0 after mismatched retract), got %v", sum.Result())
-	}
+	assertIntResult(t, sum, -89)
 
 	// COUNT: goes 1 -> 0 (decrements by 1 regardless of value)
 	cnt := &CountAccumulator{}
@@ -874,18 +864,14 @@ func TestFirstRetractDoesNotChange(t *testing.T) {
 }
 
 func TestSumRetractBelowZeroCount(t *testing.T) {
-	// When count goes below 0, Result returns NULL
+	// spec 12.2: SUM returns running total, not NULL, after retractions
 	a := &SumAccumulator{}
 	a.Add(IntValue{V: 5})
 	a.Retract(IntValue{V: 5})
-	if !a.Result().IsNull() {
-		t.Errorf("expected NULL when count=0, got %v", a.Result())
-	}
+	assertIntResult(t, a, 0)
 	a.Retract(IntValue{V: 5})
-	// count is now -1, should still be NULL
-	if !a.Result().IsNull() {
-		t.Errorf("expected NULL when count<0, got %v", a.Result())
-	}
+	// count is now -1, sum is -5; SUM still returns running total
+	assertIntResult(t, a, -5)
 }
 
 func TestAvgSingleElement(t *testing.T) {

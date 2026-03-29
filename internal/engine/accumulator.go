@@ -135,11 +135,12 @@ func (a *CountAccumulator) Unmarshal(data []byte) error {
 // SumAccumulator maintains a running sum. O(1) state. Skips NULLs.
 // Returns NULL if no non-NULL inputs. SUM can go negative (spec 12.2).
 type SumAccumulator struct {
-	sum     float64
-	count   int64 // count of non-NULL values added
-	prevSum float64
-	prevCnt int64
-	changed bool
+	sum      float64
+	count    int64 // count of non-NULL values added
+	hasValue bool  // true once any non-NULL value has been added; never reset
+	prevSum  float64
+	prevCnt  int64
+	changed  bool
 }
 
 func (a *SumAccumulator) Add(value Value) {
@@ -154,6 +155,7 @@ func (a *SumAccumulator) Add(value Value) {
 	a.prevCnt = a.count
 	a.sum += f
 	a.count++
+	a.hasValue = true
 	a.changed = true
 }
 
@@ -173,7 +175,7 @@ func (a *SumAccumulator) Retract(value Value) {
 }
 
 func (a *SumAccumulator) Result() Value {
-	if a.count <= 0 {
+	if !a.hasValue {
 		return NullValue{}
 	}
 	// Return int if the sum is an exact integer
@@ -195,7 +197,11 @@ func (a *SumAccumulator) Merge(other Accumulator) {
 }
 
 func (a *SumAccumulator) Marshal() ([]byte, error) {
-	return json.Marshal([]float64{a.sum, float64(a.count)})
+	hasVal := float64(0)
+	if a.hasValue {
+		hasVal = 1
+	}
+	return json.Marshal([]float64{a.sum, float64(a.count), hasVal})
 }
 
 func (a *SumAccumulator) Unmarshal(data []byte) error {
@@ -206,6 +212,9 @@ func (a *SumAccumulator) Unmarshal(data []byte) error {
 	if len(v) >= 2 {
 		a.sum = v[0]
 		a.count = int64(v[1])
+	}
+	if len(v) >= 3 {
+		a.hasValue = v[2] != 0
 	}
 	return nil
 }
