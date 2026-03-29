@@ -6,16 +6,16 @@
 <title>FoldDB Demo</title>
 <style>
   :root {
-    --bg: #1a1a2e;
-    --surface: #16213e;
-    --surface2: #0f3460;
-    --accent: #e94560;
-    --accent2: #533483;
-    --text: #eee;
-    --text-dim: #8892a4;
-    --green: #4ecca3;
-    --red: #e94560;
-    --yellow: #f0c040;
+    --bg: #0d1117;
+    --surface: #161b22;
+    --surface2: #21262d;
+    --border: #30363d;
+    --accent: #58a6ff;
+    --green: #3fb950;
+    --red: #f85149;
+    --yellow: #d29922;
+    --text: #e6edf3;
+    --text-dim: #7d8590;
     --mono: 'SF Mono', 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
     --sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   }
@@ -33,51 +33,48 @@
   }
 
   header {
-    padding: 16px 24px;
-    border-bottom: 1px solid var(--surface2);
+    padding: 12px 20px;
+    border-bottom: 1px solid var(--border);
     display: flex;
-    align-items: baseline;
-    gap: 16px;
+    align-items: center;
+    gap: 12px;
     flex-shrink: 0;
+    background: var(--surface);
   }
 
-  header h1 {
-    font-size: 20px;
-    font-weight: 700;
-    color: var(--accent);
-  }
-
-  header .tagline {
-    font-size: 14px;
-    color: var(--text-dim);
-  }
+  header h1 { font-size: 18px; font-weight: 700; color: var(--accent); }
+  header .tagline { font-size: 13px; color: var(--text-dim); }
 
   .layout {
     display: grid;
-    grid-template-columns: 260px 1fr 1fr;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: 1fr;
     flex: 1;
     overflow: hidden;
   }
 
   .panel {
-    border-right: 1px solid var(--surface2);
     display: flex;
     flex-direction: column;
     overflow: hidden;
+    border-right: 1px solid var(--border);
   }
 
   .panel:last-child { border-right: none; }
 
   .panel-header {
-    padding: 12px 16px;
-    font-size: 13px;
+    padding: 10px 16px;
+    font-size: 12px;
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.5px;
     color: var(--text-dim);
-    border-bottom: 1px solid var(--surface2);
+    border-bottom: 1px solid var(--border);
     flex-shrink: 0;
     background: var(--surface);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
   }
 
   .panel-body {
@@ -86,64 +83,50 @@
     padding: 12px;
   }
 
-  /* Streams panel */
-  .stream-card {
-    background: var(--surface);
-    border: 1px solid var(--surface2);
-    border-radius: 6px;
-    padding: 12px;
-    margin-bottom: 10px;
-    cursor: pointer;
-    transition: border-color 0.2s;
-  }
-
-  .stream-card:hover, .stream-card.selected {
-    border-color: var(--accent);
-  }
-
-  .stream-card .name {
-    font-family: var(--mono);
-    font-size: 13px;
-    color: var(--green);
-    margin-bottom: 4px;
-  }
-
-  .stream-card .desc {
-    font-size: 12px;
-    color: var(--text-dim);
-    margin-bottom: 4px;
-  }
-
-  .stream-card .meta {
-    font-size: 11px;
-    color: var(--text-dim);
-  }
-
-  .stream-card .meta span {
-    background: var(--surface2);
-    padding: 2px 6px;
-    border-radius: 3px;
-    margin-right: 6px;
-  }
-
-  /* Examples panel */
+  /* Example cards */
   .example {
     background: var(--surface);
-    border: 1px solid var(--surface2);
-    border-radius: 6px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
     padding: 12px;
-    margin-bottom: 12px;
+    margin-bottom: 10px;
+    transition: border-color 0.15s;
+  }
+
+  .example:hover { border-color: var(--accent); }
+
+  .example-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 6px;
   }
 
   .example-title {
     font-size: 13px;
     font-weight: 600;
-    margin-bottom: 4px;
     color: var(--green);
   }
 
+  .example-tags {
+    display: flex;
+    gap: 4px;
+  }
+
+  .tag {
+    font-size: 10px;
+    padding: 2px 6px;
+    border-radius: 3px;
+    background: var(--surface2);
+    color: var(--text-dim);
+    font-family: var(--mono);
+  }
+
+  .tag.cdc { color: var(--yellow); background: rgba(210, 153, 34, 0.15); }
+  .tag.window { color: var(--accent); background: rgba(88, 166, 255, 0.15); }
+
   .example-desc {
-    font-size: 12px;
+    font-size: 11px;
     color: var(--text-dim);
     margin-bottom: 8px;
   }
@@ -151,41 +134,33 @@
   .example textarea {
     width: 100%;
     font-family: var(--mono);
-    font-size: 12px;
+    font-size: 11px;
     background: var(--bg);
     color: var(--text);
-    border: 1px solid var(--surface2);
+    border: 1px solid var(--border);
     border-radius: 4px;
     padding: 8px;
     resize: vertical;
-    min-height: 60px;
+    min-height: 48px;
     line-height: 1.4;
+    tab-size: 2;
   }
 
-  .example textarea:focus {
-    outline: none;
-    border-color: var(--accent);
-  }
+  .example textarea:focus { outline: none; border-color: var(--accent); }
 
   .example-footer {
     display: flex;
     align-items: center;
     justify-content: space-between;
     margin-top: 8px;
-    gap: 8px;
   }
 
-  .example-footer .stream-label {
-    font-size: 11px;
-    color: var(--text-dim);
-  }
-
-  .example-footer select {
+  .stream-select {
     font-family: var(--mono);
     font-size: 11px;
     background: var(--bg);
     color: var(--text);
-    border: 1px solid var(--surface2);
+    border: 1px solid var(--border);
     border-radius: 4px;
     padding: 4px 8px;
   }
@@ -196,123 +171,95 @@
     font-weight: 600;
     border: none;
     border-radius: 4px;
-    padding: 6px 16px;
+    padding: 5px 14px;
     cursor: pointer;
-    transition: opacity 0.2s;
+    transition: all 0.15s;
   }
 
-  .btn:hover { opacity: 0.85; }
-
-  .btn-run {
-    background: var(--green);
-    color: #1a1a2e;
-  }
-
-  .btn-stop {
-    background: var(--red);
-    color: #fff;
-  }
+  .btn:hover { filter: brightness(1.1); }
+  .btn:active { transform: scale(0.97); }
+  .btn-run { background: var(--green); color: var(--bg); }
+  .btn-stop { background: var(--red); color: #fff; }
+  .btn-sm { font-size: 11px; padding: 4px 10px; }
 
   /* Output panel */
-  .output-controls {
+  .output-bar {
     padding: 8px 16px;
-    border-bottom: 1px solid var(--surface2);
+    border-bottom: 1px solid var(--border);
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 10px;
     flex-shrink: 0;
     background: var(--surface);
+    font-size: 12px;
   }
 
-  .output-controls .stats {
+  .output-bar .stats {
     font-family: var(--mono);
-    font-size: 12px;
+    font-size: 11px;
     color: var(--text-dim);
     flex: 1;
   }
 
-  .output-controls label {
-    font-size: 12px;
-    color: var(--text-dim);
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    cursor: pointer;
+  .badge {
+    display: inline-block;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 10px;
+    font-weight: 600;
+    font-family: var(--mono);
   }
 
-  .output-controls input[type="checkbox"] {
-    accent-color: var(--accent);
-  }
+  .badge-run { background: rgba(63, 185, 80, 0.2); color: var(--green); }
+  .badge-stop { background: rgba(248, 81, 73, 0.2); color: var(--red); }
 
   #output-area {
     flex: 1;
     overflow-y: auto;
-    padding: 12px;
     font-family: var(--mono);
-    font-size: 12px;
+    font-size: 11px;
     line-height: 1.5;
     background: var(--bg);
+    padding: 0;
   }
 
-  /* Non-accumulating: scrolling lines */
-  .output-line {
-    padding: 1px 0;
-    white-space: pre-wrap;
-    word-break: break-all;
+  /* Scrolling lines mode */
+  #output-lines {
+    padding: 8px 12px;
   }
 
-  .output-line .op-plus { color: var(--green); }
-  .output-line .op-minus { color: var(--red); }
+  .line { white-space: pre-wrap; word-break: break-all; padding: 1px 0; }
+  .line-insert { color: var(--green); }
+  .line-retract { color: var(--red); opacity: 0.5; }
 
-  /* Accumulating: table */
+  /* Table mode */
   .result-table {
     width: 100%;
     border-collapse: collapse;
     font-family: var(--mono);
-    font-size: 12px;
+    font-size: 11px;
   }
 
   .result-table th {
     text-align: left;
-    padding: 6px 12px;
-    border-bottom: 2px solid var(--surface2);
+    padding: 8px 12px;
+    border-bottom: 2px solid var(--border);
     color: var(--text-dim);
     font-weight: 600;
     position: sticky;
     top: 0;
-    background: var(--bg);
+    background: var(--surface);
+    z-index: 1;
   }
 
   .result-table td {
-    padding: 4px 12px;
-    border-bottom: 1px solid var(--surface2);
+    padding: 6px 12px;
+    border-bottom: 1px solid var(--border);
   }
 
-  .result-table tr.flash {
-    animation: flash 0.5s ease-out;
-  }
-
-  @keyframes flash {
-    0% { background: rgba(78, 204, 163, 0.3); }
-    100% { background: transparent; }
-  }
-
-  .status-badge {
-    display: inline-block;
-    padding: 2px 8px;
-    border-radius: 3px;
-    font-size: 11px;
-    font-weight: 600;
-  }
-
-  .status-running {
-    background: rgba(78, 204, 163, 0.2);
-    color: var(--green);
-  }
-
-  .status-stopped {
-    background: rgba(233, 69, 96, 0.2);
-    color: var(--red);
+  .result-table tr.updated td {
+    background: rgba(63, 185, 80, 0.08);
+    transition: background 0.6s;
   }
 
   .empty-state {
@@ -321,399 +268,382 @@
     justify-content: center;
     height: 100%;
     color: var(--text-dim);
-    font-size: 14px;
+    font-size: 13px;
     text-align: center;
     padding: 40px;
-    line-height: 1.6;
   }
 
-  /* Changelog view */
-  .changelog-line {
-    padding: 1px 0;
-    white-space: pre-wrap;
-    word-break: break-all;
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+  /* Mobile responsive */
+  @media (max-width: 900px) {
+    .layout {
+      grid-template-columns: 1fr;
+      grid-template-rows: auto 1fr;
+    }
+    .panel:first-child {
+      max-height: 40vh;
+      border-right: none;
+      border-bottom: 1px solid var(--border);
+    }
+    .panel:last-child { border-right: none; }
+    header { padding: 10px 12px; }
+    header .tagline { display: none; }
   }
 
-  .changelog-line.retract {
-    color: var(--red);
-    opacity: 0.6;
+  @media (max-width: 500px) {
+    .example-footer { flex-direction: column; align-items: stretch; gap: 6px; }
+    .example textarea { font-size: 10px; }
   }
-
-  .changelog-line.insert {
-    color: var(--green);
-  }
-
-  /* Scrollbar */
-  ::-webkit-scrollbar { width: 8px; }
-  ::-webkit-scrollbar-track { background: var(--bg); }
-  ::-webkit-scrollbar-thumb { background: var(--surface2); border-radius: 4px; }
 </style>
 </head>
 <body>
 
 <header>
-  <h1>FoldDB Demo</h1>
+  <h1>FoldDB</h1>
   <span class="tagline">Streaming SQL with incremental aggregation</span>
 </header>
 
 <div class="layout">
-  <!-- Streams Panel -->
-  <div class="panel">
-    <div class="panel-header">Sample Streams</div>
-    <div class="panel-body" id="streams-panel"></div>
-  </div>
-
   <!-- Queries Panel -->
   <div class="panel">
-    <div class="panel-header">Example Queries</div>
+    <div class="panel-header">
+      Example Queries
+    </div>
     <div class="panel-body" id="queries-panel"></div>
   </div>
 
   <!-- Output Panel -->
-  <div class="panel" style="border-right:none;">
-    <div class="panel-header">Output</div>
-    <div class="output-controls">
+  <div class="panel">
+    <div class="panel-header">
+      Output
+      <div style="display:flex;gap:8px;align-items:center;">
+        <label style="font-size:11px;color:var(--text-dim);font-weight:400;text-transform:none;letter-spacing:0;display:flex;align-items:center;gap:4px;cursor:pointer">
+          <input type="checkbox" id="raw-toggle" style="accent-color:var(--accent)"> Raw
+        </label>
+        <button class="btn btn-stop btn-sm" id="stop-btn" style="display:none" onclick="stopQuery()">Stop</button>
+      </div>
+    </div>
+    <div class="output-bar">
       <span class="stats" id="stats">Ready</span>
-      <label><input type="checkbox" id="raw-toggle"> Raw changelog</label>
-      <button class="btn btn-stop" id="stop-btn" style="display:none" onclick="stopQuery()">Stop</button>
     </div>
     <div id="output-area">
-      <div class="empty-state">Select an example query and click Run to start streaming.</div>
+      <div class="empty-state">Pick a query and click Run</div>
     </div>
   </div>
 </div>
 
 <script>
-const examples = [
+const EXAMPLES = [
   {
     title: "Filter API errors",
-    desc: "Non-accumulating: stream only 4xx/5xx responses",
+    desc: "Stream only 4xx/5xx responses",
+    tags: ["filter"],
     stream: "api_metrics",
-    sql: `SELECT timestamp, endpoint, status_code, latency_ms\nWHERE status_code >= 400`,
-    accumulating: false,
+    sql: "SELECT timestamp, endpoint, status_code, latency_ms\nWHERE status_code >= 400",
+    acc: false,
   },
   {
-    title: "Count orders by status (CDC)",
-    desc: "Accumulating with Debezium format: live count per status",
+    title: "Orders by status (CDC)",
+    desc: "Live count per order status with Debezium retractions",
+    tags: ["cdc", "group by"],
     stream: "ecommerce_orders",
-    sql: `SELECT _after->>'status' AS status, COUNT(*) AS count\nGROUP BY _after->>'status'\nFORMAT DEBEZIUM`,
-    accumulating: true,
+    sql: "SELECT _after->>'status' AS status, COUNT(*) AS count\nGROUP BY _after->>'status'\nFORMAT DEBEZIUM",
+    acc: true,
   },
   {
-    title: "Avg API latency per endpoint (windowed)",
-    desc: "Tumbling 1-minute windows with event time",
+    title: "API latency (windowed)",
+    desc: "1-minute tumbling windows over event time",
+    tags: ["window"],
     stream: "api_metrics",
-    sql: `SELECT window_start, endpoint, COUNT(*) AS reqs, AVG(latency_ms) AS avg_lat\nGROUP BY endpoint\nWINDOW TUMBLING '1 minute'\nEVENT TIME BY timestamp`,
-    accumulating: true,
+    sql: "SELECT window_start, endpoint,\n       COUNT(*) AS reqs,\n       AVG(latency_ms) AS avg_lat\nGROUP BY endpoint\nWINDOW TUMBLING '1 minute'\nEVENT TIME BY timestamp",
+    acc: true,
   },
   {
     title: "Revenue by region (CDC)",
-    desc: "Accumulating SUM over Debezium change events",
+    desc: "Running SUM over Debezium change events",
+    tags: ["cdc", "group by"],
     stream: "ecommerce_orders",
-    sql: `SELECT _after->>'region' AS region, SUM((_after->>'amount')::float) AS revenue\nWHERE _op IN ('c', 'u')\nGROUP BY _after->>'region'\nFORMAT DEBEZIUM`,
-    accumulating: true,
+    sql: "SELECT _after->>'region' AS region,\n       SUM((_after->>'amount')::float) AS revenue\nWHERE _op IN ('c', 'u')\nGROUP BY _after->>'region'\nFORMAT DEBEZIUM",
+    acc: true,
   },
   {
-    title: "Top pages by unique visitors",
-    desc: "COUNT DISTINCT users per page",
+    title: "Top pages",
+    desc: "Unique visitors and total actions per page",
+    tags: ["group by"],
     stream: "clickstream",
-    sql: `SELECT page, COUNT(DISTINCT user_id) AS unique_visitors, COUNT(*) AS total_actions\nGROUP BY page`,
-    accumulating: true,
+    sql: "SELECT page,\n       COUNT(DISTINCT user_id) AS uniq_visitors,\n       COUNT(*) AS total\nGROUP BY page",
+    acc: true,
   },
   {
     title: "Error rate per endpoint",
-    desc: "Derived error count via CASE expression",
+    desc: "Total requests vs errors using CASE",
+    tags: ["group by"],
     stream: "api_metrics",
-    sql: `SELECT endpoint,\n       COUNT(*) AS total,\n       SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END) AS errors\nGROUP BY endpoint`,
-    accumulating: true,
+    sql: "SELECT endpoint,\n       COUNT(*) AS total,\n       SUM(CASE WHEN status_code >= 400\n           THEN 1 ELSE 0 END) AS errors\nGROUP BY endpoint",
+    acc: true,
   },
 ];
 
-let eventSource = null;
-let recordCount = 0;
-let startTime = null;
-let isAccumulating = false;
-let showRawChangelog = false;
-let accumulatorState = {}; // key -> row
-let accumulatorColumns = null;
+// State
+let reader = null;
+let recCount = 0;
+let t0 = null;
+let isAcc = false;
+let accState = new Map();
+let accCols = null;
+let outputEl, linesEl, statsEl, stopBtn;
+let pendingRender = false;
+let lineBuffer = [];
+const MAX_LINES = 300;
 
-// Render streams panel
-function renderStreams() {
-  const panel = document.getElementById('streams-panel');
-  const streams = [
-    { name: 'ecommerce_orders', desc: 'Debezium CDC events for an orders table', format: 'DEBEZIUM', rate: '~5/s' },
-    { name: 'api_metrics', desc: 'Simulated API request logs', format: 'JSON', rate: '~10/s' },
-    { name: 'clickstream', desc: 'User click/interaction events', format: 'JSON', rate: '~8/s' },
-  ];
+function init() {
+  outputEl = document.getElementById('output-area');
+  statsEl = document.getElementById('stats');
+  stopBtn = document.getElementById('stop-btn');
 
-  panel.innerHTML = streams.map(s => `
-    <div class="stream-card" data-stream="${s.name}">
-      <div class="name">${s.name}</div>
-      <div class="desc">${s.desc}</div>
-      <div class="meta">
-        <span>${s.format}</span>
-        <span>${s.rate}</span>
-      </div>
-    </div>
-  `).join('');
-}
-
-// Render queries panel
-function renderQueries() {
   const panel = document.getElementById('queries-panel');
-  panel.innerHTML = examples.map((ex, i) => `
-    <div class="example">
-      <div class="example-title">${ex.title}</div>
-      <div class="example-desc">${ex.desc}</div>
-      <textarea id="sql-${i}" rows="${ex.sql.split('\n').length + 1}">${ex.sql}</textarea>
-      <div class="example-footer">
-        <div>
-          <span class="stream-label">Stream:</span>
-          <select id="stream-${i}">
-            <option value="ecommerce_orders" ${ex.stream === 'ecommerce_orders' ? 'selected' : ''}>ecommerce_orders</option>
-            <option value="api_metrics" ${ex.stream === 'api_metrics' ? 'selected' : ''}>api_metrics</option>
-            <option value="clickstream" ${ex.stream === 'clickstream' ? 'selected' : ''}>clickstream</option>
-          </select>
-        </div>
-        <button class="btn btn-run" onclick="runQuery(${i})">Run</button>
+  panel.innerHTML = EXAMPLES.map((ex, i) => {
+    const tags = ex.tags.map(t => {
+      const cls = t === 'cdc' ? 'tag cdc' : t === 'window' ? 'tag window' : 'tag';
+      return `<span class="${cls}">${t}</span>`;
+    }).join('');
+    const rows = ex.sql.split('\n').length + 1;
+    return `<div class="example" id="ex-${i}">
+      <div class="example-header">
+        <span class="example-title">${ex.title}</span>
+        <div class="example-tags">${tags}</div>
       </div>
-    </div>
-  `).join('');
+      <div class="example-desc">${ex.desc}</div>
+      <textarea id="sql-${i}" rows="${rows}">${ex.sql}</textarea>
+      <div class="example-footer">
+        <select class="stream-select" id="stream-${i}">
+          <option value="ecommerce_orders" ${ex.stream==='ecommerce_orders'?'selected':''}>ecommerce_orders</option>
+          <option value="api_metrics" ${ex.stream==='api_metrics'?'selected':''}>api_metrics</option>
+          <option value="clickstream" ${ex.stream==='clickstream'?'selected':''}>clickstream</option>
+        </select>
+        <button class="btn btn-run" onclick="run(${i})">Run</button>
+      </div>
+    </div>`;
+  }).join('');
 }
 
-function runQuery(idx) {
-  // Stop previous
+async function run(idx) {
   stopQuery();
-
   const sql = document.getElementById(`sql-${idx}`).value.trim();
   const stream = document.getElementById(`stream-${idx}`).value;
-  isAccumulating = examples[idx].accumulating;
-  showRawChangelog = document.getElementById('raw-toggle').checked;
+  isAcc = EXAMPLES[idx].acc;
 
-  // Reset state
-  recordCount = 0;
-  startTime = Date.now();
-  accumulatorState = {};
-  accumulatorColumns = null;
+  // Reset
+  recCount = 0;
+  t0 = performance.now();
+  accState = new Map();
+  accCols = null;
+  lineBuffer = [];
 
-  const outputArea = document.getElementById('output-area');
-  outputArea.innerHTML = '';
+  // Highlight active example
+  document.querySelectorAll('.example').forEach(e => e.style.borderColor = '');
+  document.getElementById(`ex-${idx}`).style.borderColor = 'var(--accent)';
 
-  document.getElementById('stop-btn').style.display = 'inline-block';
+  outputEl.innerHTML = '';
+  stopBtn.style.display = 'inline-block';
   updateStats();
 
-  // Highlight stream card
-  document.querySelectorAll('.stream-card').forEach(c => c.classList.remove('selected'));
-  const card = document.querySelector(`.stream-card[data-stream="${stream}"]`);
-  if (card) card.classList.add('selected');
+  try {
+    const resp = await fetch('/api/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ stream, sql }),
+    });
 
-  // POST to start
-  fetch('/api/run', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ stream, sql }),
-  }).then(response => {
-    if (!response.ok) {
-      return response.text().then(t => { throw new Error(t); });
+    if (!resp.ok) {
+      const msg = await resp.text();
+      outputEl.innerHTML = `<div class="empty-state" style="color:var(--red)">${esc(msg)}</div>`;
+      return;
     }
 
-    const reader = response.body.getReader();
+    reader = resp.body.getReader();
     const decoder = new TextDecoder();
-    let buffer = '';
+    let buf = '';
 
-    function pump() {
-      return reader.read().then(({ done, value }) => {
-        if (done) {
-          onStreamEnd();
+    // Set up output container
+    if (!isAcc || document.getElementById('raw-toggle').checked) {
+      linesEl = document.createElement('div');
+      linesEl.id = 'output-lines';
+      outputEl.appendChild(linesEl);
+    }
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buf += decoder.decode(value, { stream: true });
+      const parts = buf.split('\n');
+      buf = parts.pop();
+
+      for (const part of parts) {
+        if (part.startsWith('data: ')) {
+          handleRecord(part.slice(6));
+        } else if (part.startsWith('event: done')) {
+          onEnd();
           return;
         }
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop(); // keep incomplete line
-
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const data = line.slice(6);
-            handleData(data);
-          } else if (line.startsWith('event: done')) {
-            onStreamEnd();
-            return;
-          }
-        }
-        return pump();
-      });
-    }
-
-    // Store abort controller
-    window._activeReader = reader;
-    return pump();
-  }).catch(err => {
-    const outputArea = document.getElementById('output-area');
-    outputArea.innerHTML = `<div class="empty-state" style="color:var(--red);">Error: ${err.message}</div>`;
-  });
-}
-
-function handleData(data) {
-  recordCount++;
-  updateStats();
-
-  const outputArea = document.getElementById('output-area');
-  const rawMode = document.getElementById('raw-toggle').checked;
-
-  if (!isAccumulating || rawMode) {
-    // Scrolling NDJSON lines
-    const div = document.createElement('div');
-    div.className = 'output-line';
-
-    try {
-      const obj = JSON.parse(data);
-      if (obj.op === '+') {
-        div.innerHTML = '<span class="op-plus">+</span> ' + escapeHtml(JSON.stringify(obj));
-        div.className = 'changelog-line insert';
-      } else if (obj.op === '-') {
-        div.innerHTML = '<span class="op-minus">-</span> ' + escapeHtml(JSON.stringify(obj));
-        div.className = 'changelog-line retract';
-      } else {
-        div.textContent = data;
       }
-    } catch {
-      div.textContent = data;
     }
-
-    outputArea.appendChild(div);
-
-    // Keep max 500 lines
-    while (outputArea.childElementCount > 500) {
-      outputArea.removeChild(outputArea.firstChild);
+    onEnd();
+  } catch (e) {
+    if (e.name !== 'AbortError') {
+      outputEl.innerHTML = `<div class="empty-state" style="color:var(--red)">${esc(e.message)}</div>`;
     }
+  }
+}
 
-    outputArea.scrollTop = outputArea.scrollHeight;
+function handleRecord(data) {
+  recCount++;
+  const raw = document.getElementById('raw-toggle').checked;
+
+  if (!isAcc || raw) {
+    // Scrolling lines — batch DOM updates
+    lineBuffer.push(data);
+    if (!pendingRender) {
+      pendingRender = true;
+      requestAnimationFrame(flushLines);
+    }
   } else {
-    // Accumulating: maintain table
+    // Accumulating table — update state, batch render
     try {
       const obj = JSON.parse(data);
-      processAccumulatingRow(obj);
-      renderAccumulatingTable();
-    } catch {
-      // fallback to raw
-      const div = document.createElement('div');
-      div.className = 'output-line';
-      div.textContent = data;
-      outputArea.appendChild(div);
-      outputArea.scrollTop = outputArea.scrollHeight;
-    }
+      const op = obj.op || '+';
+
+      if (!accCols) {
+        accCols = Object.keys(obj).filter(k => k !== 'op');
+      }
+
+      // Build key from string-valued columns
+      const keyCols = accCols.filter(c => typeof obj[c] === 'string');
+      const key = keyCols.length > 0 ? keyCols.map(c => obj[c]).join('\0') : JSON.stringify(obj);
+
+      if (op === '-') {
+        accState.delete(key);
+      } else {
+        accState.set(key, { data: obj, fresh: true });
+      }
+
+      if (!pendingRender) {
+        pendingRender = true;
+        requestAnimationFrame(renderTable);
+      }
+    } catch {}
   }
+
+  // Update stats every 50 records instead of every record
+  if (recCount % 50 === 0) updateStats();
 }
 
-function processAccumulatingRow(obj) {
-  const op = obj.op || '+';
+function flushLines() {
+  pendingRender = false;
+  if (!linesEl || lineBuffer.length === 0) return;
 
-  // Extract columns (excluding 'op')
-  if (!accumulatorColumns) {
-    accumulatorColumns = Object.keys(obj).filter(k => k !== 'op');
+  const frag = document.createDocumentFragment();
+  for (const data of lineBuffer) {
+    const div = document.createElement('div');
+    div.className = 'line';
+    try {
+      const obj = JSON.parse(data);
+      if (obj.op === '+') { div.className = 'line line-insert'; }
+      else if (obj.op === '-') { div.className = 'line line-retract'; }
+    } catch {}
+    div.textContent = data;
+    frag.appendChild(div);
+  }
+  lineBuffer = [];
+  linesEl.appendChild(frag);
+
+  // Trim old lines
+  while (linesEl.childElementCount > MAX_LINES) {
+    linesEl.removeChild(linesEl.firstChild);
   }
 
-  // Build key from non-aggregate columns (heuristic: all string-valued columns)
-  // Better heuristic: use all columns that aren't obviously numeric aggregates
-  const keyCols = accumulatorColumns.filter(c => {
-    const v = obj[c];
-    return typeof v === 'string';
-  });
-  const key = keyCols.length > 0
-    ? keyCols.map(c => String(obj[c])).join('|')
-    : JSON.stringify(obj);
-
-  if (op === '-') {
-    delete accumulatorState[key];
-  } else {
-    accumulatorState[key] = obj;
-  }
+  outputEl.scrollTop = outputEl.scrollHeight;
 }
 
-function renderAccumulatingTable() {
-  const outputArea = document.getElementById('output-area');
-  const rows = Object.values(accumulatorState);
+function renderTable() {
+  pendingRender = false;
+  if (!accCols) return;
 
-  if (rows.length === 0 || !accumulatorColumns) {
-    outputArea.innerHTML = '<div class="empty-state">Waiting for data...</div>';
+  const rows = Array.from(accState.values());
+  if (rows.length === 0) {
+    outputEl.innerHTML = '<div class="empty-state">Waiting for data...</div>';
     return;
   }
 
-  let html = '<table class="result-table"><thead><tr>';
-  for (const col of accumulatorColumns) {
-    html += `<th>${escapeHtml(col)}</th>`;
+  // Build table via string concat (much faster than DOM manipulation)
+  const parts = ['<table class="result-table"><thead><tr>'];
+  for (const col of accCols) {
+    parts.push(`<th>${esc(col)}</th>`);
   }
-  html += '</tr></thead><tbody>';
+  parts.push('</tr></thead><tbody>');
 
   for (const row of rows) {
-    html += '<tr class="flash">';
-    for (const col of accumulatorColumns) {
-      let val = row[col];
-      if (typeof val === 'number' && !Number.isInteger(val)) {
-        val = val.toFixed(2);
-      }
-      html += `<td>${escapeHtml(String(val ?? ''))}</td>`;
+    const cls = row.fresh ? ' class="updated"' : '';
+    row.fresh = false;
+    parts.push(`<tr${cls}>`);
+    for (const col of accCols) {
+      let v = row.data[col];
+      if (typeof v === 'number' && !Number.isInteger(v)) v = v.toFixed(2);
+      parts.push(`<td>${esc(String(v ?? ''))}</td>`);
     }
-    html += '</tr>';
+    parts.push('</tr>');
   }
-  html += '</tbody></table>';
-  outputArea.innerHTML = html;
+  parts.push('</tbody></table>');
+  outputEl.innerHTML = parts.join('');
+
+  // Clear updated highlight after animation
+  setTimeout(() => {
+    outputEl.querySelectorAll('tr.updated').forEach(tr => tr.classList.remove('updated'));
+  }, 600);
 }
 
 function updateStats() {
-  const stats = document.getElementById('stats');
-  const elapsed = startTime ? ((Date.now() - startTime) / 1000).toFixed(1) : '0.0';
-  stats.innerHTML = `<span class="status-badge status-running">RUNNING</span> &nbsp; ${recordCount} records &nbsp; ${elapsed}s`;
+  const elapsed = t0 ? ((performance.now() - t0) / 1000).toFixed(1) : '0.0';
+  const rps = t0 && elapsed > 0 ? Math.round(recCount / elapsed) : 0;
+  statsEl.innerHTML = `<span class="badge badge-run">LIVE</span> ${recCount.toLocaleString()} records &middot; ${elapsed}s &middot; ${rps}/s`;
 }
 
-function onStreamEnd() {
-  const stats = document.getElementById('stats');
-  const elapsed = startTime ? ((Date.now() - startTime) / 1000).toFixed(1) : '0.0';
-  stats.innerHTML = `<span class="status-badge status-stopped">STOPPED</span> &nbsp; ${recordCount} records &nbsp; ${elapsed}s`;
-  document.getElementById('stop-btn').style.display = 'none';
-  document.querySelectorAll('.stream-card').forEach(c => c.classList.remove('selected'));
+function onEnd() {
+  const elapsed = t0 ? ((performance.now() - t0) / 1000).toFixed(1) : '0.0';
+  statsEl.innerHTML = `<span class="badge badge-stop">DONE</span> ${recCount.toLocaleString()} records &middot; ${elapsed}s`;
+  stopBtn.style.display = 'none';
+  document.querySelectorAll('.example').forEach(e => e.style.borderColor = '');
 }
 
 function stopQuery() {
-  if (window._activeReader) {
-    window._activeReader.cancel();
-    window._activeReader = null;
-  }
-
+  if (reader) { reader.cancel(); reader = null; }
   fetch('/api/stop', { method: 'POST' }).catch(() => {});
-  onStreamEnd();
+  onEnd();
 }
 
-function escapeHtml(s) {
-  const div = document.createElement('div');
-  div.textContent = s;
-  return div.innerHTML;
+function esc(s) {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-// Stats timer
-setInterval(() => {
-  if (startTime && window._activeReader) {
-    updateStats();
-  }
-}, 1000);
-
-// Toggle raw changelog
 document.getElementById('raw-toggle').addEventListener('change', () => {
-  showRawChangelog = document.getElementById('raw-toggle').checked;
-  // If accumulating query is running, reset view
-  if (isAccumulating && window._activeReader) {
-    const outputArea = document.getElementById('output-area');
-    if (!showRawChangelog) {
-      renderAccumulatingTable();
+  if (reader && isAcc) {
+    outputEl.innerHTML = '';
+    if (document.getElementById('raw-toggle').checked) {
+      linesEl = document.createElement('div');
+      linesEl.id = 'output-lines';
+      outputEl.appendChild(linesEl);
     } else {
-      outputArea.innerHTML = '<div class="empty-state">Switched to raw mode. New records will appear here.</div>';
+      linesEl = null;
+      renderTable();
     }
   }
 });
 
-// Init
-renderStreams();
-renderQueries();
+init();
 </script>
 </body>
 </html>
