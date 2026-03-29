@@ -5,39 +5,74 @@ import (
 	"io"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/kevin-cantwell/folddb/internal/engine"
 )
 
 // TUISink displays accumulating query results as a table that redraws in place.
-// Uses ANSI escape codes for cursor movement and clearing.
+// Redraws are throttled to a fixed frame rate to avoid terminal bottlenecks.
 type TUISink struct {
 	Writer      io.Writer
 	ColumnOrder []string
+	FPS         int // target frames per second (default 15)
 
 	mu          sync.Mutex
-	rows        map[string]map[string]engine.Value // composite key -> column values
-	rowOrder    []string                            // insertion-order keys
-	linesDrawn  int                                 // how many lines we drew last time
+	rows        map[string]map[string]engine.Value
+	rowOrder    []string
+	linesDrawn  int
 	recordCount int
+	dirty       bool
+	done        chan struct{}
+	wg          sync.WaitGroup
+}
+
+// Start begins the background redraw loop. Must be called before Write.
+func (s *TUISink) Start() {
+	if s.FPS <= 0 {
+		s.FPS = 15
+	}
+	s.done = make(chan struct{})
+	s.rows = make(map[string]map[string]engine.Value)
+	s.wg.Add(1)
+	go s.renderLoop()
+}
+
+func (s *TUISink) renderLoop() {
+	defer s.wg.Done()
+	ticker := time.NewTicker(time.Second / time.Duration(s.FPS))
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			s.mu.Lock()
+			if s.dirty {
+				s.redraw()
+				s.dirty = false
+			}
+			s.mu.Unlock()
+		case <-s.done:
+			// Final redraw
+			s.mu.Lock()
+			s.redraw()
+			s.dirty = false
+			s.mu.Unlock()
+			return
+		}
+	}
 }
 
 // Write processes a changelog record, updating the in-memory table.
+// Does NOT redraw — the background loop handles rendering.
 func (s *TUISink) Write(rec engine.Record) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if s.rows == nil {
-		s.rows = make(map[string]map[string]engine.Value)
-	}
-
 	s.recordCount++
-
-	// Build a composite key from the non-aggregate column values
 	key := s.rowKey(rec)
 
 	if rec.Diff < 0 {
-		// Retraction — remove the row
 		delete(s.rows, key)
 		for i, k := range s.rowOrder {
 			if k == key {
@@ -45,8 +80,8 @@ func (s *TUISink) Write(rec engine.Record) error {
 				break
 			}
 		}
+		s.dirty = true
 	} else {
-		// Insertion — add or update the row
 		if _, exists := s.rows[key]; !exists {
 			s.rowOrder = append(s.rowOrder, key)
 		}
@@ -54,22 +89,18 @@ func (s *TUISink) Write(rec engine.Record) error {
 		for k, v := range rec.Columns {
 			s.rows[key][k] = v
 		}
-	}
-
-	// Redraw the table after each insertion (not on retraction alone,
-	// since retractions are always immediately followed by insertions)
-	if rec.Diff >= 0 {
-		s.redraw()
+		s.dirty = true
 	}
 
 	return nil
 }
 
-// Close writes a final newline.
+// Close stops the render loop and writes a final newline.
 func (s *TUISink) Close() error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	// Move cursor below the table
+	if s.done != nil {
+		close(s.done)
+		s.wg.Wait()
+	}
 	fmt.Fprintln(s.Writer)
 	return nil
 }
@@ -112,34 +143,34 @@ func (s *TUISink) redraw() {
 		}
 	}
 
+	// Build the entire frame as a single string to minimize write syscalls
+	var buf strings.Builder
+
 	// Move cursor up to clear previous draw
 	if s.linesDrawn > 0 {
-		fmt.Fprintf(s.Writer, "\033[%dA", s.linesDrawn)
-		fmt.Fprintf(s.Writer, "\033[J") // clear from cursor to end of screen
+		fmt.Fprintf(&buf, "\033[%dA\033[J", s.linesDrawn)
 	}
 
 	var lines int
 
 	// Header
-	var header strings.Builder
 	for i, col := range s.ColumnOrder {
 		if i > 0 {
-			header.WriteString(" | ")
+			buf.WriteString(" | ")
 		}
-		header.WriteString(padRight(strings.ToUpper(col), widths[i]))
+		buf.WriteString(padRight(strings.ToUpper(col), widths[i]))
 	}
-	fmt.Fprintln(s.Writer, header.String())
+	buf.WriteByte('\n')
 	lines++
 
 	// Separator
-	var sep strings.Builder
 	for i, w := range widths {
 		if i > 0 {
-			sep.WriteString("-+-")
+			buf.WriteString("-+-")
 		}
-		sep.WriteString(strings.Repeat("-", w))
+		buf.WriteString(strings.Repeat("-", w))
 	}
-	fmt.Fprintln(s.Writer, sep.String())
+	buf.WriteByte('\n')
 	lines++
 
 	// Rows
@@ -148,25 +179,26 @@ func (s *TUISink) redraw() {
 		if !ok {
 			continue
 		}
-		var line strings.Builder
 		for i, col := range s.ColumnOrder {
 			if i > 0 {
-				line.WriteString(" | ")
+				buf.WriteString(" | ")
 			}
 			val := "NULL"
 			if v, ok := row[col]; ok && !v.IsNull() {
 				val = v.String()
 			}
-			line.WriteString(padRight(val, widths[i]))
+			buf.WriteString(padRight(val, widths[i]))
 		}
-		fmt.Fprintln(s.Writer, line.String())
+		buf.WriteByte('\n')
 		lines++
 	}
 
 	// Footer
-	fmt.Fprintf(s.Writer, "(%d groups, %d records processed)\n", len(s.rows), s.recordCount)
+	fmt.Fprintf(&buf, "(%d groups, %d records processed)\n", len(s.rows), s.recordCount)
 	lines++
 
+	// Single write to terminal
+	io.WriteString(s.Writer, buf.String())
 	s.linesDrawn = lines
 }
 

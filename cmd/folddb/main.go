@@ -137,6 +137,7 @@ func run() error {
 		kong.Name("folddb"),
 		kong.Description("Execute SQL queries against streaming data sources."),
 		kong.UsageOnError(),
+		kong.ConfigureHelp(kong.HelpOptions{Compact: true}),
 		kong.Vars{"version": Version},
 	)
 
@@ -471,10 +472,12 @@ func runAccumulatingFromFiltered(ctx context.Context, stmt *ast.SelectStatement,
 
 	var snk sink.Sink
 	if isTTY() {
-		snk = &sink.TUISink{
+		tui := &sink.TUISink{
 			Writer:      os.Stdout,
 			ColumnOrder: columnOrder,
 		}
+		tui.Start()
+		snk = tui
 	} else {
 		snk = &sink.ChangelogSink{
 			Writer:      os.Stdout,
@@ -651,10 +654,12 @@ func runWindowedFromRecords(ctx context.Context, stmt *ast.SelectStatement, reco
 		}
 		snk = sqliteSink
 	} else if isTTY() {
-		snk = &sink.TUISink{
+		tui := &sink.TUISink{
 			Writer:      os.Stdout,
 			ColumnOrder: columnOrder,
 		}
+		tui.Start()
+		snk = tui
 	} else {
 		snk = &sink.ChangelogSink{
 			Writer:      os.Stdout,
