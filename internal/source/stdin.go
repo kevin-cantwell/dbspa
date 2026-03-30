@@ -13,7 +13,7 @@ type Stdin struct {
 
 // Read starts reading lines from stdin and returns a channel of raw bytes.
 func (s *Stdin) Read() <-chan []byte {
-	ch := make(chan []byte)
+	ch := make(chan []byte, 1024)
 	go func() {
 		defer close(ch)
 		scanner := bufio.NewScanner(s.Reader)

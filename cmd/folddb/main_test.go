@@ -69,6 +69,7 @@ func runQuery(t *testing.T, sql string, inputLines []string) []map[string]any {
 		}
 		count++
 	}
+	snk.Close()
 
 	// Parse output
 	var results []map[string]any
@@ -153,6 +154,7 @@ func runAggQuery(t *testing.T, sql string, inputLines []string) []map[string]any
 			t.Fatalf("sink error: %v", err)
 		}
 	}
+	snk.Close()
 
 	// Parse output
 	var results []map[string]any

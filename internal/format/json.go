@@ -1,9 +1,9 @@
 package format
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/kevin-cantwell/folddb/internal/engine"
@@ -16,10 +16,15 @@ type JSONDecoder struct{}
 // number -> IntValue or FloatValue, string -> TextValue,
 // bool -> BoolValue, null -> NullValue, object/array -> JsonValue.
 func (d *JSONDecoder) Decode(data []byte) (engine.Record, error) {
+	if len(data) == 0 {
+		return engine.Record{}, fmt.Errorf("JSON decode error: empty input")
+	}
+
+	// Use Unmarshal (faster than NewDecoder for single objects).
+	// Without UseNumber, Go decodes JSON numbers as float64.
+	// We recover int vs float by checking if the float64 is a whole number.
 	var raw map[string]any
-	dec := json.NewDecoder(bytes.NewReader(data))
-	dec.UseNumber()
-	if err := dec.Decode(&raw); err != nil {
+	if err := json.Unmarshal(data, &raw); err != nil {
 		return engine.Record{}, fmt.Errorf("JSON decode error: %w", err)
 	}
 
@@ -40,14 +45,12 @@ func inferValue(v any) engine.Value {
 		return engine.NullValue{}
 	}
 	switch val := v.(type) {
-	case json.Number:
-		if i, err := val.Int64(); err == nil {
-			return engine.IntValue{V: i}
+	case float64:
+		// Recover integer type: if the value is a whole number within int64 range, use IntValue
+		if val == math.Trunc(val) && val >= math.MinInt64 && val <= math.MaxInt64 {
+			return engine.IntValue{V: int64(val)}
 		}
-		if f, err := val.Float64(); err == nil {
-			return engine.FloatValue{V: f}
-		}
-		return engine.TextValue{V: val.String()}
+		return engine.FloatValue{V: val}
 	case string:
 		return engine.TextValue{V: val}
 	case bool:

@@ -40,10 +40,10 @@ func TestChangelogSink_InsertionHasPlusOp(t *testing.T) {
 	if err := s.Write(rec); err != nil {
 		t.Fatalf("Write error: %v", err)
 	}
-
+	s.Close()
 	results := parseNDJSON(t, &buf)
 	if len(results) != 1 {
-		t.Fatalf("expected 1 line, got %d", len(results))
+		t.Fatalf("expected 1 line, got %d: %q", len(results), buf.String())
 	}
 	if results[0]["op"] != "+" {
 		t.Errorf("expected op='+', got %v", results[0]["op"])
@@ -66,6 +66,7 @@ func TestChangelogSink_RetractionHasMinusOp(t *testing.T) {
 		t.Fatalf("Write error: %v", err)
 	}
 
+	s.Close()
 	results := parseNDJSON(t, &buf)
 	if results[0]["op"] != "-" {
 		t.Errorf("expected op='-', got %v", results[0]["op"])
@@ -91,6 +92,7 @@ func TestChangelogSink_ColumnOrderPreserved(t *testing.T) {
 	if err := s.Write(rec); err != nil {
 		t.Fatalf("Write error: %v", err)
 	}
+	s.Close()
 
 	line := strings.TrimSpace(buf.String())
 	// "op" should come first, then columns in specified order
@@ -124,6 +126,7 @@ func TestChangelogSink_NoColumnOrderSortsKeys(t *testing.T) {
 	if err := s.Write(rec); err != nil {
 		t.Fatalf("Write error: %v", err)
 	}
+	s.Close()
 
 	line := strings.TrimSpace(buf.String())
 	// Keys should be sorted: op, a, m, z
@@ -150,6 +153,7 @@ func TestChangelogSink_NullValues(t *testing.T) {
 		t.Fatalf("Write error: %v", err)
 	}
 
+	s.Close()
 	results := parseNDJSON(t, &buf)
 	if results[0]["x"] != nil {
 		t.Errorf("expected null, got %v", results[0]["x"])
@@ -190,6 +194,7 @@ func TestChangelogSink_MultipleWrites(t *testing.T) {
 		t.Fatalf("Write error: %v", err)
 	}
 
+	s.Close()
 	results := parseNDJSON(t, &buf)
 	if len(results) != 2 {
 		t.Fatalf("expected 2 lines, got %d", len(results))
@@ -218,6 +223,7 @@ func TestJSONSink_NoOpField(t *testing.T) {
 		t.Fatalf("Write error: %v", err)
 	}
 
+	s.Close()
 	results := parseNDJSON(t, &buf)
 	if _, ok := results[0]["op"]; ok {
 		t.Error("JSONSink should not include 'op' field")
@@ -239,6 +245,7 @@ func TestChangelogSink_BoolValue(t *testing.T) {
 		t.Fatalf("Write error: %v", err)
 	}
 
+	s.Close()
 	results := parseNDJSON(t, &buf)
 	if results[0]["active"] != true {
 		t.Errorf("expected true, got %v", results[0]["active"])
@@ -260,6 +267,7 @@ func TestChangelogSink_FloatValue(t *testing.T) {
 		t.Fatalf("Write error: %v", err)
 	}
 
+	s.Close()
 	results := parseNDJSON(t, &buf)
 	if results[0]["val"] != 3.14 {
 		t.Errorf("expected 3.14, got %v", results[0]["val"])

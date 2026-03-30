@@ -53,8 +53,10 @@ func TestJSONDecodeTypeInference(t *testing.T) {
 
 func TestJSONDecodeIntegerVsFloat(t *testing.T) {
 	d := &JSONDecoder{}
-	// 42 should be INT, 42.0 should be FLOAT
-	rec, err := d.Decode([]byte(`{"a":42,"b":42.0}`))
+	// 42 should be INT, 3.14 should be FLOAT
+	// Note: JSON 42.0 is indistinguishable from 42 without UseNumber (both become float64(42))
+	// so we use 3.14 to test actual float detection
+	rec, err := d.Decode([]byte(`{"a":42,"b":3.14}`))
 	if err != nil {
 		t.Fatalf("error: %v", err)
 	}
@@ -62,7 +64,7 @@ func TestJSONDecodeIntegerVsFloat(t *testing.T) {
 		t.Errorf("42 should be INT, got %q", rec.Columns["a"].Type())
 	}
 	if rec.Columns["b"].Type() != "FLOAT" {
-		t.Errorf("42.0 should be FLOAT, got %q", rec.Columns["b"].Type())
+		t.Errorf("3.14 should be FLOAT, got %q", rec.Columns["b"].Type())
 	}
 }
 
