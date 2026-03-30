@@ -31,6 +31,7 @@ type CLI struct {
 	Query QueryCmd `cmd:"" default:"withargs" help:"Execute a SQL query."`
 
 	// Subcommands
+	Serve   ServeCmd   `cmd:"" help:"Run a query and serve results via HTTP."`
 	Schema  SchemaCmd  `cmd:"" help:"Print schema for a source."`
 	State_  StateCmd   `cmd:"" name:"state" help:"Manage checkpoint state."`
 	Version VersionCmd `cmd:"" help:"Print version."`
@@ -59,6 +60,19 @@ type QueryCmd struct {
 	DeadLetter string `help:"Route errors to NDJSON file." placeholder:"FILE" name:"dead-letter"`
 	DryRun     bool   `help:"Print query plan without executing." name:"dry-run"`
 	Explain    bool   `help:"Print query plan then execute."`
+}
+
+// ServeCmd runs a query and serves results via HTTP.
+type ServeCmd struct {
+	SQL     string        `arg:"" help:"SQL query to execute."`
+	Port    int           `help:"HTTP port." default:"8080"`
+	Input   string        `short:"i" help:"Read input from file." type:"existingfile"`
+	State   string        `help:"SQLite state file." placeholder:"FILE"`
+	Timeout time.Duration `help:"Query timeout." default:"0s"`
+}
+
+func (c *ServeCmd) Run() error {
+	return runServe(c)
 }
 
 // SchemaCmd is the "schema" subcommand.
@@ -151,6 +165,8 @@ func run() error {
 
 	// Dispatch subcommands via Kong's Run interface
 	switch ctx.Command() {
+	case "serve <sql>":
+		return cli.Serve.Run()
 	case "schema", "schema <args>":
 		return cli.Schema.Run()
 	case "version":
@@ -1112,6 +1128,322 @@ func resolveOrderBy(items []ast.OrderByItem) []sink.OrderBySpec {
 		})
 	}
 	return specs
+}
+
+// runServe implements the "serve" subcommand: runs a query pipeline and serves
+// the live result set via HTTP.
+func runServe(c *ServeCmd) error {
+	// Parse the SQL query
+	p := parser.New(c.SQL)
+	stmt, err := p.Parse()
+	if err != nil {
+		return fmt.Errorf("parse error: %w", err)
+	}
+
+	// Set up context with SIGINT handling
+	runCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if c.Timeout > 0 {
+		var timeoutCancel context.CancelFunc
+		runCtx, timeoutCancel = context.WithTimeout(runCtx, c.Timeout)
+		defer timeoutCancel()
+	}
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		<-sigCh
+		cancel()
+	}()
+
+	// Determine format decoder
+	var formatStr string
+	var formatOpts map[string]string
+	if stmt.From != nil {
+		formatStr = stmt.From.Format
+		formatOpts = stmt.From.FormatOptions
+	}
+	dec, err := format.NewDecoderWithOptions(formatStr, formatOpts)
+	if err != nil {
+		return err
+	}
+
+	// If SELECT has aggregates but no GROUP BY, create an implicit single group
+	if stmt.GroupBy == nil && hasAggregateInSelect(stmt.Columns) {
+		stmt.GroupBy = []ast.Expr{}
+	}
+
+	isAccumulating := stmt.GroupBy != nil
+
+	// Build hash join operator if JOIN is present
+	var joinOp *engine.HashJoinOp
+	if stmt.Join != nil {
+		joinOp, err = buildJoinOp(stmt)
+		if err != nil {
+			return err
+		}
+	}
+
+	// Parse aggregate columns to get column order
+	var columnOrder []string
+	if isAccumulating {
+		aggCols, err := engine.ParseAggColumns(stmt.Columns, stmt.GroupBy)
+		if err != nil {
+			return fmt.Errorf("aggregate setup error: %w", err)
+		}
+		columnOrder = make([]string, len(aggCols))
+		for i, col := range aggCols {
+			columnOrder[i] = col.Alias
+		}
+	} else {
+		// For non-accumulating queries, derive columns from SELECT
+		for _, col := range stmt.Columns {
+			if col.Alias != "" {
+				columnOrder = append(columnOrder, col.Alias)
+			} else {
+				columnOrder = append(columnOrder, exprString(col.Expr))
+			}
+		}
+	}
+
+	orderBy := resolveOrderBy(stmt.OrderBy)
+
+	httpSink := &sink.HTTPSink{
+		ColumnOrder: columnOrder,
+		OrderBy:     orderBy,
+		Port:        c.Port,
+	}
+	httpSink.Start()
+	defer httpSink.Close()
+
+	fmt.Fprintf(os.Stderr, "Serving on http://localhost:%d\n", c.Port)
+
+	// Determine source
+	fromURI := ""
+	if stmt.From != nil {
+		fromURI = stmt.From.URI
+	}
+
+	if fromURI != "" && strings.HasPrefix(fromURI, "kafka://") {
+		return runServeKafka(runCtx, stmt, dec, isAccumulating, httpSink, c, joinOp)
+	}
+
+	// Default: stdin source (or --input file)
+	var reader io.Reader = os.Stdin
+	if c.Input != "" {
+		f, err := os.Open(c.Input)
+		if err != nil {
+			return fmt.Errorf("cannot open input file: %w", err)
+		}
+		defer f.Close()
+		reader = f
+	}
+	inputSrc := &source.Stdin{Reader: reader}
+
+	if isAccumulating {
+		return runServeAccumulating(runCtx, stmt, inputSrc, dec, httpSink, joinOp)
+	}
+	return runServeNonAccumulating(runCtx, stmt, inputSrc, dec, httpSink, joinOp)
+}
+
+func runServeKafka(ctx context.Context, stmt *ast.SelectStatement, dec format.Decoder, isAccumulating bool, snk *sink.HTTPSink, c *ServeCmd, joinOp *engine.HashJoinOp) error {
+	cfg, err := source.ParseKafkaURI(stmt.From.URI)
+	if err != nil {
+		return err
+	}
+
+	kafkaSrc := source.NewKafka(ctx, cfg)
+	kafkaCh := kafkaSrc.Read()
+
+	recordCh := make(chan engine.Record, 256)
+	go func() {
+		defer close(recordCh)
+		for kr := range kafkaCh {
+			if kr.Value == nil {
+				continue
+			}
+			recs, err := decodeWithCSVHeader(dec, kr.Value)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
+				continue
+			}
+			recs = format.InjectKafkaVirtuals(recs, kr)
+			for _, rec := range recs {
+				select {
+				case recordCh <- rec:
+				case <-ctx.Done():
+					return
+				}
+			}
+		}
+	}()
+
+	var finalCh <-chan engine.Record = recordCh
+	if joinOp != nil {
+		finalCh = applyJoin(ctx, joinOp, recordCh)
+	}
+
+	if isAccumulating {
+		return runServeAccumulatingFromRecords(ctx, stmt, finalCh, snk)
+	}
+	return runServeNonAccumulatingFromRecords(ctx, stmt, finalCh, snk)
+}
+
+func runServeAccumulating(ctx context.Context, stmt *ast.SelectStatement, src *source.Stdin, dec format.Decoder, snk *sink.HTTPSink, joinOp *engine.HashJoinOp) error {
+	recordCh := make(chan engine.Record)
+
+	if sd, ok := dec.(format.StreamDecoder); ok {
+		go func() {
+			if err := sd.DecodeStream(src.ReadRaw(), recordCh); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: stream decode error: %v\n", err)
+			}
+		}()
+		var joined <-chan engine.Record = recordCh
+		if joinOp != nil {
+			joined = applyJoin(ctx, joinOp, recordCh)
+		}
+		return runServeAccumulatingFromRecords(ctx, stmt, joined, snk)
+	}
+
+	rawCh := src.Read()
+	go func() {
+		defer close(recordCh)
+		for raw := range rawCh {
+			recs, err := decodeWithCSVHeader(dec, raw)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
+				continue
+			}
+			for _, rec := range recs {
+				select {
+				case recordCh <- rec:
+				case <-ctx.Done():
+					return
+				}
+			}
+		}
+	}()
+
+	var finalCh <-chan engine.Record = recordCh
+	if joinOp != nil {
+		finalCh = applyJoin(ctx, joinOp, recordCh)
+	}
+	return runServeAccumulatingFromRecords(ctx, stmt, finalCh, snk)
+}
+
+func runServeAccumulatingFromRecords(ctx context.Context, stmt *ast.SelectStatement, recordCh <-chan engine.Record, snk *sink.HTTPSink) error {
+	// Apply WHERE filter
+	filteredCh := make(chan engine.Record)
+	go func() {
+		defer close(filteredCh)
+		for rec := range recordCh {
+			if stmt.Where != nil {
+				pass, err := engine.Filter(stmt.Where, rec)
+				if err != nil || !pass {
+					continue
+				}
+			}
+			select {
+			case filteredCh <- rec:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
+	aggCols, err := engine.ParseAggColumns(stmt.Columns, stmt.GroupBy)
+	if err != nil {
+		return fmt.Errorf("aggregate setup error: %w", err)
+	}
+	aggOp := engine.NewAggregateOp(aggCols, stmt.GroupBy, stmt.Having)
+
+	aggOutCh := make(chan engine.Record)
+	go func() {
+		aggOp.Process(filteredCh, aggOutCh)
+	}()
+
+	for {
+		select {
+		case rec, ok := <-aggOutCh:
+			if !ok {
+				return nil
+			}
+			if err := snk.Write(rec); err != nil {
+				return fmt.Errorf("output error: %w", err)
+			}
+		case <-ctx.Done():
+			return nil
+		}
+	}
+}
+
+func runServeNonAccumulating(ctx context.Context, stmt *ast.SelectStatement, src *source.Stdin, dec format.Decoder, snk *sink.HTTPSink, joinOp *engine.HashJoinOp) error {
+	recordCh := make(chan engine.Record)
+
+	if sd, ok := dec.(format.StreamDecoder); ok {
+		go func() {
+			if err := sd.DecodeStream(src.ReadRaw(), recordCh); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: stream decode error: %v\n", err)
+			}
+		}()
+		var joined <-chan engine.Record = recordCh
+		if joinOp != nil {
+			joined = applyJoin(ctx, joinOp, recordCh)
+		}
+		return runServeNonAccumulatingFromRecords(ctx, stmt, joined, snk)
+	}
+
+	rawCh := src.Read()
+	go func() {
+		defer close(recordCh)
+		for raw := range rawCh {
+			recs, err := decodeWithCSVHeader(dec, raw)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
+				continue
+			}
+			for _, rec := range recs {
+				select {
+				case recordCh <- rec:
+				case <-ctx.Done():
+					return
+				}
+			}
+		}
+	}()
+
+	var finalCh <-chan engine.Record = recordCh
+	if joinOp != nil {
+		finalCh = applyJoin(ctx, joinOp, recordCh)
+	}
+	return runServeNonAccumulatingFromRecords(ctx, stmt, finalCh, snk)
+}
+
+func runServeNonAccumulatingFromRecords(ctx context.Context, stmt *ast.SelectStatement, recordCh <-chan engine.Record, snk *sink.HTTPSink) error {
+	pipeline := &engine.Pipeline{
+		Columns: stmt.Columns,
+		Where:   stmt.Where,
+	}
+
+	outputCh := make(chan engine.Record)
+	go func() {
+		pipeline.Process(recordCh, outputCh)
+	}()
+
+	for {
+		select {
+		case rec, ok := <-outputCh:
+			if !ok {
+				return nil
+			}
+			if err := snk.Write(rec); err != nil {
+				return fmt.Errorf("output error: %w", err)
+			}
+		case <-ctx.Done():
+			return nil
+		}
+	}
 }
 
 // hasAggregateInSelect returns true if any column in the SELECT list is an aggregate function.
