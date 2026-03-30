@@ -3,6 +3,7 @@ package engine
 import (
 	"encoding/json"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/kevin-cantwell/folddb/internal/sql/ast"
@@ -32,6 +33,10 @@ type WindowedAggregateOp struct {
 	EmitMode string
 	// EmitInterval for EARLY mode
 	EmitInterval time.Duration
+
+	// mu protects windows and windowBuckets for concurrent access
+	// between the record-processing goroutine and the EMIT EARLY ticker.
+	mu sync.Mutex
 
 	// windows maps "windowKey|groupKey" -> windowGroupState
 	windows map[string]*windowGroupState
@@ -86,14 +91,132 @@ func NewWindowedAggregateOp(
 func (op *WindowedAggregateOp) Process(in <-chan Record, out chan<- Record) error {
 	defer close(out)
 
+	// Start EMIT EARLY ticker goroutine if configured.
+	var done chan struct{}
+	if op.EmitMode == "EARLY" && op.EmitInterval > 0 {
+		done = make(chan struct{})
+		go op.earlyEmitLoop(done, out)
+	}
+
 	for rec := range in {
+		op.mu.Lock()
 		op.processRecord(rec, out)
+		op.mu.Unlock()
+	}
+
+	// Stop the early emit ticker before flushing.
+	if done != nil {
+		close(done)
 	}
 
 	// Input exhausted (e.g., stdin EOF). Flush all open windows.
+	op.mu.Lock()
 	op.flushAllWindows(out)
+	op.mu.Unlock()
 
 	return nil
+}
+
+// earlyEmitLoop runs in a background goroutine, periodically emitting
+// partial results for all open windows.
+func (op *WindowedAggregateOp) earlyEmitLoop(done chan struct{}, out chan<- Record) {
+	ticker := time.NewTicker(op.EmitInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-done:
+			return
+		case <-ticker.C:
+			op.mu.Lock()
+			op.emitEarlyResults(out)
+			op.mu.Unlock()
+		}
+	}
+}
+
+// emitEarlyResults emits partial results for all open windows.
+// For each group in each open window, it emits a retraction of the
+// previously emitted partial result (if any), then the current partial result.
+// Must be called with op.mu held.
+func (op *WindowedAggregateOp) emitEarlyResults(out chan<- Record) {
+	for _, wb := range op.windowBuckets {
+		if wb.closed {
+			continue
+		}
+		wkStr := wb.key.String()
+
+		for gk := range wb.groupKeys {
+			compositeStr := wkStr + "|" + gk
+			wgs, ok := op.windows[compositeStr]
+			if !ok {
+				continue
+			}
+
+			// Build the current partial result columns.
+			cols := make(map[string]Value)
+			cols["window_start"] = TextValue{V: wb.key.Start.Format(time.RFC3339)}
+			cols["window_end"] = TextValue{V: wb.key.End.Format(time.RFC3339)}
+
+			keyIdx := 0
+			for i, col := range op.Columns {
+				if col.IsAggregate {
+					cols[col.Alias] = wgs.accumulators[i].Result()
+				} else {
+					if col.Alias == "window_start" || col.Alias == "window_end" {
+						continue
+					}
+					if keyIdx < len(wgs.keyValues) {
+						cols[col.Alias] = wgs.keyValues[keyIdx]
+						keyIdx++
+					}
+				}
+			}
+
+			// If we previously emitted a partial result, retract it.
+			if wgs.hasEmitted {
+				retraction := make(map[string]Value, len(wgs.lastEmitted))
+				retraction["window_start"] = TextValue{V: wb.key.Start.Format(time.RFC3339)}
+				retraction["window_end"] = TextValue{V: wb.key.End.Format(time.RFC3339)}
+				keyIdx2 := 0
+				for i, col := range op.Columns {
+					if col.IsAggregate {
+						retraction[col.Alias] = wgs.lastEmitted[i]
+					} else {
+						if col.Alias == "window_start" || col.Alias == "window_end" {
+							continue
+						}
+						if keyIdx2 < len(wgs.keyValues) {
+							retraction[col.Alias] = wgs.keyValues[keyIdx2]
+							keyIdx2++
+						}
+					}
+				}
+				out <- Record{
+					Columns:   retraction,
+					Timestamp: wb.key.End,
+					Diff:      -1,
+				}
+			}
+
+			// Emit the current partial result.
+			out <- Record{
+				Columns:   cols,
+				Timestamp: wb.key.End,
+				Diff:      1,
+			}
+
+			// Save the emitted values for future retraction.
+			emitted := make([]Value, len(op.Columns))
+			for i, col := range op.Columns {
+				if col.IsAggregate {
+					emitted[i] = wgs.accumulators[i].Result()
+				}
+			}
+			wgs.lastEmitted = emitted
+			wgs.hasEmitted = true
+		}
+	}
 }
 
 func (op *WindowedAggregateOp) processRecord(rec Record, out chan<- Record) {
@@ -235,6 +358,7 @@ func (op *WindowedAggregateOp) flushAllWindows(out chan<- Record) {
 }
 
 // emitWindowResults emits final results for all groups in a window.
+// If EMIT EARLY was active, it first retracts the last early-emitted partial result.
 func (op *WindowedAggregateOp) emitWindowResults(wb *windowBucket, out chan<- Record) {
 	wkStr := wb.key.String()
 
@@ -243,6 +367,32 @@ func (op *WindowedAggregateOp) emitWindowResults(wb *windowBucket, out chan<- Re
 		wgs, ok := op.windows[compositeStr]
 		if !ok {
 			continue
+		}
+
+		// If EMIT EARLY was active and we emitted a partial result, retract it.
+		if op.EmitMode == "EARLY" && wgs.hasEmitted {
+			retraction := make(map[string]Value)
+			retraction["window_start"] = TextValue{V: wb.key.Start.Format(time.RFC3339)}
+			retraction["window_end"] = TextValue{V: wb.key.End.Format(time.RFC3339)}
+			keyIdx := 0
+			for i, col := range op.Columns {
+				if col.IsAggregate {
+					retraction[col.Alias] = wgs.lastEmitted[i]
+				} else {
+					if col.Alias == "window_start" || col.Alias == "window_end" {
+						continue
+					}
+					if keyIdx < len(wgs.keyValues) {
+						retraction[col.Alias] = wgs.keyValues[keyIdx]
+						keyIdx++
+					}
+				}
+			}
+			out <- Record{
+				Columns:   retraction,
+				Timestamp: wb.key.End,
+				Diff:      -1,
+			}
 		}
 
 		// Build result record with window_start and window_end
@@ -268,7 +418,7 @@ func (op *WindowedAggregateOp) emitWindowResults(wb *windowBucket, out chan<- Re
 			}
 		}
 
-		// Emit the result
+		// Emit the final result
 		out <- Record{
 			Columns:   cols,
 			Timestamp: wb.key.End,
