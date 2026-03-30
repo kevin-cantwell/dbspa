@@ -19,6 +19,7 @@ type SelectStatement struct {
 	From        *TableSource  // nil means stdin
 	FromAlias   string        // optional alias for the FROM source
 	Join        *JoinClause   // nil means no JOIN
+	Seed        *SeedClause   // nil means no SEED FROM
 	Where       Expr          // nil means no WHERE
 	GroupBy     []Expr        // nil means non-accumulating
 	Having      Expr          // nil means no HAVING
@@ -40,6 +41,13 @@ type JoinClause struct {
 }
 
 func (*JoinClause) nodeTag() {}
+
+// SeedClause represents a SEED FROM clause that bootstraps accumulators from a file.
+type SeedClause struct {
+	Source *TableSource // file path + optional format
+}
+
+func (*SeedClause) nodeTag() {}
 
 func (*SelectStatement) nodeTag() {}
 

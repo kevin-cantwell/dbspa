@@ -908,6 +908,57 @@ func TestJoinWithFormat(t *testing.T) {
 	}
 }
 
+func TestSeedFromClause(t *testing.T) {
+	p := New("SELECT region, COUNT(*) AS orders FROM 'kafka://broker/orders.cdc' FORMAT DEBEZIUM SEED FROM '/path/to/snapshot.parquet' GROUP BY region")
+	stmt, err := p.Parse()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if stmt.Seed == nil {
+		t.Fatal("expected SEED clause")
+	}
+	if stmt.Seed.Source.URI != "/path/to/snapshot.parquet" {
+		t.Errorf("seed source URI: got %q, want %q", stmt.Seed.Source.URI, "/path/to/snapshot.parquet")
+	}
+}
+
+func TestSeedFromWithFormat(t *testing.T) {
+	p := New("SELECT status, COUNT(*) FROM stdin SEED FROM '/tmp/seed.csv' FORMAT CSV GROUP BY status")
+	stmt, err := p.Parse()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if stmt.Seed == nil {
+		t.Fatal("expected SEED clause")
+	}
+	if stmt.Seed.Source.URI != "/tmp/seed.csv" {
+		t.Errorf("seed source URI: got %q, want %q", stmt.Seed.Source.URI, "/tmp/seed.csv")
+	}
+	if stmt.Seed.Source.Format != "CSV" {
+		t.Errorf("seed format: got %q, want %q", stmt.Seed.Source.Format, "CSV")
+	}
+}
+
+func TestSeedFromWithJoin(t *testing.T) {
+	p := New("SELECT e.status, COUNT(*) FROM stdin e JOIN '/tmp/users.ndjson' u ON e.uid = u.id SEED FROM '/tmp/seed.ndjson' GROUP BY e.status")
+	stmt, err := p.Parse()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if stmt.Join == nil {
+		t.Fatal("expected JOIN clause")
+	}
+	if stmt.Seed == nil {
+		t.Fatal("expected SEED clause")
+	}
+	if stmt.Seed.Source.URI != "/tmp/seed.ndjson" {
+		t.Errorf("seed source URI: got %q, want %q", stmt.Seed.Source.URI, "/tmp/seed.ndjson")
+	}
+}
+
 func containsStr(s, substr string) bool {
 	return len(s) >= len(substr) && searchString(s, substr)
 }

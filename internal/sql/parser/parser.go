@@ -73,6 +73,15 @@ func (p *Parser) parseSelect() (*ast.SelectStatement, error) {
 		stmt.Join = join
 	}
 
+	// SEED FROM (optional)
+	if p.lex.Peek().Type == lexer.TokenSeed {
+		seed, err := p.parseSeedClause()
+		if err != nil {
+			return nil, err
+		}
+		stmt.Seed = seed
+	}
+
 	// WHERE
 	if p.lex.Peek().Type == lexer.TokenWhere {
 		p.lex.Next()
@@ -446,6 +455,25 @@ func (p *Parser) parseJoinClause() (*ast.JoinClause, error) {
 		Alias:     alias,
 		Condition: cond,
 	}, nil
+}
+
+// parseSeedClause parses SEED FROM '<file-path>' [FORMAT <format>]
+func (p *Parser) parseSeedClause() (*ast.SeedClause, error) {
+	p.lex.Next() // consume SEED
+	if err := p.expect(lexer.TokenFrom); err != nil {
+		return nil, err
+	}
+
+	tok := p.lex.Peek()
+	if tok.Type != lexer.TokenString {
+		return nil, p.errorf(tok, "expected file path string after SEED FROM, got %q", tok.Literal)
+	}
+	src, err := p.parseTableSource()
+	if err != nil {
+		return nil, err
+	}
+
+	return &ast.SeedClause{Source: src}, nil
 }
 
 func (p *Parser) parseWindowClause() (*ast.WindowClause, error) {
