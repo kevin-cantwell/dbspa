@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/kevin-cantwell/folddb/internal/sql/ast"
 )
@@ -42,6 +44,9 @@ type AggregateOp struct {
 	groups map[string]*groupState
 	// keyOrder tracks insertion order of keys.
 	keyOrder []string
+
+	// mu protects groups and keyOrder for concurrent checkpoint saves.
+	mu sync.RWMutex
 }
 
 type groupState struct {
@@ -73,6 +78,9 @@ func (op *AggregateOp) Process(in <-chan Record, out chan<- Record) error {
 }
 
 func (op *AggregateOp) processRecord(rec Record, out chan<- Record) {
+	op.mu.Lock()
+	defer op.mu.Unlock()
+
 	// Evaluate GROUP BY key
 	keyVals := make([]Value, len(op.GroupByExprs))
 	for i, expr := range op.GroupByExprs {
@@ -359,6 +367,196 @@ func newAccumulator(funcName string, isStar bool) Accumulator {
 	default:
 		return &CountStarAccumulator{} // fallback
 	}
+}
+
+// aggColumnMeta describes a column for checkpoint validation.
+type aggColumnMeta struct {
+	Alias       string `json:"alias"`
+	IsAggregate bool   `json:"is_aggregate"`
+	AggFunc     string `json:"agg_func,omitempty"`
+	IsStar      bool   `json:"is_star,omitempty"`
+	GroupByIdx  int    `json:"group_by_idx,omitempty"`
+}
+
+// aggStateEnvelope is the top-level serialized format for AggregateOp state.
+type aggStateEnvelope struct {
+	Columns []aggColumnMeta              `json:"columns"`
+	Groups  map[string]json.RawMessage   `json:"groups"`
+}
+
+// groupStateData is the serialized form of a single group's state.
+type groupStateData struct {
+	KeyValues    []any             `json:"key_values"`
+	Accumulators []json.RawMessage `json:"accumulators"`
+	LastEmitted  []any             `json:"last_emitted,omitempty"`
+	HasEmitted   bool              `json:"has_emitted"`
+}
+
+// MarshalState serializes all group keys and their accumulator states.
+// Safe for concurrent use with processRecord.
+func (op *AggregateOp) MarshalState() ([]byte, error) {
+	op.mu.RLock()
+	defer op.mu.RUnlock()
+
+	// Build column metadata for validation on restore
+	colMeta := make([]aggColumnMeta, len(op.Columns))
+	for i, col := range op.Columns {
+		colMeta[i] = aggColumnMeta{
+			Alias:       col.Alias,
+			IsAggregate: col.IsAggregate,
+			AggFunc:     col.AggFunc,
+			IsStar:      col.IsStar,
+			GroupByIdx:  col.GroupByIdx,
+		}
+	}
+
+	groups := make(map[string]json.RawMessage, len(op.groups))
+	for keyStr, gs := range op.groups {
+		// Serialize key values
+		keyVals := make([]any, len(gs.keyValues))
+		for i, v := range gs.keyValues {
+			if v == nil || v.IsNull() {
+				keyVals[i] = nil
+			} else {
+				keyVals[i] = v.ToJSON()
+			}
+		}
+
+		// Serialize accumulators
+		accData := make([]json.RawMessage, len(gs.accumulators))
+		for i, acc := range gs.accumulators {
+			b, err := acc.Marshal()
+			if err != nil {
+				return nil, fmt.Errorf("marshal accumulator %d for key %s: %w", i, keyStr, err)
+			}
+			accData[i] = b
+		}
+
+		// Serialize last emitted values
+		var lastEmitted []any
+		if gs.hasEmitted && gs.lastEmitted != nil {
+			lastEmitted = make([]any, len(gs.lastEmitted))
+			for i, v := range gs.lastEmitted {
+				if v == nil || v.IsNull() {
+					lastEmitted[i] = nil
+				} else {
+					lastEmitted[i] = v.ToJSON()
+				}
+			}
+		}
+
+		gsd := groupStateData{
+			KeyValues:    keyVals,
+			Accumulators: accData,
+			LastEmitted:  lastEmitted,
+			HasEmitted:   gs.hasEmitted,
+		}
+		b, err := json.Marshal(gsd)
+		if err != nil {
+			return nil, fmt.Errorf("marshal group %s: %w", keyStr, err)
+		}
+		groups[keyStr] = b
+	}
+
+	env := aggStateEnvelope{
+		Columns: colMeta,
+		Groups:  groups,
+	}
+	return json.Marshal(env)
+}
+
+// UnmarshalState restores group keys and accumulator states.
+// Must be called before processing starts (not concurrency-safe with processRecord).
+func (op *AggregateOp) UnmarshalState(data []byte) error {
+	var env aggStateEnvelope
+	if err := json.Unmarshal(data, &env); err != nil {
+		return fmt.Errorf("unmarshal state envelope: %w", err)
+	}
+
+	// Validate column metadata matches current query
+	if len(env.Columns) != len(op.Columns) {
+		return fmt.Errorf("column count mismatch: checkpoint has %d, query has %d", len(env.Columns), len(op.Columns))
+	}
+	for i, cm := range env.Columns {
+		col := op.Columns[i]
+		if cm.Alias != col.Alias || cm.IsAggregate != col.IsAggregate || cm.AggFunc != col.AggFunc {
+			return fmt.Errorf("column %d mismatch: checkpoint has %s/%s, query has %s/%s",
+				i, cm.Alias, cm.AggFunc, col.Alias, col.AggFunc)
+		}
+	}
+
+	// Restore groups
+	op.groups = make(map[string]*groupState, len(env.Groups))
+	op.keyOrder = make([]string, 0, len(env.Groups))
+
+	for keyStr, raw := range env.Groups {
+		var gsd groupStateData
+		if err := json.Unmarshal(raw, &gsd); err != nil {
+			return fmt.Errorf("unmarshal group %s: %w", keyStr, err)
+		}
+
+		// Restore key values
+		keyVals := make([]Value, len(gsd.KeyValues))
+		for i, v := range gsd.KeyValues {
+			keyVals[i] = anyToValue(v)
+		}
+
+		// Create and restore accumulators
+		accs := op.newAccumulators()
+		if len(gsd.Accumulators) != len(accs) {
+			return fmt.Errorf("accumulator count mismatch for group %s: checkpoint has %d, expected %d",
+				keyStr, len(gsd.Accumulators), len(accs))
+		}
+		for i, accData := range gsd.Accumulators {
+			if accData != nil {
+				if err := accs[i].Unmarshal(accData); err != nil {
+					return fmt.Errorf("unmarshal accumulator %d for group %s: %w", i, keyStr, err)
+				}
+			}
+		}
+
+		// Restore last emitted
+		var lastEmitted []Value
+		if gsd.HasEmitted && gsd.LastEmitted != nil {
+			lastEmitted = make([]Value, len(gsd.LastEmitted))
+			for i, v := range gsd.LastEmitted {
+				lastEmitted[i] = anyToValue(v)
+			}
+		}
+
+		gs := &groupState{
+			accumulators: accs,
+			keyValues:    keyVals,
+			lastEmitted:  lastEmitted,
+			hasEmitted:   gsd.HasEmitted,
+		}
+		op.groups[keyStr] = gs
+		op.keyOrder = append(op.keyOrder, keyStr)
+	}
+
+	return nil
+}
+
+// CurrentState returns one Record per group key with current accumulator values.
+// This is used to re-emit state to the sink after restoring from a checkpoint.
+func (op *AggregateOp) CurrentState() []Record {
+	op.mu.RLock()
+	defer op.mu.RUnlock()
+
+	var records []Record
+	for _, keyStr := range op.keyOrder {
+		gs, ok := op.groups[keyStr]
+		if !ok {
+			continue
+		}
+		cols := op.buildResult(gs)
+		records = append(records, Record{
+			Columns:   cols,
+			Timestamp: time.Now(),
+			Diff:      1,
+		})
+	}
+	return records
 }
 
 // compositeKey produces a deterministic string key from a slice of Values.
