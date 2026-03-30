@@ -1,6 +1,6 @@
-folddb
-folddb-gen
-demo
+/folddb
+/folddb-gen
+/demo
 coverage.out
 *.out
 /tmp/
