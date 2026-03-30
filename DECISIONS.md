@@ -26,4 +26,37 @@ This file tracks design decisions made during development. Each entry explains w
 
 **Decision:** Sort in TUI always, sort at EOF for bounded changelog, warn for unbounded changelog. This matches what the user expects in each context.
 
+**Result:** Implemented in 3 commits. TUI sorts rows every frame. Changelog emits sorted final snapshot at Close(). CompareValues handles NULL-last, INT/FLOAT promotion, TEXT lexicographic. 4 new tests.
+
+---
+
+### 2. Wire checkpointing into hot path
+
+**Status:** In progress
+
+**Problem:** The checkpoint manager (`internal/engine/checkpoint.go`) is built but never called during streaming. `--stateful` is accepted as a flag but doesn't save or restore state. The accumulator state, dedup cache, and Kafka offsets are lost on restart.
+
+**Design:**
+
+The checkpoint should save:
+- Query fingerprint (hash of normalized SQL)
+- Accumulator state (all group keys → serialized accumulators via Marshal())
+- Last processed offset (for Kafka) or record count (for stdin)
+- Dedup cache state
+- Timestamp of last flush
+
+Save cadence: every `--checkpoint-interval` (default 5s) or every N records, whichever comes first.
+
+On restart with `--stateful`:
+1. Check for existing checkpoint matching query fingerprint
+2. If found: restore accumulator state, resume from saved offset
+3. If not found or fingerprint mismatch: start fresh
+
+The checkpoint is a performance optimization, not a correctness requirement. If corrupted, replay from scratch.
+
+**Integration points:**
+- `runAccumulatingFromFiltered()` — save after each checkpoint interval
+- `runWindowedFromRecords()` — save after each window close
+- The aggregate operator needs `Marshal()/Unmarshal()` at the operator level (not just individual accumulators)
+
 ---
