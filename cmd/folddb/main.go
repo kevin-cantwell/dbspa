@@ -239,6 +239,16 @@ func run() error {
 	isAccumulating := stmt.GroupBy != nil
 	isWindowed := stmt.Window != nil
 
+	// Build hash join operator if JOIN is present
+	var joinOp *engine.HashJoinOp
+	if stmt.Join != nil {
+		var err error
+		joinOp, err = buildJoinOp(stmt)
+		if err != nil {
+			return err
+		}
+	}
+
 	// Map CLI fields to cliFlags for execution functions
 	flags := cliFlags{
 		stateDB: q.State,
@@ -250,7 +260,7 @@ func run() error {
 		fromURI = stmt.From.URI
 	}
 	if fromURI != "" && strings.HasPrefix(fromURI, "kafka://") {
-		return runKafka(runCtx, stmt, dec, isAccumulating, isWindowed, flags, dlWriter)
+		return runKafka(runCtx, stmt, dec, isAccumulating, isWindowed, flags, dlWriter, joinOp)
 	}
 
 	// Reject non-kafka URI schemes that we don't support
@@ -275,12 +285,12 @@ func run() error {
 	}
 	inputSrc := &source.Stdin{Reader: reader}
 	if isWindowed {
-		return runWindowed(runCtx, stmt, inputSrc, dec, flags, dlWriter)
+		return runWindowed(runCtx, stmt, inputSrc, dec, flags, dlWriter, joinOp)
 	}
 	if isAccumulating {
-		return runAccumulating(runCtx, stmt, inputSrc, dec, dlWriter)
+		return runAccumulating(runCtx, stmt, inputSrc, dec, dlWriter, joinOp)
 	}
-	return runNonAccumulating(runCtx, stmt, inputSrc, dec, dlWriter)
+	return runNonAccumulating(runCtx, stmt, inputSrc, dec, dlWriter, joinOp)
 }
 
 func getSQL(q *QueryCmd) (string, error) {
@@ -297,7 +307,7 @@ func getSQL(q *QueryCmd) (string, error) {
 	return "", fmt.Errorf("usage: folddb <SQL> or folddb -f <file.sql>")
 }
 
-func runKafka(ctx context.Context, stmt *ast.SelectStatement, dec format.Decoder, isAccumulating, isWindowed bool, flags cliFlags, dl *deadLetterWriter) error {
+func runKafka(ctx context.Context, stmt *ast.SelectStatement, dec format.Decoder, isAccumulating, isWindowed bool, flags cliFlags, dl *deadLetterWriter, joinOp *engine.HashJoinOp) error {
 	cfg, err := source.ParseKafkaURI(stmt.From.URI)
 	if err != nil {
 		return err
@@ -330,16 +340,22 @@ func runKafka(ctx context.Context, stmt *ast.SelectStatement, dec format.Decoder
 		}
 	}()
 
+	// Apply JOIN if present
+	var finalCh <-chan engine.Record = recordCh
+	if joinOp != nil {
+		finalCh = applyJoin(ctx, joinOp, recordCh)
+	}
+
 	if isWindowed {
-		return runWindowedFromRecords(ctx, stmt, recordCh, flags)
+		return runWindowedFromRecords(ctx, stmt, finalCh, flags)
 	}
 	if isAccumulating {
-		return runAccumulatingFromRecords(ctx, stmt, recordCh)
+		return runAccumulatingFromRecords(ctx, stmt, finalCh)
 	}
-	return runNonAccumulatingFromRecords(ctx, stmt, recordCh)
+	return runNonAccumulatingFromRecords(ctx, stmt, finalCh)
 }
 
-func runNonAccumulating(ctx context.Context, stmt *ast.SelectStatement, src *source.Stdin, dec format.Decoder, dl *deadLetterWriter) error {
+func runNonAccumulating(ctx context.Context, stmt *ast.SelectStatement, src *source.Stdin, dec format.Decoder, dl *deadLetterWriter, joinOp *engine.HashJoinOp) error {
 	recordCh := make(chan engine.Record)
 
 	// Stream decoders handle their own framing — bypass line-based reading.
@@ -349,7 +365,12 @@ func runNonAccumulating(ctx context.Context, stmt *ast.SelectStatement, src *sou
 				fmt.Fprintf(os.Stderr, "Warning: stream decode error: %v\n", err)
 			}
 		}()
-		return runNonAccumulatingFromRecords(ctx, stmt, recordCh)
+		// Apply JOIN if present
+		var joinedCh <-chan engine.Record = recordCh
+		if joinOp != nil {
+			joinedCh = applyJoin(ctx, joinOp, recordCh)
+		}
+		return runNonAccumulatingFromRecords(ctx, stmt, joinedCh)
 	}
 
 	rawCh := src.Read()
@@ -373,7 +394,14 @@ func runNonAccumulating(ctx context.Context, stmt *ast.SelectStatement, src *sou
 			offset++
 		}
 	}()
-	return runNonAccumulatingFromRecords(ctx, stmt, recordCh)
+
+	// Apply JOIN if present
+	var finalCh <-chan engine.Record = recordCh
+	if joinOp != nil {
+		finalCh = applyJoin(ctx, joinOp, recordCh)
+	}
+
+	return runNonAccumulatingFromRecords(ctx, stmt, finalCh)
 }
 
 func runNonAccumulatingFromRecords(ctx context.Context, stmt *ast.SelectStatement, recordCh <-chan engine.Record) error {
@@ -424,7 +452,7 @@ func runNonAccumulatingFromRecords(ctx context.Context, stmt *ast.SelectStatemen
 	}
 }
 
-func runAccumulating(ctx context.Context, stmt *ast.SelectStatement, src *source.Stdin, dec format.Decoder, dl *deadLetterWriter) error {
+func runAccumulating(ctx context.Context, stmt *ast.SelectStatement, src *source.Stdin, dec format.Decoder, dl *deadLetterWriter, joinOp *engine.HashJoinOp) error {
 	// Stream decoders handle their own framing — bypass line-based reading.
 	if sd, ok := dec.(format.StreamDecoder); ok {
 		recordCh := make(chan engine.Record)
@@ -433,18 +461,21 @@ func runAccumulating(ctx context.Context, stmt *ast.SelectStatement, src *source
 				fmt.Fprintf(os.Stderr, "Warning: stream decode error: %v\n", err)
 			}
 		}()
-		return runAccumulatingFromRecords(ctx, stmt, recordCh)
+		var joined <-chan engine.Record = recordCh
+		if joinOp != nil {
+			joined = applyJoin(ctx, joinOp, recordCh)
+		}
+		return runAccumulatingFromRecords(ctx, stmt, joined)
 	}
 
+	// Decode raw lines into records
 	rawCh := src.Read()
-	filteredCh := make(chan engine.Record)
-	var inputCount atomic.Int64
+	decodedCh := make(chan engine.Record)
 
 	go func() {
-		defer close(filteredCh)
+		defer close(decodedCh)
 		var offset int64
 		for raw := range rawCh {
-			inputCount.Add(1)
 			recs, err := decodeWithCSVHeader(dec, raw)
 			if err != nil {
 				handleDeserError(dl, err, raw, offset, 0)
@@ -452,19 +483,40 @@ func runAccumulating(ctx context.Context, stmt *ast.SelectStatement, src *source
 				continue
 			}
 			for _, rec := range recs {
-				if stmt.Where != nil {
-					pass, err := engine.Filter(stmt.Where, rec)
-					if err != nil || !pass {
-						continue
-					}
-				}
 				select {
-				case filteredCh <- rec:
+				case decodedCh <- rec:
 				case <-ctx.Done():
 					return
 				}
 			}
 			offset++
+		}
+	}()
+
+	// Apply JOIN if present (before WHERE filtering)
+	var joinedCh <-chan engine.Record = decodedCh
+	if joinOp != nil {
+		joinedCh = applyJoin(ctx, joinOp, decodedCh)
+	}
+
+	// Apply WHERE filter
+	filteredCh := make(chan engine.Record)
+	var inputCount atomic.Int64
+	go func() {
+		defer close(filteredCh)
+		for rec := range joinedCh {
+			inputCount.Add(1)
+			if stmt.Where != nil {
+				pass, err := engine.Filter(stmt.Where, rec)
+				if err != nil || !pass {
+					continue
+				}
+			}
+			select {
+			case filteredCh <- rec:
+			case <-ctx.Done():
+				return
+			}
 		}
 	}()
 
@@ -550,7 +602,7 @@ func runAccumulatingFromFiltered(ctx context.Context, stmt *ast.SelectStatement,
 }
 
 // runWindowed handles windowed aggregation from stdin source.
-func runWindowed(ctx context.Context, stmt *ast.SelectStatement, src *source.Stdin, dec format.Decoder, flags cliFlags, dl *deadLetterWriter) error {
+func runWindowed(ctx context.Context, stmt *ast.SelectStatement, src *source.Stdin, dec format.Decoder, flags cliFlags, dl *deadLetterWriter, joinOp *engine.HashJoinOp) error {
 	recordCh := make(chan engine.Record)
 
 	// Stream decoders handle their own framing — bypass line-based reading.
@@ -560,7 +612,11 @@ func runWindowed(ctx context.Context, stmt *ast.SelectStatement, src *source.Std
 				fmt.Fprintf(os.Stderr, "Warning: stream decode error: %v\n", err)
 			}
 		}()
-		return runWindowedFromRecords(ctx, stmt, recordCh, flags)
+		var joined <-chan engine.Record = recordCh
+		if joinOp != nil {
+			joined = applyJoin(ctx, joinOp, recordCh)
+		}
+		return runWindowedFromRecords(ctx, stmt, joined, flags)
 	}
 
 	rawCh := src.Read()
@@ -585,7 +641,11 @@ func runWindowed(ctx context.Context, stmt *ast.SelectStatement, src *source.Std
 		}
 	}()
 
-	return runWindowedFromRecords(ctx, stmt, recordCh, flags)
+	var joined <-chan engine.Record = recordCh
+	if joinOp != nil {
+		joined = applyJoin(ctx, joinOp, recordCh)
+	}
+	return runWindowedFromRecords(ctx, stmt, joined, flags)
 }
 
 // runWindowedFromRecords runs a windowed aggregation query from a record channel.
@@ -979,4 +1039,62 @@ func handleDeserError(dl *deadLetterWriter, err error, raw []byte, offset, parti
 	} else {
 		fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
 	}
+}
+
+// buildJoinOp constructs a HashJoinOp from the parsed JOIN clause.
+func buildJoinOp(stmt *ast.SelectStatement) (*engine.HashJoinOp, error) {
+	join := stmt.Join
+
+	// Load table file
+	tableFormat := ""
+	if join.Source != nil {
+		tableFormat = join.Source.Format
+	}
+	tableRecords, err := loadTableFile(join.Source.URI, tableFormat)
+	if err != nil {
+		return nil, fmt.Errorf("join table load error: %w", err)
+	}
+
+	streamAlias := stmt.FromAlias
+	tableAlias := join.Alias
+
+	// Extract equi-join keys from the ON condition
+	streamKey, tableKey, err := engine.ExtractEquiJoinKeys(join.Condition, streamAlias, tableAlias)
+	if err != nil {
+		return nil, fmt.Errorf("join key extraction error: %w", err)
+	}
+
+	op := &engine.HashJoinOp{
+		StreamKeyExpr: streamKey,
+		TableKeyExpr:  tableKey,
+		LeftJoin:      join.Type == "LEFT JOIN",
+		StreamAlias:   streamAlias,
+		TableAlias:    tableAlias,
+	}
+
+	if err := op.BuildIndex(tableRecords); err != nil {
+		return nil, fmt.Errorf("join index build error: %w", err)
+	}
+
+	fmt.Fprintf(os.Stderr, "Loaded %d table records into join index (%d distinct keys)\n", len(tableRecords), len(op.Index))
+	return op, nil
+}
+
+// applyJoin wraps a record channel with join probing, emitting joined records.
+func applyJoin(ctx context.Context, joinOp *engine.HashJoinOp, in <-chan engine.Record) <-chan engine.Record {
+	out := make(chan engine.Record)
+	go func() {
+		defer close(out)
+		for rec := range in {
+			joined := joinOp.Probe(rec)
+			for _, jr := range joined {
+				select {
+				case out <- jr:
+				case <-ctx.Done():
+					return
+				}
+			}
+		}
+	}()
+	return out
 }
