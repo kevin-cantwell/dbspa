@@ -14,6 +14,7 @@ func main() {
 		kong.Name("folddb-gen"),
 		kong.Description("Generate synthetic data fixtures for testing FoldDB."),
 		kong.UsageOnError(),
+		kong.ConfigureHelp(kong.HelpOptions{Compact: true}),
 	)
 
 	if err := cli.Run(); err != nil {
