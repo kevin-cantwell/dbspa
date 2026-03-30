@@ -83,6 +83,42 @@ In `WindowedAggregateOp.Process()`, when EMIT EARLY is configured:
 - For changelog mode this creates a lot of retraction noise
 - This is the expected behavior — users opt into it explicitly with EMIT EARLY
 
-**Result:** Implemented in 2 commits. Background ticker goroutine in Process() emits partial results at EmitInterval for all open windows. Tracks last-emitted values per window+group for proper retraction pairs. Mutex protects window state for concurrent access. At window close, retracts last early-emitted value before emitting final result. 2 new tests: timer-fires-before-close and retraction-on-update.
+**Result:** Implemented in 3 commits. Background ticker goroutine in Process() emits partial results at EmitInterval for all open windows. Tracks last-emitted values per window+group for proper retraction pairs. Mutex protects window state for concurrent access. At window close, retracts last early-emitted value before emitting final result. 2 new tests.
+
+---
+
+### 4. folddb serve (HTTP sidecar)
+
+**Status:** In progress
+
+**Problem:** FoldDB is CLI-only. For sidecar deployments (Kubernetes, etc.), users need an HTTP API to query the current accumulated state. The TUI sink redraws a terminal, but there's no programmatic access to the live result set.
+
+**Design:**
+
+`folddb serve` starts an HTTP server that:
+- Runs a streaming query in the background (same pipeline as `folddb query`)
+- Exposes the current accumulated state via HTTP endpoints:
+  - `GET /` — current result set as JSON array
+  - `GET /stream` — SSE stream of changelog diffs
+  - `GET /health` — liveness check
+  - `GET /metrics` — record count, groups, lag, uptime
+- Accepts the SQL query and source as arguments (same as `query`)
+- Uses `--state <file.db>` for SQLite persistence (optional)
+
+**Syntax:**
+```
+folddb serve --port 8080 "SELECT region, COUNT(*) FROM 'kafka://broker/orders.cdc' FORMAT DEBEZIUM GROUP BY region"
+```
+
+**Architecture:**
+- The serve command starts the normal pipeline but with a custom sink that maintains the result set in memory (like TUISink's row map)
+- The HTTP handler reads from this in-memory map (protected by RWMutex)
+- SSE endpoint writes changelog diffs as they arrive
+- The pipeline runs in a background goroutine; the HTTP server is the main goroutine
+
+**Trade-offs:**
+- Simplest possible HTTP layer — no framework, just net/http
+- No authentication in v0 (assume trusted network / sidecar)
+- Single query per server instance (not a multi-tenant query service)
 
 ---
