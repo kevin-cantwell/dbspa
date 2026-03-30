@@ -63,6 +63,8 @@ func inferColumnName(expr ast.Expr) string {
 	switch e := expr.(type) {
 	case *ast.ColumnRef:
 		return e.Name
+	case *ast.QualifiedRef:
+		return e.Name
 	case *ast.FunctionCall:
 		return e.Name
 	case *ast.JsonAccessExpr:

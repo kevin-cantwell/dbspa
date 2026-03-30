@@ -14,6 +14,15 @@ func Eval(expr ast.Expr, rec Record) (Value, error) {
 	case *ast.ColumnRef:
 		return rec.Get(e.Name), nil
 
+	case *ast.QualifiedRef:
+		// Try qualified name first: "qualifier.name"
+		qualName := e.Qualifier + "." + e.Name
+		if v, ok := rec.Columns[qualName]; ok {
+			return v, nil
+		}
+		// Fall back to unqualified name
+		return rec.Get(e.Name), nil
+
 	case *ast.NumberLiteral:
 		return parseNumber(e)
 
