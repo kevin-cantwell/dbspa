@@ -605,6 +605,7 @@ func runAccumulatingFromFiltered(ctx context.Context, stmt *ast.SelectStatement,
 	}
 
 	// Set up checkpointing if --stateful
+	restoredFromCheckpoint := false
 	var cpMgr *engine.CheckpointManager
 	if flags.stateful {
 		cpMgr, err = engine.NewCheckpointManager(flags.sql, flags.stateDir, flags.checkpointInterval)
@@ -620,6 +621,7 @@ func runAccumulatingFromFiltered(ctx context.Context, stmt *ast.SelectStatement,
 			if restoreErr := aggOp.UnmarshalState(cp.State); restoreErr != nil {
 				fmt.Fprintf(os.Stderr, "Warning: cannot restore state: %v (starting fresh)\n", restoreErr)
 			} else {
+				restoredFromCheckpoint = true
 				// Re-emit current state to sink so TUI/changelog shows existing data
 				for _, rec := range aggOp.CurrentState() {
 					if writeErr := snk.Write(rec); writeErr != nil {
@@ -627,6 +629,38 @@ func runAccumulatingFromFiltered(ctx context.Context, stmt *ast.SelectStatement,
 					}
 				}
 			}
+		}
+	}
+
+	// SEED FROM: load seed file and prepend to stream (skip if checkpoint restored)
+	if stmt.Seed != nil && !restoredFromCheckpoint {
+		seedRecords, seedErr := loadSeedRecords(stmt)
+		if seedErr != nil {
+			return fmt.Errorf("seed load error: %w", seedErr)
+		}
+		if len(seedRecords) > 0 {
+			streamCh := filteredCh
+			mergedCh := make(chan engine.Record, 256)
+			go func() {
+				defer close(mergedCh)
+				// Send seed records first
+				for _, rec := range seedRecords {
+					select {
+					case mergedCh <- rec:
+					case <-ctx.Done():
+						return
+					}
+				}
+				// Then forward stream records
+				for rec := range streamCh {
+					select {
+					case mergedCh <- rec:
+					case <-ctx.Done():
+						return
+					}
+				}
+			}()
+			filteredCh = mergedCh
 		}
 	}
 
@@ -760,6 +794,35 @@ func runWindowed(ctx context.Context, stmt *ast.SelectStatement, src *source.Std
 
 // runWindowedFromRecords runs a windowed aggregation query from a record channel.
 func runWindowedFromRecords(ctx context.Context, stmt *ast.SelectStatement, recordCh <-chan engine.Record, flags cliFlags) error {
+	// SEED FROM: load seed file and prepend to stream (before WHERE filter)
+	if stmt.Seed != nil {
+		seedRecords, seedErr := loadSeedFile(stmt.Seed)
+		if seedErr != nil {
+			return fmt.Errorf("seed load error: %w", seedErr)
+		}
+		if len(seedRecords) > 0 {
+			mergedCh := make(chan engine.Record, 256)
+			go func() {
+				defer close(mergedCh)
+				for _, rec := range seedRecords {
+					select {
+					case mergedCh <- rec:
+					case <-ctx.Done():
+						return
+					}
+				}
+				for rec := range recordCh {
+					select {
+					case mergedCh <- rec:
+					case <-ctx.Done():
+						return
+					}
+				}
+			}()
+			recordCh = mergedCh
+		}
+	}
+
 	// Apply WHERE filter
 	filteredCh := make(chan engine.Record)
 	go func() {
@@ -978,6 +1041,15 @@ func printQueryPlan(stmt *ast.SelectStatement) {
 		}
 		fmt.Fprintf(os.Stderr, "\n")
 		fmt.Fprintf(os.Stderr, "  ON: %s\n", exprString(stmt.Join.Condition))
+	}
+
+	// Seed
+	if stmt.Seed != nil {
+		fmt.Fprintf(os.Stderr, "  Seed: %s", stmt.Seed.Source.URI)
+		if stmt.Seed.Source.Format != "" {
+			fmt.Fprintf(os.Stderr, " (format: %s)", stmt.Seed.Source.Format)
+		}
+		fmt.Fprintf(os.Stderr, "\n")
 	}
 
 	// Format
@@ -1504,6 +1576,37 @@ func handleDeserError(dl *deadLetterWriter, err error, raw []byte, offset, parti
 	} else {
 		fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
 	}
+}
+
+// loadSeedFile loads all records from a SEED FROM file (no WHERE filtering).
+func loadSeedFile(seed *ast.SeedClause) ([]engine.Record, error) {
+	seedFormat := ""
+	if seed.Source != nil {
+		seedFormat = seed.Source.Format
+	}
+	return loadTableFile(seed.Source.URI, seedFormat)
+}
+
+// loadSeedRecords loads and WHERE-filters records from a SEED FROM file.
+func loadSeedRecords(stmt *ast.SelectStatement) ([]engine.Record, error) {
+	records, err := loadSeedFile(stmt.Seed)
+	if err != nil {
+		return nil, err
+	}
+
+	// Apply WHERE filter to seed records
+	if stmt.Where == nil {
+		return records, nil
+	}
+	var filtered []engine.Record
+	for _, rec := range records {
+		pass, err := engine.Filter(stmt.Where, rec)
+		if err != nil || !pass {
+			continue
+		}
+		filtered = append(filtered, rec)
+	}
+	return filtered, nil
 }
 
 // buildJoinOp constructs a HashJoinOp from the parsed JOIN clause.
