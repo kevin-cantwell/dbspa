@@ -89,7 +89,7 @@ In `WindowedAggregateOp.Process()`, when EMIT EARLY is configured:
 
 ### 4. folddb serve (HTTP sidecar)
 
-**Status:** In progress
+**Status:** Implemented
 
 **Problem:** FoldDB is CLI-only. For sidecar deployments (Kubernetes, etc.), users need an HTTP API to query the current accumulated state. The TUI sink redraws a terminal, but there's no programmatic access to the live result set.
 
