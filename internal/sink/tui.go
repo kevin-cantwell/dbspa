@@ -26,7 +26,7 @@ type TUISink struct {
 	rows        map[string]map[string]engine.Value
 	rowOrder    []string
 	linesDrawn  int
-	recordCount int // records that reached the accumulator (after filtering)
+	recordCount int
 	dirty       bool
 	done        chan struct{}
 	wg          sync.WaitGroup
@@ -51,31 +51,149 @@ func (s *TUISink) renderLoop() {
 	for {
 		select {
 		case <-ticker.C:
-			s.mu.Lock()
-			needsRedraw := s.dirty
-			// Also redraw if the input counter changed (filter may have
-			// rejected records, but the footer should still update)
-			if !needsRedraw && s.InputCount != nil && s.linesDrawn > 0 {
-				needsRedraw = true
+			frame := s.buildFrame()
+			if frame != "" {
+				io.WriteString(s.Writer, frame)
 			}
-			if needsRedraw {
-				s.redraw()
-				s.dirty = false
-			}
-			s.mu.Unlock()
 		case <-s.done:
-			// Final redraw
-			s.mu.Lock()
-			s.redraw()
-			s.dirty = false
-			s.mu.Unlock()
+			frame := s.buildFrame()
+			if frame != "" {
+				io.WriteString(s.Writer, frame)
+			}
 			return
 		}
 	}
 }
 
+// buildFrame takes a snapshot of state under the lock, builds the frame string,
+// and returns it. The actual terminal write happens OUTSIDE the lock.
+func (s *TUISink) buildFrame() string {
+	s.mu.Lock()
+
+	needsRedraw := s.dirty
+	if !needsRedraw && s.InputCount != nil && s.linesDrawn > 0 {
+		needsRedraw = true
+	}
+	if !needsRedraw || (len(s.ColumnOrder) == 0 || len(s.rows) == 0) {
+		// Nothing to draw, but still check if we need a footer-only update
+		if !needsRedraw || len(s.rows) == 0 {
+			s.mu.Unlock()
+			return ""
+		}
+	}
+
+	// Snapshot state
+	colOrder := s.ColumnOrder
+	rowOrder := make([]string, len(s.rowOrder))
+	copy(rowOrder, s.rowOrder)
+	rows := make(map[string]map[string]engine.Value, len(s.rows))
+	for k, v := range s.rows {
+		row := make(map[string]engine.Value, len(v))
+		for ck, cv := range v {
+			row[ck] = cv
+		}
+		rows[k] = row
+	}
+	nGroups := len(s.rows)
+	recCount := s.recordCount
+	linesDrawn := s.linesDrawn
+	var inputCount int64
+	if s.InputCount != nil {
+		inputCount = s.InputCount.Load()
+	}
+	s.dirty = false
+
+	s.mu.Unlock()
+
+	// Build frame string outside the lock
+	widths := make([]int, len(colOrder))
+	for i, col := range colOrder {
+		widths[i] = len(col)
+	}
+	for _, key := range rowOrder {
+		row, ok := rows[key]
+		if !ok {
+			continue
+		}
+		for i, col := range colOrder {
+			val := "NULL"
+			if v, ok := row[col]; ok && !v.IsNull() {
+				val = v.String()
+			}
+			if len(val) > widths[i] {
+				widths[i] = len(val)
+			}
+		}
+	}
+
+	var buf strings.Builder
+	buf.Grow(4096)
+
+	// Move cursor to start of previous draw and clear
+	if linesDrawn > 0 {
+		fmt.Fprintf(&buf, "\033[%dA", linesDrawn)
+	}
+	buf.WriteString("\r\033[J")
+
+	var lines int
+
+	// Header
+	for i, col := range colOrder {
+		if i > 0 {
+			buf.WriteString(" | ")
+		}
+		buf.WriteString(padRight(strings.ToUpper(col), widths[i]))
+	}
+	buf.WriteByte('\n')
+	lines++
+
+	// Separator
+	for i, w := range widths {
+		if i > 0 {
+			buf.WriteString("-+-")
+		}
+		buf.WriteString(strings.Repeat("-", w))
+	}
+	buf.WriteByte('\n')
+	lines++
+
+	// Rows
+	for _, key := range rowOrder {
+		row, ok := rows[key]
+		if !ok {
+			continue
+		}
+		for i, col := range colOrder {
+			if i > 0 {
+				buf.WriteString(" | ")
+			}
+			val := "NULL"
+			if v, ok := row[col]; ok && !v.IsNull() {
+				val = v.String()
+			}
+			buf.WriteString(padRight(val, widths[i]))
+		}
+		buf.WriteByte('\n')
+		lines++
+	}
+
+	// Footer
+	if inputCount > 0 {
+		fmt.Fprintf(&buf, "(%d groups | %d matched | %d input)\n", nGroups, recCount, inputCount)
+	} else {
+		fmt.Fprintf(&buf, "(%d groups | %d accumulated)\n", nGroups, recCount)
+	}
+	lines++
+
+	// Update linesDrawn under lock
+	s.mu.Lock()
+	s.linesDrawn = lines
+	s.mu.Unlock()
+
+	return buf.String()
+}
+
 // Write processes a changelog record, updating the in-memory table.
-// Does NOT redraw — the background loop handles rendering.
 func (s *TUISink) Write(rec engine.Record) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -91,7 +209,6 @@ func (s *TUISink) Write(rec engine.Record) error {
 				break
 			}
 		}
-		s.dirty = true
 	} else {
 		if _, exists := s.rows[key]; !exists {
 			s.rowOrder = append(s.rowOrder, key)
@@ -100,8 +217,8 @@ func (s *TUISink) Write(rec engine.Record) error {
 		for k, v := range rec.Columns {
 			s.rows[key][k] = v
 		}
-		s.dirty = true
 	}
+	s.dirty = true
 
 	return nil
 }
@@ -126,100 +243,6 @@ func (s *TUISink) rowKey(rec engine.Record) string {
 		}
 	}
 	return strings.Join(parts, "\x00")
-}
-
-func (s *TUISink) redraw() {
-	if len(s.ColumnOrder) == 0 || len(s.rows) == 0 {
-		return
-	}
-
-	// Calculate column widths
-	widths := make([]int, len(s.ColumnOrder))
-	for i, col := range s.ColumnOrder {
-		widths[i] = len(col)
-	}
-	for _, key := range s.rowOrder {
-		row, ok := s.rows[key]
-		if !ok {
-			continue
-		}
-		for i, col := range s.ColumnOrder {
-			val := "NULL"
-			if v, ok := row[col]; ok && !v.IsNull() {
-				val = v.String()
-			}
-			if len(val) > widths[i] {
-				widths[i] = len(val)
-			}
-		}
-	}
-
-	// Build the entire frame as a single string to minimize write syscalls
-	var buf strings.Builder
-
-	// Move cursor to start of previous draw and clear everything below
-	if s.linesDrawn > 0 {
-		fmt.Fprintf(&buf, "\033[%dA", s.linesDrawn) // move up
-	}
-	buf.WriteString("\r\033[J") // carriage return + clear from cursor to end of screen
-
-	var lines int
-
-	// Header
-	for i, col := range s.ColumnOrder {
-		if i > 0 {
-			buf.WriteString(" | ")
-		}
-		buf.WriteString(padRight(strings.ToUpper(col), widths[i]))
-	}
-	buf.WriteByte('\n')
-	lines++
-
-	// Separator
-	for i, w := range widths {
-		if i > 0 {
-			buf.WriteString("-+-")
-		}
-		buf.WriteString(strings.Repeat("-", w))
-	}
-	buf.WriteByte('\n')
-	lines++
-
-	// Rows
-	for _, key := range s.rowOrder {
-		row, ok := s.rows[key]
-		if !ok {
-			continue
-		}
-		for i, col := range s.ColumnOrder {
-			if i > 0 {
-				buf.WriteString(" | ")
-			}
-			val := "NULL"
-			if v, ok := row[col]; ok && !v.IsNull() {
-				val = v.String()
-			}
-			buf.WriteString(padRight(val, widths[i]))
-		}
-		buf.WriteByte('\n')
-		lines++
-	}
-
-	// Footer
-	var inputCount int64
-	if s.InputCount != nil {
-		inputCount = s.InputCount.Load()
-	}
-	if inputCount > 0 {
-		fmt.Fprintf(&buf, "(%d groups | %d matched | %d input)\n", len(s.rows), s.recordCount, inputCount)
-	} else {
-		fmt.Fprintf(&buf, "(%d groups | %d accumulated)\n", len(s.rows), s.recordCount)
-	}
-	lines++
-
-	// Single write to terminal
-	io.WriteString(s.Writer, buf.String())
-	s.linesDrawn = lines
 }
 
 func padRight(s string, width int) string {
