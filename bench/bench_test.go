@@ -28,13 +28,17 @@ func envOr(key, fallback string) string {
 }
 
 func generateFixture(b *testing.B, dataset string, count int) []byte {
+	return generateFixtureFormat(b, dataset, count, "ndjson")
+}
+
+func generateFixtureFormat(b *testing.B, dataset string, count int, format string) []byte {
 	b.Helper()
-	cmd := exec.Command(genBin, dataset, "--count", fmt.Sprintf("%d", count), "--seed", "42")
+	cmd := exec.Command(genBin, dataset, "--count", fmt.Sprintf("%d", count), "--seed", "42", "--format", format)
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
-		b.Fatalf("folddb-gen failed: %v", err)
+		b.Fatalf("folddb-gen --format %s failed: %v", format, err)
 	}
 	return out.Bytes()
 }
@@ -165,8 +169,101 @@ func BenchmarkJSONDecode_100K(b *testing.B) {
 	data := generateFixture(b, "orders", 100_000)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		// Just decode and project one column — measures decode + minimal processing
 		runFoldDB(b, data, "SELECT order_id")
+	}
+	b.ReportMetric(float64(100_000)/b.Elapsed().Seconds(), "records/sec")
+}
+
+// =====================================================
+// Format comparison benchmarks: NDJSON vs Avro vs Protobuf
+// =====================================================
+
+// --- Passthrough (SELECT *) across formats ---
+
+func BenchmarkFormat_NDJSON_Passthrough_100K(b *testing.B) {
+	data := generateFixtureFormat(b, "orders", 100_000, "ndjson")
+	b.SetBytes(int64(len(data)))
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		runFoldDB(b, data, "SELECT *")
+	}
+	b.ReportMetric(float64(100_000)/b.Elapsed().Seconds(), "records/sec")
+}
+
+func BenchmarkFormat_Avro_Passthrough_100K(b *testing.B) {
+	data := generateFixtureFormat(b, "orders", 100_000, "avro")
+	b.SetBytes(int64(len(data)))
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		runFoldDB(b, data, "SELECT * FORMAT AVRO")
+	}
+	b.ReportMetric(float64(100_000)/b.Elapsed().Seconds(), "records/sec")
+}
+
+func BenchmarkFormat_Protobuf_Passthrough_100K(b *testing.B) {
+	data := generateFixtureFormat(b, "orders", 100_000, "protobuf")
+	b.SetBytes(int64(len(data)))
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		runFoldDB(b, data, "SELECT * FORMAT PROTOBUF")
+	}
+	b.ReportMetric(float64(100_000)/b.Elapsed().Seconds(), "records/sec")
+}
+
+// --- Filter across formats ---
+
+func BenchmarkFormat_NDJSON_Filter_100K(b *testing.B) {
+	data := generateFixtureFormat(b, "orders", 100_000, "ndjson")
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		runFoldDB(b, data, "SELECT * WHERE status = 'confirmed'")
+	}
+	b.ReportMetric(float64(100_000)/b.Elapsed().Seconds(), "records/sec")
+}
+
+func BenchmarkFormat_Avro_Filter_100K(b *testing.B) {
+	data := generateFixtureFormat(b, "orders", 100_000, "avro")
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		runFoldDB(b, data, "SELECT * WHERE status = 'confirmed' FORMAT AVRO")
+	}
+	b.ReportMetric(float64(100_000)/b.Elapsed().Seconds(), "records/sec")
+}
+
+func BenchmarkFormat_Protobuf_Filter_100K(b *testing.B) {
+	data := generateFixtureFormat(b, "orders", 100_000, "protobuf")
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		runFoldDB(b, data, "SELECT * WHERE status = 'confirmed' FORMAT PROTOBUF")
+	}
+	b.ReportMetric(float64(100_000)/b.Elapsed().Seconds(), "records/sec")
+}
+
+// --- GROUP BY across formats ---
+
+func BenchmarkFormat_NDJSON_GroupBy_100K(b *testing.B) {
+	data := generateFixtureFormat(b, "orders", 100_000, "ndjson")
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		runFoldDB(b, data, "SELECT product, region, COUNT(*), SUM(total) GROUP BY product, region")
+	}
+	b.ReportMetric(float64(100_000)/b.Elapsed().Seconds(), "records/sec")
+}
+
+func BenchmarkFormat_Avro_GroupBy_100K(b *testing.B) {
+	data := generateFixtureFormat(b, "orders", 100_000, "avro")
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		runFoldDB(b, data, "SELECT product, region, COUNT(*), SUM(total) GROUP BY product, region FORMAT AVRO")
+	}
+	b.ReportMetric(float64(100_000)/b.Elapsed().Seconds(), "records/sec")
+}
+
+func BenchmarkFormat_Protobuf_GroupBy_100K(b *testing.B) {
+	data := generateFixtureFormat(b, "orders", 100_000, "protobuf")
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		runFoldDB(b, data, "SELECT product, region, COUNT(*), SUM(total) GROUP BY product, region FORMAT PROTOBUF")
 	}
 	b.ReportMetric(float64(100_000)/b.Elapsed().Seconds(), "records/sec")
 }
