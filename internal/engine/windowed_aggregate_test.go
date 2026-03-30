@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"sync"
 	"testing"
 	"time"
 
@@ -480,5 +481,211 @@ func TestParseWindowSpec(t *testing.T) {
 				t.Errorf("got %+v, want %+v", got, tt.want)
 			}
 		})
+	}
+}
+
+// TestWindowedAggregate_EmitEarly_Timer verifies that EMIT EARLY produces
+// partial results before the window closes.
+func TestWindowedAggregate_EmitEarly_Timer(t *testing.T) {
+	aggCols := []AggColumn{
+		{Alias: "cnt", IsAggregate: true, AggFunc: "COUNT", IsStar: true},
+	}
+
+	// Use a large window (10 minutes) so it never closes during the test.
+	windowSpec := WindowSpec{Type: "TUMBLING", Size: 10 * time.Minute, Advance: 10 * time.Minute}
+	watermark := NewWatermarkTracker(0)
+	eventTimeExpr := &ast.ColumnRef{Name: "ts"}
+
+	// EMIT EARLY every 50ms
+	op := NewWindowedAggregateOp(aggCols, nil, nil, windowSpec, eventTimeExpr, watermark, "EARLY", 50*time.Millisecond)
+
+	in := make(chan Record)
+	out := make(chan Record, 100)
+
+	base := time.Date(2026, 3, 28, 10, 0, 0, 0, time.UTC)
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		op.Process(in, out)
+	}()
+
+	// Send a record into the window.
+	in <- Record{
+		Columns: map[string]Value{
+			"ts": TextValue{V: base.Add(30 * time.Second).Format(time.RFC3339)},
+		},
+		Diff: 1,
+	}
+
+	// Wait enough time for at least one early emission (2 tick intervals).
+	time.Sleep(150 * time.Millisecond)
+
+	// Close input to stop processing.
+	close(in)
+	wg.Wait()
+
+	// Collect all results.
+	var results []Record
+	for {
+		select {
+		case r, ok := <-out:
+			if !ok {
+				goto done
+			}
+			results = append(results, r)
+		default:
+			goto done
+		}
+	}
+done:
+
+	// We should have at least one early emission (Diff=+1) BEFORE the final flush.
+	// The final flush also produces a result. So we expect at least 2 insertion records.
+	insertions := 0
+	for _, r := range results {
+		if r.Diff == 1 {
+			insertions++
+		}
+	}
+	if insertions < 2 {
+		t.Errorf("expected at least 2 insertions (early + final), got %d insertions out of %d total records", insertions, len(results))
+	}
+
+	// Every early-emitted record should have correct cnt value.
+	for _, r := range results {
+		if r.Diff == 1 {
+			cnt, ok := r.Columns["cnt"].(IntValue)
+			if !ok {
+				t.Errorf("cnt is not IntValue: %T", r.Columns["cnt"])
+				continue
+			}
+			if cnt.V != 1 {
+				t.Errorf("cnt = %d, want 1", cnt.V)
+			}
+		}
+	}
+}
+
+// TestWindowedAggregate_EmitEarly_RetractionOnUpdate verifies that when
+// partial results change between early emissions, proper retractions are sent.
+func TestWindowedAggregate_EmitEarly_RetractionOnUpdate(t *testing.T) {
+	aggCols := []AggColumn{
+		{Alias: "total", IsAggregate: true, AggFunc: "SUM", AggArg: &ast.ColumnRef{Name: "v"}},
+	}
+
+	// Large window so it never closes during the test.
+	windowSpec := WindowSpec{Type: "TUMBLING", Size: 10 * time.Minute, Advance: 10 * time.Minute}
+	watermark := NewWatermarkTracker(0)
+	eventTimeExpr := &ast.ColumnRef{Name: "ts"}
+
+	// EMIT EARLY every 50ms
+	op := NewWindowedAggregateOp(aggCols, nil, nil, windowSpec, eventTimeExpr, watermark, "EARLY", 50*time.Millisecond)
+
+	in := make(chan Record)
+	out := make(chan Record, 200)
+
+	base := time.Date(2026, 3, 28, 10, 0, 0, 0, time.UTC)
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		op.Process(in, out)
+	}()
+
+	// Send first record: SUM = 10
+	in <- Record{
+		Columns: map[string]Value{
+			"ts": TextValue{V: base.Add(10 * time.Second).Format(time.RFC3339)},
+			"v":  IntValue{V: 10},
+		},
+		Diff: 1,
+	}
+
+	// Wait for at least one early emission.
+	time.Sleep(100 * time.Millisecond)
+
+	// Send second record: SUM becomes 30
+	in <- Record{
+		Columns: map[string]Value{
+			"ts": TextValue{V: base.Add(20 * time.Second).Format(time.RFC3339)},
+			"v":  IntValue{V: 20},
+		},
+		Diff: 1,
+	}
+
+	// Wait for at least one more early emission with the updated value.
+	time.Sleep(100 * time.Millisecond)
+
+	// Close input.
+	close(in)
+	wg.Wait()
+
+	// Collect all results.
+	var results []Record
+	for {
+		select {
+		case r, ok := <-out:
+			if !ok {
+				goto done
+			}
+			results = append(results, r)
+		default:
+			goto done
+		}
+	}
+done:
+
+	if len(results) == 0 {
+		t.Fatal("expected results, got none")
+	}
+
+	// Verify we have at least one retraction (Diff=-1).
+	retractions := 0
+	for _, r := range results {
+		if r.Diff == -1 {
+			retractions++
+		}
+	}
+	if retractions < 1 {
+		t.Errorf("expected at least 1 retraction, got %d", retractions)
+	}
+
+	// The final record (last insertion) should have the correct total.
+	// Walk backwards to find the last Diff=+1 record.
+	var finalTotal Value
+	for i := len(results) - 1; i >= 0; i-- {
+		if results[i].Diff == 1 {
+			finalTotal = results[i].Columns["total"]
+			break
+		}
+	}
+	if finalTotal == nil {
+		t.Fatal("no final insertion found")
+	}
+
+	// Final total should be 30 (10 + 20).
+	switch v := finalTotal.(type) {
+	case IntValue:
+		if v.V != 30 {
+			t.Errorf("final total = %d, want 30", v.V)
+		}
+	default:
+		t.Errorf("final total type = %T, want IntValue", finalTotal)
+	}
+
+	// Verify that net sum of diffs makes sense: sum of (diff * total) should
+	// equal 30 (the final value). Each insertion adds its value, each retraction
+	// subtracts its value — the net should be the final result.
+	var netSum int64
+	for _, r := range results {
+		if total, ok := r.Columns["total"].(IntValue); ok {
+			netSum += int64(r.Diff) * total.V
+		}
+	}
+	if netSum != 30 {
+		t.Errorf("net sum of diffs = %d, want 30", netSum)
 	}
 }
