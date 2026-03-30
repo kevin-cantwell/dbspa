@@ -2,7 +2,7 @@ VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -ldflags "-X main.Version=$(VERSION)"
 BINARY := folddb
 
-.PHONY: build test test-unit test-integration test-all verify lint release clean docker-up docker-down testdata
+.PHONY: build test test-unit test-integration test-all verify bench lint release clean docker-up docker-down testdata
 
 build:
 	go build $(LDFLAGS) -o $(BINARY) ./cmd/folddb
@@ -35,6 +35,11 @@ test-all: test-unit test-integration verify
 
 verify: build
 	./scripts/verify.sh 10000
+
+bench: build
+	@echo "Running benchmarks (this may take a few minutes)..."
+	go test -tags bench -bench . -benchtime 1x -timeout 10m ./bench/ 2>&1 | tee bench/results.txt
+	@echo "Results saved to bench/results.txt"
 
 docker-up:
 	docker compose up -d
