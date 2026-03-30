@@ -52,7 +52,13 @@ func (s *TUISink) renderLoop() {
 		select {
 		case <-ticker.C:
 			s.mu.Lock()
-			if s.dirty {
+			needsRedraw := s.dirty
+			// Also redraw if the input counter changed (filter may have
+			// rejected records, but the footer should still update)
+			if !needsRedraw && s.InputCount != nil && s.linesDrawn > 0 {
+				needsRedraw = true
+			}
+			if needsRedraw {
 				s.redraw()
 				s.dirty = false
 			}
