@@ -858,6 +858,16 @@ func printQueryPlan(stmt *ast.SelectStatement) {
 		fmt.Fprintln(os.Stderr, "  Source: stdin")
 	}
 
+	// Join
+	if stmt.Join != nil {
+		fmt.Fprintf(os.Stderr, "  %s: %s", stmt.Join.Type, stmt.Join.Source.URI)
+		if stmt.Join.Alias != "" {
+			fmt.Fprintf(os.Stderr, " (alias: %s)", stmt.Join.Alias)
+		}
+		fmt.Fprintf(os.Stderr, "\n")
+		fmt.Fprintf(os.Stderr, "  ON: %s\n", exprString(stmt.Join.Condition))
+	}
+
 	// Format
 	if stmt.From != nil && stmt.From.Format != "" {
 		fmt.Fprintf(os.Stderr, "  Format: %s\n", stmt.From.Format)
@@ -947,6 +957,8 @@ func exprString(e ast.Expr) string {
 		return "*"
 	case *ast.ColumnRef:
 		return v.Name
+	case *ast.QualifiedRef:
+		return v.Qualifier + "." + v.Name
 	case *ast.NumberLiteral:
 		return v.Value
 	case *ast.StringLiteral:
