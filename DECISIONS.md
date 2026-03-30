@@ -1,0 +1,29 @@
+# FoldDB Decision Log
+
+This file tracks design decisions made during development. Each entry explains what was changed, why, what alternatives were considered, and trade-offs.
+
+---
+
+## Loop: Post-Join Feature Pass
+
+### 1. ORDER BY on accumulating queries
+
+**Status:** In progress
+
+**Problem:** ORDER BY is parsed but silently ignored for accumulating (GROUP BY) queries. The TUI and changelog output show rows in hash map insertion order, which is non-deterministic.
+
+**Design:**
+
+**Where to sort:**
+- **TUI mode:** Sort the in-memory row map before rendering each frame. This is cheap — we're already iterating all rows to render. Just sort `rowOrder` by the ORDER BY columns before drawing.
+- **Changelog mode (bounded, stdin EOF):** Emit diffs unsorted during streaming. At EOF, emit one final sorted snapshot. During streaming, ORDER BY is meaningless for changelog because diffs are temporal.
+- **Changelog mode (unbounded, Kafka):** ORDER BY applies to window close emissions only. Each window's results are sorted before emitting. Non-windowed unbounded queries: ORDER BY is a no-op with a warning.
+
+**Alternatives considered:**
+- Sort every changelog emission: O(n log n) per record, kills throughput. Rejected.
+- Reject ORDER BY on accumulating queries: too restrictive, TUI users expect sorted output.
+- Buffer all output and sort at end: only works for bounded inputs.
+
+**Decision:** Sort in TUI always, sort at EOF for bounded changelog, warn for unbounded changelog. This matches what the user expects in each context.
+
+---
