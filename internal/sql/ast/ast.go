@@ -17,6 +17,8 @@ type SelectStatement struct {
 	Distinct    bool
 	Columns     []Column
 	From        *TableSource  // nil means stdin
+	FromAlias   string        // optional alias for the FROM source
+	Join        *JoinClause   // nil means no JOIN
 	Where       Expr          // nil means no WHERE
 	GroupBy     []Expr        // nil means non-accumulating
 	Having      Expr          // nil means no HAVING
@@ -28,6 +30,16 @@ type SelectStatement struct {
 	OrderBy     []OrderByItem // nil means no ORDER BY
 	Limit       *int          // nil means no LIMIT
 }
+
+// JoinClause represents a JOIN clause in a SELECT statement.
+type JoinClause struct {
+	Type      string       // "JOIN" or "LEFT JOIN"
+	Source    *TableSource // the file/URI to join against
+	Alias     string       // optional alias
+	Condition Expr         // the ON expression
+}
+
+func (*JoinClause) nodeTag() {}
 
 func (*SelectStatement) nodeTag() {}
 
@@ -105,6 +117,15 @@ type ColumnRef struct {
 
 func (*ColumnRef) nodeTag() {}
 func (*ColumnRef) exprTag() {}
+
+// QualifiedRef represents a qualified column reference like alias.column.
+type QualifiedRef struct {
+	Qualifier string // the table alias (e.g., "e" in "e.user_id")
+	Name      string // the column name (e.g., "user_id")
+}
+
+func (*QualifiedRef) nodeTag() {}
+func (*QualifiedRef) exprTag() {}
 
 // NumberLiteral represents an integer or float literal.
 type NumberLiteral struct {

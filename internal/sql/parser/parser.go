@@ -56,11 +56,21 @@ func (p *Parser) parseSelect() (*ast.SelectStatement, error) {
 	// FROM (optional)
 	if p.lex.Peek().Type == lexer.TokenFrom {
 		p.lex.Next()
-		src, err := p.parseTableSource()
+		src, alias, err := p.parseTableSourceWithAlias()
 		if err != nil {
 			return nil, err
 		}
 		stmt.From = src
+		stmt.FromAlias = alias
+	}
+
+	// JOIN / LEFT JOIN (optional)
+	if p.lex.Peek().Type == lexer.TokenJoin || p.lex.Peek().Type == lexer.TokenLeft {
+		join, err := p.parseJoinClause()
+		if err != nil {
+			return nil, err
+		}
+		stmt.Join = join
 	}
 
 	// WHERE
@@ -299,6 +309,43 @@ func (p *Parser) parseSelectColumn() (ast.Column, error) {
 	return ast.Column{Expr: expr, Alias: alias}, nil
 }
 
+// parseTableSourceWithAlias parses a FROM source followed by an optional alias.
+// Supports both string literals ('kafka://...') and bare identifiers (stdin).
+func (p *Parser) parseTableSourceWithAlias() (*ast.TableSource, string, error) {
+	tok := p.lex.Peek()
+
+	var src *ast.TableSource
+	if tok.Type == lexer.TokenString {
+		// Quoted source URI: FROM 'kafka://...'
+		s, err := p.parseTableSource()
+		if err != nil {
+			return nil, "", err
+		}
+		src = s
+	} else if tok.Type == lexer.TokenIdent || lexer.IsKeyword(tok.Type) {
+		// Bare identifier: FROM stdin
+		p.lex.Next()
+		uri := tok.Literal
+		// Normalize: stdin -> stdin://
+		if strings.ToLower(uri) == "stdin" {
+			uri = "stdin://"
+		}
+		src = &ast.TableSource{URI: uri}
+	} else {
+		return nil, "", p.errorf(tok, "expected source URI or identifier after FROM, got %q", tok.Literal)
+	}
+
+	// Check for optional alias (identifier that's not a clause keyword and not JOIN/LEFT)
+	var alias string
+	next := p.lex.Peek()
+	if next.Type == lexer.TokenIdent && !isClauseKeyword(next.Type) {
+		p.lex.Next()
+		alias = next.Literal
+	}
+
+	return src, alias, nil
+}
+
 func (p *Parser) parseTableSource() (*ast.TableSource, error) {
 	tok := p.lex.Next()
 	if tok.Type != lexer.TokenString {
@@ -353,6 +400,52 @@ func (p *Parser) parseTableSource() (*ast.TableSource, error) {
 	}
 
 	return src, nil
+}
+
+// parseJoinClause parses [LEFT] JOIN <source> [alias] ON <condition>
+func (p *Parser) parseJoinClause() (*ast.JoinClause, error) {
+	joinType := "JOIN"
+	if p.lex.Peek().Type == lexer.TokenLeft {
+		p.lex.Next()
+		joinType = "LEFT JOIN"
+	}
+	if err := p.expect(lexer.TokenJoin); err != nil {
+		return nil, err
+	}
+
+	// Parse join source: string literal (file path)
+	tok := p.lex.Peek()
+	if tok.Type != lexer.TokenString {
+		return nil, p.errorf(tok, "expected file path string after JOIN, got %q", tok.Literal)
+	}
+	src, err := p.parseTableSource()
+	if err != nil {
+		return nil, err
+	}
+
+	// Parse optional alias
+	var alias string
+	next := p.lex.Peek()
+	if next.Type == lexer.TokenIdent && !isClauseKeyword(next.Type) {
+		p.lex.Next()
+		alias = next.Literal
+	}
+
+	// Parse ON condition
+	if err := p.expect(lexer.TokenOn); err != nil {
+		return nil, err
+	}
+	cond, err := p.parseExpr()
+	if err != nil {
+		return nil, err
+	}
+
+	return &ast.JoinClause{
+		Type:      joinType,
+		Source:    src,
+		Alias:     alias,
+		Condition: cond,
+	}, nil
 }
 
 func (p *Parser) parseWindowClause() (*ast.WindowClause, error) {
@@ -902,6 +995,20 @@ func (p *Parser) parseIdentOrFunction() (ast.Expr, error) {
 	tok := p.lex.Next()
 	name := tok.Literal
 
+	// Check for qualified reference: alias.column
+	if p.lex.Peek().Type == lexer.TokenDot {
+		p.lex.Next() // consume '.'
+		colTok := p.lex.Next()
+		if colTok.Type != lexer.TokenIdent && colTok.Type != lexer.TokenStar && !lexer.IsKeyword(colTok.Type) {
+			return nil, p.errorf(colTok, "expected column name after %q., got %q", name, colTok.Literal)
+		}
+		if colTok.Type == lexer.TokenStar {
+			// alias.* — return a QualifiedRef with "*" as the name
+			return &ast.QualifiedRef{Qualifier: name, Name: "*"}, nil
+		}
+		return &ast.QualifiedRef{Qualifier: name, Name: colTok.Literal}, nil
+	}
+
 	// Check if it's a function call (followed by '(')
 	if p.lex.Peek().Type == lexer.TokenLParen {
 		p.lex.Next() // consume '('
@@ -1021,7 +1128,7 @@ func isClauseKeyword(tt lexer.TokenType) bool {
 	case lexer.TokenFrom, lexer.TokenWhere, lexer.TokenGroup, lexer.TokenHaving,
 		lexer.TokenOrder, lexer.TokenLimit, lexer.TokenWindow, lexer.TokenEmit,
 		lexer.TokenEvent, lexer.TokenWatermark, lexer.TokenDeduplicate,
-		lexer.TokenFormat:
+		lexer.TokenFormat, lexer.TokenJoin, lexer.TokenLeft, lexer.TokenOn:
 		return true
 	}
 	return false
@@ -1068,6 +1175,10 @@ func tokenTypeName(tt lexer.TokenType) string {
 		return "'END'"
 	case lexer.TokenSelect:
 		return "'SELECT'"
+	case lexer.TokenJoin:
+		return "'JOIN'"
+	case lexer.TokenOn:
+		return "'ON'"
 	default:
 		return fmt.Sprintf("token(%d)", tt)
 	}
