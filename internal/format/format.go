@@ -51,6 +51,12 @@ func NewDecoderWithOptions(formatStr string, opts map[string]string) (Decoder, e
 	case "AVRO":
 		return &AvroOCFDecoder{}, nil
 	case "PROTOBUF":
+		// Check for typed protobuf via message= option
+		if opts != nil {
+			if msgType, ok := opts["message"]; ok && msgType != "" {
+				return &TypedProtobufDecoder{MessageType: msgType}, nil
+			}
+		}
 		return &ProtobufDecoder{}, nil
 	case "PARQUET":
 		return &ParquetDecoder{}, nil

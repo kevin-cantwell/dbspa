@@ -299,6 +299,36 @@ func BenchmarkFormat_Protobuf_GroupBy_100K(b *testing.B) {
 	b.ReportMetric(float64(100_000)/b.Elapsed().Seconds(), "records/sec")
 }
 
+// --- Typed Protobuf benchmarks ---
+
+func BenchmarkFormat_ProtoTyped_Passthrough_100K(b *testing.B) {
+	data := generateFixtureFormat(b, "orders", 100_000, "proto-typed")
+	b.SetBytes(int64(len(data)))
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		runFoldDB(b, data, "SELECT * FORMAT PROTOBUF(message='Order')")
+	}
+	b.ReportMetric(float64(100_000)/b.Elapsed().Seconds(), "records/sec")
+}
+
+func BenchmarkFormat_ProtoTyped_Filter_100K(b *testing.B) {
+	data := generateFixtureFormat(b, "orders", 100_000, "proto-typed")
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		runFoldDB(b, data, "SELECT * WHERE status = 'confirmed' FORMAT PROTOBUF(message='Order')")
+	}
+	b.ReportMetric(float64(100_000)/b.Elapsed().Seconds(), "records/sec")
+}
+
+func BenchmarkFormat_ProtoTyped_GroupBy_100K(b *testing.B) {
+	data := generateFixtureFormat(b, "orders", 100_000, "proto-typed")
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		runFoldDB(b, data, "SELECT product, region, COUNT(*), SUM(total) GROUP BY product, region FORMAT PROTOBUF(message='Order')")
+	}
+	b.ReportMetric(float64(100_000)/b.Elapsed().Seconds(), "records/sec")
+}
+
 // --- Parquet file benchmarks (--input) ---
 
 func BenchmarkFormat_Parquet_Passthrough_100K(b *testing.B) {

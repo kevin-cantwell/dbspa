@@ -1,0 +1,35 @@
+syntax = "proto3";
+
+package folddb;
+
+option go_package = "github.com/kevin-cantwell/folddb/proto/pb";
+
+message Order {
+  int64 order_id = 1;
+  int64 customer_id = 2;
+  string product = 3;
+  int64 quantity = 4;
+  double price = 5;
+  double total = 6;
+  string status = 7;
+  string region = 8;
+  string created_at = 9;
+}
+
+message Metric {
+  string endpoint = 1;
+  string method = 2;
+  int64 status_code = 3;
+  int64 latency_ms = 4;
+  string region = 5;
+  string timestamp = 6;
+}
+
+message Click {
+  string user_id = 1;
+  string page = 2;
+  string action = 3;
+  string session_id = 4;
+  int64 duration_ms = 5;
+  string timestamp = 6;
+}
