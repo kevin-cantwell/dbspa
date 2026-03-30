@@ -15,6 +15,7 @@ COUNT="${1:-10000}"
 SEED=42
 TMPDIR=$(mktemp -d)
 FOLDDB="${FOLDDB:-./folddb}"
+FOLDDB_GEN="${FOLDDB_GEN:-./folddb-gen}"
 DUCKDB="${DUCKDB:-duckdb}"
 
 # Colors
@@ -58,6 +59,11 @@ if [ ! -f "$FOLDDB" ]; then
   go build -o "$FOLDDB" ./cmd/folddb
 fi
 
+if [ ! -f "$FOLDDB_GEN" ]; then
+  echo "Building folddb-gen..."
+  go build -o "$FOLDDB_GEN" ./cmd/folddb-gen
+fi
+
 echo -e "${YELLOW}=== FoldDB vs DuckDB Verification ===${NC}"
 echo "Records: $COUNT  Seed: $SEED"
 echo ""
@@ -66,7 +72,7 @@ echo ""
 # 1. Generate plain orders fixture
 # ─────────────────────────────────────────────────────
 echo "Generating $COUNT orders..."
-"$FOLDDB" generate orders --count "$COUNT" --seed "$SEED" > "$TMPDIR/orders.ndjson"
+"$FOLDDB_GEN" orders --count "$COUNT" --seed "$SEED" > "$TMPDIR/orders.ndjson"
 echo ""
 
 echo -e "${YELLOW}--- Plain Orders Tests ---${NC}"
@@ -140,7 +146,7 @@ check "GROUP BY + HAVING" "$fdb" "$ddb"
 # ─────────────────────────────────────────────────────
 echo ""
 echo "Generating CDC events..."
-"$FOLDDB" generate orders-cdc --count "$COUNT" --seed "$SEED" > "$TMPDIR/orders_cdc.ndjson"
+"$FOLDDB_GEN" orders-cdc --count "$COUNT" --seed "$SEED" > "$TMPDIR/orders_cdc.ndjson"
 echo ""
 
 echo -e "${YELLOW}--- CDC Retraction Tests ---${NC}"

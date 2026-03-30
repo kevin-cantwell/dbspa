@@ -6,6 +6,7 @@ BINARY := folddb
 
 build:
 	go build $(LDFLAGS) -o $(BINARY) ./cmd/folddb
+	go build -o folddb-gen ./cmd/folddb-gen
 
 test: test-unit
 
@@ -55,4 +56,4 @@ testdata:
 	go run testdata/gen.go
 
 clean:
-	rm -rf dist/ $(BINARY)
+	rm -rf dist/ $(BINARY) folddb-gen
