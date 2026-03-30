@@ -65,7 +65,7 @@ The checkpoint is a performance optimization, not a correctness requirement. If 
 
 ### 3. EMIT EARLY timer
 
-**Status:** In progress
+**Status:** Implemented
 
 **Problem:** `EMIT EARLY '10 seconds'` is parsed and the config flows to the windowed aggregate operator, but the actual timer loop that triggers periodic partial result emissions was never built. Currently all windowed queries only emit on window close (EMIT FINAL).
 
@@ -82,5 +82,7 @@ In `WindowedAggregateOp.Process()`, when EMIT EARLY is configured:
 - For TUI mode this is fine (just redraws more often with fresher data)
 - For changelog mode this creates a lot of retraction noise
 - This is the expected behavior — users opt into it explicitly with EMIT EARLY
+
+**Result:** Implemented in 2 commits. Background ticker goroutine in Process() emits partial results at EmitInterval for all open windows. Tracks last-emitted values per window+group for proper retraction pairs. Mutex protects window state for concurrent access. At window close, retracts last early-emitted value before emitting final result. 2 new tests: timer-fires-before-close and retraction-on-update.
 
 ---
