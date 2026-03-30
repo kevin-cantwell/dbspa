@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"strings"
@@ -40,6 +41,9 @@ type QueryCmd struct {
 	// Positional SQL argument
 	SQL  string `arg:"" optional:"" help:"SQL query to execute."`
 	File string `short:"f" type:"existingfile" help:"Read SQL from file."`
+
+	// Input
+	Input string `short:"i" help:"Read input data from file (instead of stdin)." type:"existingfile"`
 
 	// Output
 	State   string        `help:"Write state to SQLite file." placeholder:"FILE"`
@@ -259,15 +263,24 @@ func run() error {
 		return fmt.Errorf("source type %q is not supported in v0. Supported: kafka://, stdin://", scheme)
 	}
 
-	// Default: stdin source
-	stdinSrc := &source.Stdin{Reader: os.Stdin}
+	// Default: stdin source (or --input file)
+	var reader io.Reader = os.Stdin
+	if q.Input != "" {
+		f, err := os.Open(q.Input)
+		if err != nil {
+			return fmt.Errorf("cannot open input file: %w", err)
+		}
+		defer f.Close()
+		reader = f
+	}
+	inputSrc := &source.Stdin{Reader: reader}
 	if isWindowed {
-		return runWindowed(runCtx, stmt, stdinSrc, dec, flags, dlWriter)
+		return runWindowed(runCtx, stmt, inputSrc, dec, flags, dlWriter)
 	}
 	if isAccumulating {
-		return runAccumulating(runCtx, stmt, stdinSrc, dec, dlWriter)
+		return runAccumulating(runCtx, stmt, inputSrc, dec, dlWriter)
 	}
-	return runNonAccumulating(runCtx, stmt, stdinSrc, dec, dlWriter)
+	return runNonAccumulating(runCtx, stmt, inputSrc, dec, dlWriter)
 }
 
 func getSQL(q *QueryCmd) (string, error) {
