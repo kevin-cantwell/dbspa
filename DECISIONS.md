@@ -139,10 +139,26 @@ folddb serve --port 8080 "SELECT region, COUNT(*) FROM 'kafka://broker/orders.cd
 
 ### 6. SEED FROM
 
-**Status:** Queued
+**Status:** Implemented
 
 **Problem:** Kafka retention is finite. SEED FROM bootstraps accumulators from a file before streaming.
 
 **Design:** Load seed file → process through accumulators → start stream. Simple blocking load for v0 (no timestamp-based handoff).
+
+**Syntax:**
+```sql
+SELECT region, COUNT(*) AS orders
+FROM 'kafka://broker/orders.cdc' FORMAT DEBEZIUM
+SEED FROM '/path/to/snapshot.parquet'
+GROUP BY region
+```
+
+**Implementation:**
+- Lexer: `TokenSeed` keyword. Parser: `parseSeedClause()` produces `SeedClause` AST node with `*TableSource` (reuses existing file path + FORMAT parsing).
+- Pipeline: seed records loaded via `loadTableFile()`, filtered through WHERE, then prepended to the stream channel before aggregation starts. Seed loading is synchronous — all seed records are processed before the first stream record.
+- Checkpoint interaction: if `--stateful` restores a checkpoint, seed is skipped (checkpoint is more recent). SEED FROM is the cold-start fallback.
+- Works with both accumulating (GROUP BY) and windowed queries.
+
+**Result:** Implemented in 3 commits. Parser + AST, pipeline wiring for both accumulating and windowed paths, 3 parser tests + 3 integration tests.
 
 ---
