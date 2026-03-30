@@ -132,7 +132,11 @@ func main() {
 
 // cliFlags holds parsed CLI flags, used by execution functions.
 type cliFlags struct {
-	stateDB string
+	stateDB            string
+	stateful           bool
+	stateDir           string
+	checkpointInterval time.Duration
+	sql                string // original SQL for fingerprinting
 }
 
 func run() error {
@@ -251,7 +255,11 @@ func run() error {
 
 	// Map CLI fields to cliFlags for execution functions
 	flags := cliFlags{
-		stateDB: q.State,
+		stateDB:            q.State,
+		stateful:           q.Stateful,
+		stateDir:           q.StateDir,
+		checkpointInterval: q.CheckpointInterval,
+		sql:                sql,
 	}
 
 	// Determine source and build record channel
@@ -288,7 +296,7 @@ func run() error {
 		return runWindowed(runCtx, stmt, inputSrc, dec, flags, dlWriter, joinOp)
 	}
 	if isAccumulating {
-		return runAccumulating(runCtx, stmt, inputSrc, dec, dlWriter, joinOp)
+		return runAccumulating(runCtx, stmt, inputSrc, dec, flags, dlWriter, joinOp)
 	}
 	return runNonAccumulating(runCtx, stmt, inputSrc, dec, dlWriter, joinOp)
 }
@@ -350,7 +358,7 @@ func runKafka(ctx context.Context, stmt *ast.SelectStatement, dec format.Decoder
 		return runWindowedFromRecords(ctx, stmt, finalCh, flags)
 	}
 	if isAccumulating {
-		return runAccumulatingFromRecords(ctx, stmt, finalCh)
+		return runAccumulatingFromRecords(ctx, stmt, finalCh, flags)
 	}
 	return runNonAccumulatingFromRecords(ctx, stmt, finalCh)
 }
@@ -452,7 +460,7 @@ func runNonAccumulatingFromRecords(ctx context.Context, stmt *ast.SelectStatemen
 	}
 }
 
-func runAccumulating(ctx context.Context, stmt *ast.SelectStatement, src *source.Stdin, dec format.Decoder, dl *deadLetterWriter, joinOp *engine.HashJoinOp) error {
+func runAccumulating(ctx context.Context, stmt *ast.SelectStatement, src *source.Stdin, dec format.Decoder, flags cliFlags, dl *deadLetterWriter, joinOp *engine.HashJoinOp) error {
 	// Stream decoders handle their own framing — bypass line-based reading.
 	if sd, ok := dec.(format.StreamDecoder); ok {
 		recordCh := make(chan engine.Record)
@@ -465,7 +473,7 @@ func runAccumulating(ctx context.Context, stmt *ast.SelectStatement, src *source
 		if joinOp != nil {
 			joined = applyJoin(ctx, joinOp, recordCh)
 		}
-		return runAccumulatingFromRecords(ctx, stmt, joined)
+		return runAccumulatingFromRecords(ctx, stmt, joined, flags)
 	}
 
 	// Decode raw lines into records
@@ -520,10 +528,10 @@ func runAccumulating(ctx context.Context, stmt *ast.SelectStatement, src *source
 		}
 	}()
 
-	return runAccumulatingFromFiltered(ctx, stmt, filteredCh, &inputCount)
+	return runAccumulatingFromFiltered(ctx, stmt, filteredCh, &inputCount, flags)
 }
 
-func runAccumulatingFromRecords(ctx context.Context, stmt *ast.SelectStatement, recordCh <-chan engine.Record) error {
+func runAccumulatingFromRecords(ctx context.Context, stmt *ast.SelectStatement, recordCh <-chan engine.Record, flags cliFlags) error {
 	filteredCh := make(chan engine.Record)
 	var inputCount atomic.Int64
 	go func() {
@@ -543,10 +551,10 @@ func runAccumulatingFromRecords(ctx context.Context, stmt *ast.SelectStatement, 
 			}
 		}
 	}()
-	return runAccumulatingFromFiltered(ctx, stmt, filteredCh, &inputCount)
+	return runAccumulatingFromFiltered(ctx, stmt, filteredCh, &inputCount, flags)
 }
 
-func runAccumulatingFromFiltered(ctx context.Context, stmt *ast.SelectStatement, filteredCh <-chan engine.Record, inputCount *atomic.Int64) error {
+func runAccumulatingFromFiltered(ctx context.Context, stmt *ast.SelectStatement, filteredCh <-chan engine.Record, inputCount *atomic.Int64, flags cliFlags) error {
 	aggCols, err := engine.ParseAggColumns(stmt.Columns, stmt.GroupBy)
 	if err != nil {
 		return fmt.Errorf("aggregate setup error: %w", err)
@@ -580,6 +588,73 @@ func runAccumulatingFromFiltered(ctx context.Context, stmt *ast.SelectStatement,
 		}
 	}
 
+	// Set up checkpointing if --stateful
+	var cpMgr *engine.CheckpointManager
+	if flags.stateful {
+		cpMgr, err = engine.NewCheckpointManager(flags.sql, flags.stateDir, flags.checkpointInterval)
+		if err != nil {
+			return fmt.Errorf("checkpoint setup error: %w", err)
+		}
+
+		// Restore from existing checkpoint
+		cp, loadErr := cpMgr.Load()
+		if loadErr != nil {
+			fmt.Fprintf(os.Stderr, "Warning: cannot load checkpoint: %v (starting fresh)\n", loadErr)
+		} else if cp != nil && cp.State != nil {
+			if restoreErr := aggOp.UnmarshalState(cp.State); restoreErr != nil {
+				fmt.Fprintf(os.Stderr, "Warning: cannot restore state: %v (starting fresh)\n", restoreErr)
+			} else {
+				// Re-emit current state to sink so TUI/changelog shows existing data
+				for _, rec := range aggOp.CurrentState() {
+					if writeErr := snk.Write(rec); writeErr != nil {
+						return fmt.Errorf("output error during state restore: %w", writeErr)
+					}
+				}
+			}
+		}
+	}
+
+	// saveCheckpoint is a helper for periodic and final saves.
+	saveCheckpoint := func() {
+		if cpMgr == nil {
+			return
+		}
+		stateBytes, marshalErr := aggOp.MarshalState()
+		if marshalErr != nil {
+			fmt.Fprintf(os.Stderr, "Warning: checkpoint marshal error: %v\n", marshalErr)
+			return
+		}
+		cpData := &engine.CheckpointData{
+			State: stateBytes,
+		}
+		if saveErr := cpMgr.Save(cpData); saveErr != nil {
+			fmt.Fprintf(os.Stderr, "Warning: checkpoint save error: %v\n", saveErr)
+		}
+	}
+
+	// Start periodic checkpoint ticker
+	var ticker *time.Ticker
+	var tickerDone chan struct{}
+	if cpMgr != nil {
+		interval := flags.checkpointInterval
+		if interval == 0 {
+			interval = 5 * time.Second
+		}
+		ticker = time.NewTicker(interval)
+		tickerDone = make(chan struct{})
+		go func() {
+			defer close(tickerDone)
+			for {
+				select {
+				case <-ticker.C:
+					saveCheckpoint()
+				case <-ctx.Done():
+					return
+				}
+			}
+		}()
+	}
+
 	aggOutCh := make(chan engine.Record)
 	go func() {
 		aggOp.Process(filteredCh, aggOutCh)
@@ -587,23 +662,37 @@ func runAccumulatingFromFiltered(ctx context.Context, stmt *ast.SelectStatement,
 
 	limit := stmt.Limit
 	count := 0
+	var exitErr error
+loop:
 	for {
 		select {
 		case rec, ok := <-aggOutCh:
 			if !ok {
-				return snk.Close()
+				exitErr = snk.Close()
+				break loop
 			}
 			if limit != nil && count >= *limit {
-				return snk.Close()
+				exitErr = snk.Close()
+				break loop
 			}
 			if err := snk.Write(rec); err != nil {
-				return fmt.Errorf("output error: %w", err)
+				exitErr = fmt.Errorf("output error: %w", err)
+				break loop
 			}
 			count++
 		case <-ctx.Done():
-			return snk.Close()
+			exitErr = snk.Close()
+			break loop
 		}
 	}
+
+	// Final checkpoint save at shutdown
+	if ticker != nil {
+		ticker.Stop()
+	}
+	saveCheckpoint()
+
+	return exitErr
 }
 
 // runWindowed handles windowed aggregation from stdin source.
