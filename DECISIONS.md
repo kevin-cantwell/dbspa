@@ -59,6 +59,28 @@ The checkpoint is a performance optimization, not a correctness requirement. If 
 - `runWindowedFromRecords()` — save after each window close (not yet wired)
 - The aggregate operator needs `Marshal()/Unmarshal()` at the operator level (not just individual accumulators)
 
-**Result:** Implemented in 3 commits. AggregateOp has MarshalState/UnmarshalState/CurrentState methods with column metadata validation. Pipeline wiring in runAccumulatingFromFiltered: restore on startup, periodic ticker save, final save at shutdown. Mutex protects group map for concurrent checkpoint saves. 3 new integration tests cover round-trip, schema mismatch, and full end-to-end save/restore/continue.
+**Result:** Implemented in 4 commits. AggregateOp has MarshalState/UnmarshalState/CurrentState methods with column metadata validation. Pipeline wiring in runAccumulatingFromFiltered: restore on startup, periodic ticker save, final save at shutdown. RWMutex protects group map for concurrent checkpoint saves. 3 new integration tests.
+
+---
+
+### 3. EMIT EARLY timer
+
+**Status:** In progress
+
+**Problem:** `EMIT EARLY '10 seconds'` is parsed and the config flows to the windowed aggregate operator, but the actual timer loop that triggers periodic partial result emissions was never built. Currently all windowed queries only emit on window close (EMIT FINAL).
+
+**Design:**
+
+In `WindowedAggregateOp.Process()`, when EMIT EARLY is configured:
+- Start a background goroutine with a `time.Ticker` at the specified interval
+- On each tick: iterate all open windows, emit current accumulator state for each group as a retraction+insertion pair
+- The emission is the current partial result — it will be retracted and replaced on the next tick or at window close
+- At window close: emit final result (same as EMIT FINAL), stop early emissions for that window
+
+**Trade-offs:**
+- Early emissions increase output volume significantly (every group in every open window emits per tick)
+- For TUI mode this is fine (just redraws more often with fresher data)
+- For changelog mode this creates a lot of retraction noise
+- This is the expected behavior — users opt into it explicitly with EMIT EARLY
 
 ---
