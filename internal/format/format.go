@@ -3,6 +3,7 @@ package format
 
 import (
 	"fmt"
+	"io"
 	"strings"
 
 	"github.com/kevin-cantwell/folddb/internal/engine"
@@ -20,6 +21,15 @@ type MultiDecoder interface {
 	Decoder
 	// DecodeMulti parses raw bytes into zero or more Records.
 	DecodeMulti(data []byte) ([]engine.Record, error)
+}
+
+// StreamDecoder reads from a binary stream and sends records to a channel.
+// Unlike Decoder (which processes individual lines), StreamDecoder handles
+// its own framing (e.g., Avro OCF blocks, length-delimited Protobuf).
+type StreamDecoder interface {
+	// DecodeStream reads from r and sends decoded records to ch.
+	// It closes ch when the reader is exhausted or an error occurs.
+	DecodeStream(r io.Reader, ch chan<- engine.Record) error
 }
 
 // NewDecoder returns the appropriate decoder for the given format string.

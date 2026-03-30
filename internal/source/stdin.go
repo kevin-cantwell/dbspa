@@ -11,6 +11,12 @@ type Stdin struct {
 	Reader io.Reader
 }
 
+// ReadRaw returns the underlying io.Reader for binary stream consumption.
+// Use this instead of Read() when the format decoder handles its own framing.
+func (s *Stdin) ReadRaw() io.Reader {
+	return s.Reader
+}
+
 // Read starts reading lines from stdin and returns a channel of raw bytes.
 func (s *Stdin) Read() <-chan []byte {
 	ch := make(chan []byte, 1024)
