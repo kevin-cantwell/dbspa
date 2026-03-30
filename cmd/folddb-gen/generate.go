@@ -24,7 +24,8 @@ type GenerateCmd struct {
 	Count   int    `help:"Number of records to generate (0=infinite)." default:"10000"`
 	Rate    int    `help:"Records per second (0=unlimited/burst)." default:"0"`
 	Seed    int64  `help:"Random seed for reproducible output." default:"0"`
-	Format  string `help:"Output format: ndjson, avro, protobuf." default:"ndjson" enum:"ndjson,avro,protobuf"`
+	Format  string `help:"Output format: ndjson, avro, protobuf, parquet." default:"ndjson" enum:"ndjson,avro,protobuf,parquet"`
+	Output  string `help:"Output file (required for parquet)." short:"o" placeholder:"FILE"`
 }
 
 func (c *GenerateCmd) Run() error {
@@ -70,6 +71,9 @@ func (c *GenerateCmd) Run() error {
 			return err
 		}
 		encoder = enc
+	case "parquet":
+		// Parquet is file-only — write directly and return
+		return writeParquet(c.Dataset, c.Count, rng, c.Output)
 	}
 
 	// Rate limiter

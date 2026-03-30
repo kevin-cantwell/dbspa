@@ -43,6 +43,37 @@ func generateFixtureFormat(b *testing.B, dataset string, count int, format strin
 	return out.Bytes()
 }
 
+// generateParquetFile writes a Parquet file to a temp path and returns the path.
+func generateParquetFile(b *testing.B, dataset string, count int) string {
+	b.Helper()
+	f, err := os.CreateTemp("", "bench-*.parquet")
+	if err != nil {
+		b.Fatalf("cannot create temp file: %v", err)
+	}
+	path := f.Name()
+	f.Close()
+	b.Cleanup(func() { os.Remove(path) })
+
+	cmd := exec.Command(genBin, dataset, "--count", fmt.Sprintf("%d", count), "--seed", "42", "--format", "parquet", "--output", path)
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		b.Fatalf("folddb-gen --format parquet failed: %v", err)
+	}
+	return path
+}
+
+func runFoldDBFile(b *testing.B, inputFile string, sql string) []byte {
+	b.Helper()
+	cmd := exec.Command(folddbBin, "query", "--input", inputFile, sql)
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		b.Fatalf("folddb --input failed: %v", err)
+	}
+	return out.Bytes()
+}
+
 func runFoldDB(b *testing.B, input []byte, sql string) []byte {
 	b.Helper()
 	cmd := exec.Command(folddbBin, "query", sql)
@@ -264,6 +295,35 @@ func BenchmarkFormat_Protobuf_GroupBy_100K(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		runFoldDB(b, data, "SELECT product, region, COUNT(*), SUM(total) GROUP BY product, region FORMAT PROTOBUF")
+	}
+	b.ReportMetric(float64(100_000)/b.Elapsed().Seconds(), "records/sec")
+}
+
+// --- Parquet file benchmarks (--input) ---
+
+func BenchmarkFormat_Parquet_Passthrough_100K(b *testing.B) {
+	path := generateParquetFile(b, "orders", 100_000)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		runFoldDBFile(b, path, "SELECT * FORMAT PARQUET")
+	}
+	b.ReportMetric(float64(100_000)/b.Elapsed().Seconds(), "records/sec")
+}
+
+func BenchmarkFormat_Parquet_Filter_100K(b *testing.B) {
+	path := generateParquetFile(b, "orders", 100_000)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		runFoldDBFile(b, path, "SELECT * WHERE status = 'confirmed' FORMAT PARQUET")
+	}
+	b.ReportMetric(float64(100_000)/b.Elapsed().Seconds(), "records/sec")
+}
+
+func BenchmarkFormat_Parquet_GroupBy_100K(b *testing.B) {
+	path := generateParquetFile(b, "orders", 100_000)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		runFoldDBFile(b, path, "SELECT product, region, COUNT(*), SUM(total) GROUP BY product, region FORMAT PARQUET")
 	}
 	b.ReportMetric(float64(100_000)/b.Elapsed().Seconds(), "records/sec")
 }
