@@ -4,8 +4,10 @@ import (
 	"bufio"
 	"encoding/json"
 	"io"
+	"slices"
 	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/kevin-cantwell/folddb/internal/engine"
 )
@@ -15,7 +17,9 @@ import (
 type ChangelogSink struct {
 	Writer      io.Writer
 	ColumnOrder []string
+	OrderBy     []OrderBySpec // optional ORDER BY for sorted final snapshot at Close()
 	bw          *bufio.Writer
+	rows        map[string]map[string]engine.Value // accumulated state for final snapshot
 }
 
 func (s *ChangelogSink) writer() *bufio.Writer {
@@ -26,7 +30,34 @@ func (s *ChangelogSink) writer() *bufio.Writer {
 }
 
 // Write serializes the record as a changelog JSON line with an "op" field.
+// When OrderBy is set, it also accumulates the current state for a sorted final snapshot.
 func (s *ChangelogSink) Write(rec engine.Record) error {
+	// Always emit the streaming diff
+	if err := s.writeRecord(rec); err != nil {
+		return err
+	}
+
+	// Accumulate state for sorted final snapshot
+	if len(s.OrderBy) > 0 {
+		if s.rows == nil {
+			s.rows = make(map[string]map[string]engine.Value)
+		}
+		key := s.rowKey(rec)
+		if rec.Diff < 0 {
+			delete(s.rows, key)
+		} else {
+			row := make(map[string]engine.Value, len(rec.Columns))
+			for k, v := range rec.Columns {
+				row[k] = v
+			}
+			s.rows[key] = row
+		}
+	}
+
+	return nil
+}
+
+func (s *ChangelogSink) writeRecord(rec engine.Record) error {
 	w := s.writer()
 	op := "+"
 	if rec.Diff < 0 {
@@ -64,12 +95,60 @@ func (s *ChangelogSink) Write(rec engine.Record) error {
 	return nil
 }
 
-// Close flushes the buffered writer.
+// Close flushes the buffered writer. If OrderBy is set and there are accumulated rows,
+// it emits a final sorted snapshot after the normal diffs.
 func (s *ChangelogSink) Close() error {
+	if len(s.OrderBy) > 0 && len(s.rows) > 0 {
+		// Collect and sort keys
+		keys := make([]string, 0, len(s.rows))
+		for k := range s.rows {
+			keys = append(keys, k)
+		}
+		slices.SortFunc(keys, func(a, b string) int {
+			rowA := s.rows[a]
+			rowB := s.rows[b]
+			for _, spec := range s.OrderBy {
+				va := rowA[spec.Column]
+				vb := rowB[spec.Column]
+				c := CompareValues(va, vb)
+				if spec.Desc {
+					c = -c
+				}
+				if c != 0 {
+					return c
+				}
+			}
+			return 0
+		})
+
+		// Emit sorted final snapshot as insert records
+		for _, key := range keys {
+			row := s.rows[key]
+			rec := engine.Record{
+				Columns: row,
+				Diff:    1,
+			}
+			if err := s.writeRecord(rec); err != nil {
+				return err
+			}
+		}
+	}
 	if s.bw != nil {
 		return s.bw.Flush()
 	}
 	return nil
+}
+
+func (s *ChangelogSink) rowKey(rec engine.Record) string {
+	var parts []string
+	for _, col := range s.ColumnOrder {
+		if v, ok := rec.Columns[col]; ok {
+			parts = append(parts, v.String())
+		} else {
+			parts = append(parts, "NULL")
+		}
+	}
+	return strings.Join(parts, "\x00")
 }
 
 func writeValue(w *bufio.Writer, v engine.Value) {

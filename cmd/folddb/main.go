@@ -559,11 +559,15 @@ func runAccumulatingFromFiltered(ctx context.Context, stmt *ast.SelectStatement,
 
 	aggOp := engine.NewAggregateOp(aggCols, stmt.GroupBy, stmt.Having)
 
+	// Convert AST ORDER BY to sink OrderBySpec
+	orderBy := resolveOrderBy(stmt.OrderBy)
+
 	var snk sink.Sink
 	if isTTY() {
 		tui := &sink.TUISink{
 			Writer:      os.Stdout,
 			ColumnOrder: columnOrder,
+			OrderBy:     orderBy,
 		}
 		tui.InputCount = inputCount
 		tui.Start()
@@ -572,6 +576,7 @@ func runAccumulatingFromFiltered(ctx context.Context, stmt *ast.SelectStatement,
 		snk = &sink.ChangelogSink{
 			Writer:      os.Stdout,
 			ColumnOrder: columnOrder,
+			OrderBy:     orderBy,
 		}
 	}
 
@@ -991,6 +996,31 @@ func exprString(e ast.Expr) string {
 	default:
 		return fmt.Sprintf("%T", e)
 	}
+}
+
+// resolveOrderBy converts AST ORDER BY items to sink OrderBySpec.
+// It resolves column references to their output names.
+func resolveOrderBy(items []ast.OrderByItem) []sink.OrderBySpec {
+	if len(items) == 0 {
+		return nil
+	}
+	specs := make([]sink.OrderBySpec, 0, len(items))
+	for _, item := range items {
+		col := ""
+		switch e := item.Expr.(type) {
+		case *ast.ColumnRef:
+			col = e.Name
+		default:
+			// For non-column-ref expressions, use the string representation.
+			// This handles aliases that match aggregate output column names.
+			col = exprString(item.Expr)
+		}
+		specs = append(specs, sink.OrderBySpec{
+			Column: col,
+			Desc:   item.Desc,
+		})
+	}
+	return specs
 }
 
 // hasAggregateInSelect returns true if any column in the SELECT list is an aggregate function.
