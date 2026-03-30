@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 
@@ -914,3 +915,203 @@ func TestE2EGroupByRegression(t *testing.T) {
 		})
 	}
 }
+
+// runJoinQuery is a test helper for queries with JOINs.
+// It loads the table file, builds the join operator, and runs through the pipeline.
+func runJoinQuery(t *testing.T, sql string, inputLines []string, tableFile string) []map[string]any {
+	t.Helper()
+
+	p := parser.New(sql)
+	stmt, err := p.Parse()
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	if stmt.Join == nil {
+		t.Fatal("expected JOIN clause")
+	}
+
+	// Build join operator
+	tableFormat := ""
+	if stmt.Join.Source != nil {
+		tableFormat = stmt.Join.Source.Format
+	}
+	tableRecords, err := loadTableFile(tableFile, tableFormat)
+	if err != nil {
+		t.Fatalf("table load error: %v", err)
+	}
+
+	streamAlias := stmt.FromAlias
+	tableAlias := stmt.Join.Alias
+	streamKey, tableKey, err := engine.ExtractEquiJoinKeys(stmt.Join.Condition, streamAlias, tableAlias)
+	if err != nil {
+		t.Fatalf("key extraction error: %v", err)
+	}
+
+	joinOp := &engine.HashJoinOp{
+		StreamKeyExpr: streamKey,
+		TableKeyExpr:  tableKey,
+		LeftJoin:      stmt.Join.Type == "LEFT JOIN",
+		StreamAlias:   streamAlias,
+		TableAlias:    tableAlias,
+	}
+	if err := joinOp.BuildIndex(tableRecords); err != nil {
+		t.Fatalf("index build error: %v", err)
+	}
+
+	pipeline := &engine.Pipeline{
+		Columns: stmt.Columns,
+		Where:   stmt.Where,
+	}
+
+	dec := &format.JSONDecoder{}
+	var outBuf bytes.Buffer
+	snk := &sink.JSONSink{Writer: &outBuf}
+
+	recordCh := make(chan engine.Record)
+	joinedCh := make(chan engine.Record)
+	outputCh := make(chan engine.Record)
+
+	// Decode input
+	go func() {
+		defer close(recordCh)
+		for _, line := range inputLines {
+			line = strings.TrimSpace(line)
+			if line == "" {
+				continue
+			}
+			rec, err := dec.Decode([]byte(line))
+			if err != nil {
+				t.Errorf("decode error: %v", err)
+				continue
+			}
+			recordCh <- rec
+		}
+	}()
+
+	// Apply join
+	go func() {
+		defer close(joinedCh)
+		for rec := range recordCh {
+			for _, jr := range joinOp.Probe(rec) {
+				joinedCh <- jr
+			}
+		}
+	}()
+
+	// Run pipeline
+	go func() {
+		pipeline.Process(joinedCh, outputCh)
+	}()
+
+	// Collect output
+	for rec := range outputCh {
+		if err := snk.Write(rec); err != nil {
+			t.Fatalf("sink error: %v", err)
+		}
+	}
+	snk.Close()
+
+	// Parse output
+	var results []map[string]any
+	for _, line := range strings.Split(strings.TrimSpace(outBuf.String()), "\n") {
+		if line == "" {
+			continue
+		}
+		var m map[string]any
+		if err := json.Unmarshal([]byte(line), &m); err != nil {
+			t.Fatalf("output parse error: %v\nline: %s", err, line)
+		}
+		results = append(results, m)
+	}
+	return results
+}
+
+func TestJoinInnerIntegration(t *testing.T) {
+	// Write table file
+	tableFile := t.TempDir() + "/users.ndjson"
+	tableData := `{"id":1,"name":"Alice","email":"alice@example.com"}
+{"id":2,"name":"Bob","email":"bob@example.com"}
+{"id":3,"name":"Charlie","email":"charlie@example.com"}`
+	if err := writeFile(tableFile, tableData); err != nil {
+		t.Fatal(err)
+	}
+
+	input := []string{
+		`{"user_id":1,"action":"login"}`,
+		`{"user_id":2,"action":"purchase"}`,
+		`{"user_id":99,"action":"logout"}`,
+	}
+
+	sql := "SELECT e.user_id, u.name, e.action FROM stdin e JOIN '" + tableFile + "' u ON e.user_id = u.id"
+	results := runJoinQuery(t, sql, input, tableFile)
+
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d: %v", len(results), results)
+	}
+
+	// user 1 matched
+	if results[0]["user_id"] != float64(1) {
+		t.Errorf("result[0] user_id: got %v", results[0]["user_id"])
+	}
+	if results[0]["name"] != "Alice" {
+		t.Errorf("result[0] name: got %v", results[0]["name"])
+	}
+}
+
+func TestJoinLeftIntegration(t *testing.T) {
+	tableFile := t.TempDir() + "/users.ndjson"
+	tableData := `{"id":1,"name":"Alice"}
+{"id":2,"name":"Bob"}`
+	if err := writeFile(tableFile, tableData); err != nil {
+		t.Fatal(err)
+	}
+
+	input := []string{
+		`{"user_id":1,"action":"login"}`,
+		`{"user_id":99,"action":"logout"}`,
+	}
+
+	sql := "SELECT e.user_id, u.name, e.action FROM stdin e LEFT JOIN '" + tableFile + "' u ON e.user_id = u.id"
+	results := runJoinQuery(t, sql, input, tableFile)
+
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d: %v", len(results), results)
+	}
+
+	// user 99 should have null name
+	if results[1]["name"] != nil {
+		t.Errorf("expected null name for unmatched row, got %v", results[1]["name"])
+	}
+	if results[1]["user_id"] != float64(99) {
+		t.Errorf("expected user_id=99, got %v", results[1]["user_id"])
+	}
+}
+
+func TestJoinWithWhereIntegration(t *testing.T) {
+	tableFile := t.TempDir() + "/users.ndjson"
+	tableData := `{"id":1,"name":"Alice"}
+{"id":2,"name":"Bob"}`
+	if err := writeFile(tableFile, tableData); err != nil {
+		t.Fatal(err)
+	}
+
+	input := []string{
+		`{"user_id":1,"action":"login"}`,
+		`{"user_id":2,"action":"purchase"}`,
+	}
+
+	sql := "SELECT e.user_id, u.name FROM stdin e JOIN '" + tableFile + "' u ON e.user_id = u.id WHERE e.action = 'login'"
+	results := runJoinQuery(t, sql, input, tableFile)
+
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result after WHERE, got %d: %v", len(results), results)
+	}
+	if results[0]["name"] != "Alice" {
+		t.Errorf("expected Alice, got %v", results[0]["name"])
+	}
+}
+
+func writeFile(path, content string) error {
+	return os.WriteFile(path, []byte(content), 0644)
+}
+
