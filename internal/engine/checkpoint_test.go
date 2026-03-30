@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/kevin-cantwell/folddb/internal/sql/ast"
 )
 
 // TC-CKPT-001: Basic save and restore cycle
@@ -315,5 +317,216 @@ func TestCheckpointMultipleSaves(t *testing.T) {
 	json.Unmarshal(loaded.State, &state)
 	if state["version"] != float64(4) {
 		t.Errorf("last save should win, got version %v", state["version"])
+	}
+}
+
+// --- Stateful AggregateOp integration tests ---
+
+// buildMultiAggOp creates an AggregateOp for:
+//
+//	SELECT g, COUNT(*) AS cnt, SUM(val) AS total GROUP BY g
+func buildMultiAggOp() *AggregateOp {
+	columns := []AggColumn{
+		{Alias: "g", Expr: &ast.ColumnRef{Name: "g"}, GroupByIdx: 0},
+		{Alias: "cnt", IsAggregate: true, AggFunc: "COUNT", IsStar: true, GroupByIdx: -1},
+		{Alias: "total", IsAggregate: true, AggFunc: "SUM", AggArg: &ast.ColumnRef{Name: "val"}, GroupByIdx: -1},
+	}
+	groupBy := []ast.Expr{&ast.ColumnRef{Name: "g"}}
+	return NewAggregateOp(columns, groupBy, nil)
+}
+
+// TestAggregateOp_MarshalUnmarshalRoundTrip tests that accumulator state
+// survives a marshal/unmarshal cycle and continues accumulating correctly.
+func TestAggregateOp_MarshalUnmarshalRoundTrip(t *testing.T) {
+	op := buildMultiAggOp()
+
+	// Phase 1: feed initial records
+	records := []Record{
+		mkRec(1, map[string]Value{"g": TextValue{V: "a"}, "val": IntValue{V: 10}}),
+		mkRec(1, map[string]Value{"g": TextValue{V: "b"}, "val": IntValue{V: 20}}),
+		mkRec(1, map[string]Value{"g": TextValue{V: "a"}, "val": IntValue{V: 30}}),
+	}
+	processAndCollect(op, records)
+
+	// Marshal state
+	data, err := op.MarshalState()
+	if err != nil {
+		t.Fatalf("MarshalState: %v", err)
+	}
+
+	// Unmarshal into a fresh op
+	op2 := buildMultiAggOp()
+	if err := op2.UnmarshalState(data); err != nil {
+		t.Fatalf("UnmarshalState: %v", err)
+	}
+
+	// Verify restored state via CurrentState
+	state := op2.CurrentState()
+	if len(state) != 2 {
+		t.Fatalf("expected 2 groups, got %d", len(state))
+	}
+
+	type gv struct{ cnt, total int64 }
+	groups := make(map[string]gv)
+	for _, rec := range state {
+		g := rec.Columns["g"].String()
+		cnt := rec.Columns["cnt"].(IntValue).V
+		total := rec.Columns["total"].(IntValue).V
+		groups[g] = gv{cnt, total}
+	}
+
+	if g := groups["a"]; g.cnt != 2 || g.total != 40 {
+		t.Errorf("group 'a': cnt=%d (want 2), total=%d (want 40)", g.cnt, g.total)
+	}
+	if g := groups["b"]; g.cnt != 1 || g.total != 20 {
+		t.Errorf("group 'b': cnt=%d (want 1), total=%d (want 20)", g.cnt, g.total)
+	}
+
+	// Phase 2: feed more records after restore — accumulation should continue
+	more := []Record{
+		mkRec(1, map[string]Value{"g": TextValue{V: "a"}, "val": IntValue{V: 5}}),
+		mkRec(1, map[string]Value{"g": TextValue{V: "c"}, "val": IntValue{V: 100}}),
+	}
+	results := processAndCollect(op2, more)
+	if len(results) == 0 {
+		t.Fatal("expected output records after resumed processing")
+	}
+
+	finalState := op2.CurrentState()
+	finalGroups := make(map[string]gv)
+	for _, rec := range finalState {
+		g := rec.Columns["g"].String()
+		cnt := rec.Columns["cnt"].(IntValue).V
+		total := rec.Columns["total"].(IntValue).V
+		finalGroups[g] = gv{cnt, total}
+	}
+
+	if g := finalGroups["a"]; g.cnt != 3 || g.total != 45 {
+		t.Errorf("group 'a' after resume: cnt=%d (want 3), total=%d (want 45)", g.cnt, g.total)
+	}
+	if g := finalGroups["b"]; g.cnt != 1 || g.total != 20 {
+		t.Errorf("group 'b' after resume: cnt=%d (want 1), total=%d (want 20)", g.cnt, g.total)
+	}
+	if g := finalGroups["c"]; g.cnt != 1 || g.total != 100 {
+		t.Errorf("group 'c' after resume: cnt=%d (want 1), total=%d (want 100)", g.cnt, g.total)
+	}
+}
+
+// TestAggregateOp_UnmarshalState_ColumnMismatch verifies that restoring
+// into an op with a different schema produces an error.
+func TestAggregateOp_UnmarshalState_ColumnMismatch(t *testing.T) {
+	op := buildMultiAggOp()
+	records := []Record{
+		mkRec(1, map[string]Value{"g": TextValue{V: "a"}, "val": IntValue{V: 10}}),
+	}
+	processAndCollect(op, records)
+
+	data, err := op.MarshalState()
+	if err != nil {
+		t.Fatalf("MarshalState: %v", err)
+	}
+
+	// Different schema: COUNT only, no SUM
+	diffOp := buildSimpleAggOp("g", "COUNT", "*", "cnt", nil)
+	if err := diffOp.UnmarshalState(data); err == nil {
+		t.Fatal("expected error on column mismatch, got nil")
+	}
+}
+
+// TestStatefulEndToEnd_CheckpointSaveRestore simulates the full stateful
+// pipeline: run query, checkpoint, restart with same query, verify continuation.
+func TestStatefulEndToEnd_CheckpointSaveRestore(t *testing.T) {
+	tmpDir := t.TempDir()
+	stateDir := filepath.Join(tmpDir, "state")
+
+	sql := "SELECT g, COUNT(*) AS cnt FROM stream GROUP BY g"
+
+	// --- Run 1: Process some records and checkpoint ---
+	mgr, err := NewCheckpointManager(sql, stateDir, time.Second)
+	if err != nil {
+		t.Fatalf("NewCheckpointManager: %v", err)
+	}
+
+	op := buildSimpleAggOp("g", "COUNT", "*", "cnt", nil)
+	records := []Record{
+		mkRec(1, map[string]Value{"g": TextValue{V: "x"}}),
+		mkRec(1, map[string]Value{"g": TextValue{V: "y"}}),
+		mkRec(1, map[string]Value{"g": TextValue{V: "x"}}),
+	}
+	processAndCollect(op, records)
+
+	// Save checkpoint
+	stateBytes, err := op.MarshalState()
+	if err != nil {
+		t.Fatalf("MarshalState: %v", err)
+	}
+	if err := mgr.Save(&CheckpointData{State: stateBytes}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	// Verify checkpoint file exists
+	cpPath := filepath.Join(stateDir, "checkpoint.json")
+	if _, err := os.Stat(cpPath); err != nil {
+		t.Fatalf("checkpoint file not found: %v", err)
+	}
+
+	// --- Run 2: Restart, restore, process more records ---
+	mgr2, err := NewCheckpointManager(sql, stateDir, time.Second)
+	if err != nil {
+		t.Fatalf("NewCheckpointManager: %v", err)
+	}
+
+	loaded, err := mgr2.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if loaded == nil {
+		t.Fatal("expected checkpoint data, got nil")
+	}
+
+	op2 := buildSimpleAggOp("g", "COUNT", "*", "cnt", nil)
+	if err := op2.UnmarshalState(loaded.State); err != nil {
+		t.Fatalf("UnmarshalState: %v", err)
+	}
+
+	// Verify restored state
+	restored := op2.CurrentState()
+	restoredMap := make(map[string]int64)
+	for _, rec := range restored {
+		g := rec.Columns["g"].String()
+		cnt := rec.Columns["cnt"].(IntValue).V
+		restoredMap[g] = cnt
+	}
+	if restoredMap["x"] != 2 {
+		t.Errorf("restored group 'x': cnt=%d, want 2", restoredMap["x"])
+	}
+	if restoredMap["y"] != 1 {
+		t.Errorf("restored group 'y': cnt=%d, want 1", restoredMap["y"])
+	}
+
+	// Process more records on the restored op
+	moreRecords := []Record{
+		mkRec(1, map[string]Value{"g": TextValue{V: "x"}}),
+		mkRec(1, map[string]Value{"g": TextValue{V: "z"}}),
+	}
+	processAndCollect(op2, moreRecords)
+
+	// Verify final state reflects continuation
+	finalState := op2.CurrentState()
+	finalMap := make(map[string]int64)
+	for _, rec := range finalState {
+		g := rec.Columns["g"].String()
+		cnt := rec.Columns["cnt"].(IntValue).V
+		finalMap[g] = cnt
+	}
+
+	if finalMap["x"] != 3 {
+		t.Errorf("final group 'x': cnt=%d, want 3", finalMap["x"])
+	}
+	if finalMap["y"] != 1 {
+		t.Errorf("final group 'y': cnt=%d, want 1", finalMap["y"])
+	}
+	if finalMap["z"] != 1 {
+		t.Errorf("final group 'z': cnt=%d, want 1", finalMap["z"])
 	}
 }
