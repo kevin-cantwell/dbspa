@@ -121,4 +121,28 @@ folddb serve --port 8080 "SELECT region, COUNT(*) FROM 'kafka://broker/orders.cd
 - No authentication in v0 (assume trusted network / sidecar)
 - Single query per server instance (not a multi-tenant query service)
 
+**Result:** Implemented in 3 commits. HTTPSink with 4 endpoints (/, /stream, /health, /schema). ServeCmd in Kong CLI. 6 tests.
+
+---
+
+### 5. Quoted identifiers
+
+**Status:** Implemented
+
+**Problem:** JSON fields named `last`, `first`, `min`, `max`, `count` clash with SQL keywords.
+
+**Design:** Double-quoted identifiers (`"last"`) are always `TokenIdent`, never keywords. PostgreSQL convention.
+
+**Result:** Single commit. `readQuotedIdent()` in lexer.
+
+---
+
+### 6. SEED FROM
+
+**Status:** Queued
+
+**Problem:** Kafka retention is finite. SEED FROM bootstraps accumulators from a file before streaming.
+
+**Design:** Load seed file → process through accumulators → start stream. Simple blocking load for v0 (no timestamp-based handoff).
+
 ---
