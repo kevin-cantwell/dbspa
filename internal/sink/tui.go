@@ -24,14 +24,15 @@ type TUISink struct {
 	// to track total records read from the source (before filtering).
 	InputCount *atomic.Int64
 
-	mu          sync.Mutex
-	rows        map[string]map[string]engine.Value
-	rowOrder    []string
-	linesDrawn  int
-	recordCount int
-	dirty       bool
-	done        chan struct{}
-	wg          sync.WaitGroup
+	mu            sync.Mutex
+	rows          map[string]map[string]engine.Value
+	rowOrder      []string
+	pendingDelete map[string]bool // keys with retraction but no follow-up insertion yet
+	linesDrawn    int
+	recordCount   int
+	dirty         bool
+	done          chan struct{}
+	wg            sync.WaitGroup
 }
 
 // Start begins the background redraw loop. Must be called before Write.
@@ -83,6 +84,18 @@ func (s *TUISink) buildFrame() string {
 			return ""
 		}
 	}
+
+	// Apply pending deletions — these are retractions that had no follow-up insertion
+	for key := range s.pendingDelete {
+		delete(s.rows, key)
+		for i, k := range s.rowOrder {
+			if k == key {
+				s.rowOrder = append(s.rowOrder[:i], s.rowOrder[i+1:]...)
+				break
+			}
+		}
+	}
+	s.pendingDelete = nil
 
 	// Snapshot state
 	colOrder := s.ColumnOrder
@@ -225,14 +238,17 @@ func (s *TUISink) Write(rec engine.Record) error {
 	key := s.rowKey(rec)
 
 	if rec.Diff < 0 {
-		delete(s.rows, key)
-		for i, k := range s.rowOrder {
-			if k == key {
-				s.rowOrder = append(s.rowOrder[:i], s.rowOrder[i+1:]...)
-				break
-			}
+		// Mark as pending deletion — don't remove yet.
+		// If the next Write for this key is an insertion (retraction+insertion pair),
+		// the insertion will overwrite the values and clear the pending flag.
+		// If no insertion follows, buildFrame() will clean up.
+		if s.pendingDelete == nil {
+			s.pendingDelete = make(map[string]bool)
 		}
+		s.pendingDelete[key] = true
 	} else {
+		// Insertion: either a new key or an update (clears pending deletion)
+		delete(s.pendingDelete, key)
 		if _, exists := s.rows[key]; !exists {
 			s.rowOrder = append(s.rowOrder, key)
 		}
