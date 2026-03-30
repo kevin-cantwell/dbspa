@@ -13,6 +13,11 @@ import (
 // It implements StreamDecoder since Avro OCF has its own block-based framing.
 type AvroOCFDecoder struct{}
 
+// Decode is not supported for Avro OCF — use DecodeStream instead.
+func (d *AvroOCFDecoder) Decode(data []byte) (engine.Record, error) {
+	return engine.Record{}, fmt.Errorf("avro OCF decoder requires stream mode; use DecodeStream")
+}
+
 // DecodeStream reads an Avro OCF stream and sends decoded records to ch.
 func (d *AvroOCFDecoder) DecodeStream(r io.Reader, ch chan<- engine.Record) error {
 	defer close(ch)

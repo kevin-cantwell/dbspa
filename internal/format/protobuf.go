@@ -16,6 +16,11 @@ import (
 // It implements StreamDecoder.
 type ProtobufDecoder struct{}
 
+// Decode is not supported for Protobuf streams — use DecodeStream instead.
+func (d *ProtobufDecoder) Decode(data []byte) (engine.Record, error) {
+	return engine.Record{}, fmt.Errorf("protobuf decoder requires stream mode; use DecodeStream")
+}
+
 // DecodeStream reads length-delimited protobuf Struct messages from r
 // and sends decoded records to ch.
 func (d *ProtobufDecoder) DecodeStream(r io.Reader, ch chan<- engine.Record) error {

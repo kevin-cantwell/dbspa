@@ -48,6 +48,10 @@ func NewDecoderWithOptions(formatStr string, opts map[string]string) (Decoder, e
 		return &DebeziumDecoder{}, nil
 	case "CSV":
 		return newCSVDecoder(opts), nil
+	case "AVRO":
+		return &AvroOCFDecoder{}, nil
+	case "PROTOBUF":
+		return &ProtobufDecoder{}, nil
 	default:
 		return nil, fmt.Errorf("unsupported format: %q", formatStr)
 	}

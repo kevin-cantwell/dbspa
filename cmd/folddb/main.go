@@ -327,8 +327,19 @@ func runKafka(ctx context.Context, stmt *ast.SelectStatement, dec format.Decoder
 }
 
 func runNonAccumulating(ctx context.Context, stmt *ast.SelectStatement, src *source.Stdin, dec format.Decoder, dl *deadLetterWriter) error {
-	rawCh := src.Read()
 	recordCh := make(chan engine.Record)
+
+	// Stream decoders handle their own framing — bypass line-based reading.
+	if sd, ok := dec.(format.StreamDecoder); ok {
+		go func() {
+			if err := sd.DecodeStream(src.ReadRaw(), recordCh); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: stream decode error: %v\n", err)
+			}
+		}()
+		return runNonAccumulatingFromRecords(ctx, stmt, recordCh)
+	}
+
+	rawCh := src.Read()
 	go func() {
 		defer close(recordCh)
 		var offset int64
@@ -401,6 +412,17 @@ func runNonAccumulatingFromRecords(ctx context.Context, stmt *ast.SelectStatemen
 }
 
 func runAccumulating(ctx context.Context, stmt *ast.SelectStatement, src *source.Stdin, dec format.Decoder, dl *deadLetterWriter) error {
+	// Stream decoders handle their own framing — bypass line-based reading.
+	if sd, ok := dec.(format.StreamDecoder); ok {
+		recordCh := make(chan engine.Record)
+		go func() {
+			if err := sd.DecodeStream(src.ReadRaw(), recordCh); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: stream decode error: %v\n", err)
+			}
+		}()
+		return runAccumulatingFromRecords(ctx, stmt, recordCh)
+	}
+
 	rawCh := src.Read()
 	filteredCh := make(chan engine.Record)
 	var inputCount atomic.Int64
@@ -516,8 +538,19 @@ func runAccumulatingFromFiltered(ctx context.Context, stmt *ast.SelectStatement,
 
 // runWindowed handles windowed aggregation from stdin source.
 func runWindowed(ctx context.Context, stmt *ast.SelectStatement, src *source.Stdin, dec format.Decoder, flags cliFlags, dl *deadLetterWriter) error {
-	rawCh := src.Read()
 	recordCh := make(chan engine.Record)
+
+	// Stream decoders handle their own framing — bypass line-based reading.
+	if sd, ok := dec.(format.StreamDecoder); ok {
+		go func() {
+			if err := sd.DecodeStream(src.ReadRaw(), recordCh); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: stream decode error: %v\n", err)
+			}
+		}()
+		return runWindowedFromRecords(ctx, stmt, recordCh, flags)
+	}
+
+	rawCh := src.Read()
 	go func() {
 		defer close(recordCh)
 		var offset int64
