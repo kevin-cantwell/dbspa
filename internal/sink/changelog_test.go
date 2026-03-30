@@ -273,3 +273,114 @@ func TestChangelogSink_FloatValue(t *testing.T) {
 		t.Errorf("expected 3.14, got %v", results[0]["val"])
 	}
 }
+
+func TestChangelogSink_OrderBy_SortedFinalSnapshot(t *testing.T) {
+	var buf bytes.Buffer
+	s := &ChangelogSink{
+		Writer:      &buf,
+		ColumnOrder: []string{"g", "cnt"},
+		OrderBy:     []OrderBySpec{{Column: "g", Desc: false}},
+	}
+
+	// Write records in unsorted order
+	for _, rec := range []engine.Record{
+		{Columns: map[string]engine.Value{"g": engine.TextValue{V: "c"}, "cnt": engine.IntValue{V: 3}}, Diff: 1},
+		{Columns: map[string]engine.Value{"g": engine.TextValue{V: "a"}, "cnt": engine.IntValue{V: 1}}, Diff: 1},
+		{Columns: map[string]engine.Value{"g": engine.TextValue{V: "b"}, "cnt": engine.IntValue{V: 2}}, Diff: 1},
+	} {
+		if err := s.Write(rec); err != nil {
+			t.Fatalf("Write error: %v", err)
+		}
+	}
+
+	s.Close()
+	results := parseNDJSON(t, &buf)
+
+	// First 3 are streaming diffs (unsorted), next 3 are sorted final snapshot
+	if len(results) != 6 {
+		t.Fatalf("expected 6 lines (3 diffs + 3 snapshot), got %d: %q", len(results), buf.String())
+	}
+
+	// Verify sorted final snapshot (last 3 lines)
+	snapshot := results[3:]
+	if snapshot[0]["g"] != "a" || snapshot[1]["g"] != "b" || snapshot[2]["g"] != "c" {
+		t.Errorf("final snapshot not sorted by g ASC: %v", snapshot)
+	}
+}
+
+func TestChangelogSink_OrderBy_DescSort(t *testing.T) {
+	var buf bytes.Buffer
+	s := &ChangelogSink{
+		Writer:      &buf,
+		ColumnOrder: []string{"g", "cnt"},
+		OrderBy:     []OrderBySpec{{Column: "cnt", Desc: true}},
+	}
+
+	for _, rec := range []engine.Record{
+		{Columns: map[string]engine.Value{"g": engine.TextValue{V: "a"}, "cnt": engine.IntValue{V: 1}}, Diff: 1},
+		{Columns: map[string]engine.Value{"g": engine.TextValue{V: "b"}, "cnt": engine.IntValue{V: 3}}, Diff: 1},
+		{Columns: map[string]engine.Value{"g": engine.TextValue{V: "c"}, "cnt": engine.IntValue{V: 2}}, Diff: 1},
+	} {
+		if err := s.Write(rec); err != nil {
+			t.Fatalf("Write error: %v", err)
+		}
+	}
+
+	s.Close()
+	results := parseNDJSON(t, &buf)
+
+	// Last 3 are sorted snapshot
+	snapshot := results[3:]
+	// cnt DESC: 3, 2, 1
+	if snapshot[0]["cnt"] != float64(3) || snapshot[1]["cnt"] != float64(2) || snapshot[2]["cnt"] != float64(1) {
+		t.Errorf("final snapshot not sorted by cnt DESC: %v", snapshot)
+	}
+}
+
+func TestChangelogSink_OrderBy_RetractedRowsExcluded(t *testing.T) {
+	var buf bytes.Buffer
+	s := &ChangelogSink{
+		Writer:      &buf,
+		ColumnOrder: []string{"g", "cnt"},
+		OrderBy:     []OrderBySpec{{Column: "g"}},
+	}
+
+	// Insert then retract "b"
+	s.Write(engine.Record{Columns: map[string]engine.Value{"g": engine.TextValue{V: "a"}, "cnt": engine.IntValue{V: 1}}, Diff: 1})
+	s.Write(engine.Record{Columns: map[string]engine.Value{"g": engine.TextValue{V: "b"}, "cnt": engine.IntValue{V: 2}}, Diff: 1})
+	s.Write(engine.Record{Columns: map[string]engine.Value{"g": engine.TextValue{V: "b"}, "cnt": engine.IntValue{V: 2}}, Diff: -1})
+	s.Write(engine.Record{Columns: map[string]engine.Value{"g": engine.TextValue{V: "c"}, "cnt": engine.IntValue{V: 3}}, Diff: 1})
+
+	s.Close()
+	results := parseNDJSON(t, &buf)
+
+	// 4 streaming diffs + 2 final snapshot (b retracted)
+	if len(results) != 6 {
+		t.Fatalf("expected 6 lines, got %d: %q", len(results), buf.String())
+	}
+	snapshot := results[4:]
+	if len(snapshot) != 2 {
+		t.Fatalf("expected 2 snapshot rows, got %d", len(snapshot))
+	}
+	if snapshot[0]["g"] != "a" || snapshot[1]["g"] != "c" {
+		t.Errorf("snapshot should have a, c (not b): %v", snapshot)
+	}
+}
+
+func TestChangelogSink_NoOrderBy_NoSnapshot(t *testing.T) {
+	var buf bytes.Buffer
+	s := &ChangelogSink{
+		Writer:      &buf,
+		ColumnOrder: []string{"g"},
+	}
+
+	s.Write(engine.Record{Columns: map[string]engine.Value{"g": engine.TextValue{V: "a"}}, Diff: 1})
+	s.Write(engine.Record{Columns: map[string]engine.Value{"g": engine.TextValue{V: "b"}}, Diff: 1})
+	s.Close()
+
+	results := parseNDJSON(t, &buf)
+	// No OrderBy means no final snapshot, just 2 diffs
+	if len(results) != 2 {
+		t.Fatalf("expected 2 lines (no snapshot), got %d", len(results))
+	}
+}

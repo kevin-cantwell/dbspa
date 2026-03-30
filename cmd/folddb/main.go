@@ -771,6 +771,7 @@ func runWindowedFromRecords(ctx context.Context, stmt *ast.SelectStatement, reco
 		tui := &sink.TUISink{
 			Writer:      os.Stdout,
 			ColumnOrder: columnOrder,
+			OrderBy:     resolveOrderBy(stmt.OrderBy),
 		}
 		tui.Start()
 		snk = tui
@@ -778,6 +779,7 @@ func runWindowedFromRecords(ctx context.Context, stmt *ast.SelectStatement, reco
 		snk = &sink.ChangelogSink{
 			Writer:      os.Stdout,
 			ColumnOrder: columnOrder,
+			OrderBy:     resolveOrderBy(stmt.OrderBy),
 		}
 	}
 
