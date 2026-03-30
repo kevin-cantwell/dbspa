@@ -3,6 +3,7 @@ package sink
 import (
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -16,7 +17,8 @@ import (
 type TUISink struct {
 	Writer      io.Writer
 	ColumnOrder []string
-	FPS         int // target frames per second (default 15)
+	OrderBy     []OrderBySpec // optional ORDER BY specification for sorted output
+	FPS         int           // target frames per second (default 15)
 
 	// InputCount can be set to an external counter that the pipeline increments
 	// to track total records read from the source (before filtering).
@@ -101,9 +103,30 @@ func (s *TUISink) buildFrame() string {
 	if s.InputCount != nil {
 		inputCount = s.InputCount.Load()
 	}
+	orderBy := s.OrderBy
 	s.dirty = false
 
 	s.mu.Unlock()
+
+	// Sort rows by ORDER BY specification
+	if len(orderBy) > 0 {
+		slices.SortFunc(rowOrder, func(a, b string) int {
+			rowA := rows[a]
+			rowB := rows[b]
+			for _, spec := range orderBy {
+				va := rowA[spec.Column]
+				vb := rowB[spec.Column]
+				c := CompareValues(va, vb)
+				if spec.Desc {
+					c = -c
+				}
+				if c != 0 {
+					return c
+				}
+			}
+			return 0
+		})
+	}
 
 	// Build frame string outside the lock
 	widths := make([]int, len(colOrder))
