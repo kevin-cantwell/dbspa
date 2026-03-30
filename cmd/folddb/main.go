@@ -1088,7 +1088,8 @@ func buildJoinOp(stmt *ast.SelectStatement) (*engine.HashJoinOp, error) {
 		return nil, fmt.Errorf("join index build error: %w", err)
 	}
 
-	fmt.Fprintf(os.Stderr, "Loaded %d table records into join index (%d distinct keys)\n", len(tableRecords), len(op.Index))
+	// Debug log — only show with --explain
+	_ = len(tableRecords) // suppress unused if we remove the log
 	return op, nil
 }
 
