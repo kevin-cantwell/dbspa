@@ -1115,3 +1115,202 @@ func writeFile(path, content string) error {
 	return os.WriteFile(path, []byte(content), 0644)
 }
 
+// runSeedAggQuery is a test helper for SEED FROM accumulating queries.
+// It loads seed records from file, prepends them to stream input, and runs aggregation.
+func runSeedAggQuery(t *testing.T, sql string, inputLines []string) []map[string]any {
+	t.Helper()
+
+	p := parser.New(sql)
+	stmt, err := p.Parse()
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+
+	if stmt.GroupBy == nil {
+		t.Fatal("runSeedAggQuery called on non-accumulating query")
+	}
+	if stmt.Seed == nil {
+		t.Fatal("runSeedAggQuery called on query without SEED FROM")
+	}
+
+	aggCols, err := engine.ParseAggColumns(stmt.Columns, stmt.GroupBy)
+	if err != nil {
+		t.Fatalf("aggregate setup error: %v", err)
+	}
+
+	columnOrder := make([]string, len(aggCols))
+	for i, col := range aggCols {
+		columnOrder[i] = col.Alias
+	}
+
+	aggOp := engine.NewAggregateOp(aggCols, stmt.GroupBy, stmt.Having)
+
+	// Load seed records
+	seedRecords, err := loadSeedRecords(stmt)
+	if err != nil {
+		t.Fatalf("seed load error: %v", err)
+	}
+
+	dec := &format.JSONDecoder{}
+	var outBuf bytes.Buffer
+	snk := &sink.ChangelogSink{Writer: &outBuf, ColumnOrder: columnOrder}
+
+	filteredCh := make(chan engine.Record)
+	aggOutCh := make(chan engine.Record)
+
+	// Feed seed records then stream input records (with WHERE filter)
+	go func() {
+		defer close(filteredCh)
+		// Seed records first (already WHERE-filtered by loadSeedRecords)
+		for _, rec := range seedRecords {
+			filteredCh <- rec
+		}
+		// Then stream records
+		for _, line := range inputLines {
+			line = strings.TrimSpace(line)
+			if line == "" {
+				continue
+			}
+			rec, err := dec.Decode([]byte(line))
+			if err != nil {
+				t.Errorf("decode error: %v", err)
+				continue
+			}
+			if stmt.Where != nil {
+				pass, err := engine.Filter(stmt.Where, rec)
+				if err != nil || !pass {
+					continue
+				}
+			}
+			filteredCh <- rec
+		}
+	}()
+
+	// Run aggregate
+	go func() {
+		aggOp.Process(filteredCh, aggOutCh)
+	}()
+
+	// Collect output
+	for rec := range aggOutCh {
+		if err := snk.Write(rec); err != nil {
+			t.Fatalf("sink error: %v", err)
+		}
+	}
+	snk.Close()
+
+	// Parse output
+	var results []map[string]any
+	for _, line := range strings.Split(strings.TrimSpace(outBuf.String()), "\n") {
+		if line == "" {
+			continue
+		}
+		var m map[string]any
+		if err := json.Unmarshal([]byte(line), &m); err != nil {
+			t.Fatalf("output parse error: %v\nline: %s", err, line)
+		}
+		results = append(results, m)
+	}
+	return results
+}
+
+func TestSeedFromIntegration(t *testing.T) {
+	seedFile := t.TempDir() + "/seed.ndjson"
+	seedData := `{"status":"pending"}
+{"status":"pending"}
+{"status":"shipped"}
+{"status":"shipped"}
+{"status":"delivered"}`
+	if err := writeFile(seedFile, seedData); err != nil {
+		t.Fatal(err)
+	}
+
+	streamInput := []string{
+		`{"status":"pending"}`,
+		`{"status":"pending"}`,
+		`{"status":"shipped"}`,
+	}
+
+	sql := "SELECT status, COUNT(*) AS cnt FROM stdin SEED FROM '" + seedFile + "' GROUP BY status"
+	results := runSeedAggQuery(t, sql, streamInput)
+
+	// Find final state: last insertion for each status
+	finalState := make(map[string]float64)
+	for _, r := range results {
+		if r["op"] == "+" {
+			finalState[r["status"].(string)] = r["cnt"].(float64)
+		}
+	}
+
+	if finalState["pending"] != 4 {
+		t.Errorf("pending: got %v, want 4", finalState["pending"])
+	}
+	if finalState["shipped"] != 3 {
+		t.Errorf("shipped: got %v, want 3", finalState["shipped"])
+	}
+	if finalState["delivered"] != 1 {
+		t.Errorf("delivered: got %v, want 1", finalState["delivered"])
+	}
+}
+
+func TestSeedFromWithWhereIntegration(t *testing.T) {
+	seedFile := t.TempDir() + "/seed.ndjson"
+	seedData := `{"status":"pending","region":"us"}
+{"status":"pending","region":"eu"}
+{"status":"shipped","region":"us"}
+{"status":"shipped","region":"eu"}`
+	if err := writeFile(seedFile, seedData); err != nil {
+		t.Fatal(err)
+	}
+
+	streamInput := []string{
+		`{"status":"pending","region":"us"}`,
+		`{"status":"shipped","region":"us"}`,
+	}
+
+	// WHERE filters to only region='us' — both seed and stream records are filtered
+	sql := "SELECT status, COUNT(*) AS cnt FROM stdin SEED FROM '" + seedFile + "' WHERE region = 'us' GROUP BY status"
+	results := runSeedAggQuery(t, sql, streamInput)
+
+	finalState := make(map[string]float64)
+	for _, r := range results {
+		if r["op"] == "+" {
+			finalState[r["status"].(string)] = r["cnt"].(float64)
+		}
+	}
+
+	// us-only: 1 pending seed + 1 pending stream = 2, 1 shipped seed + 1 shipped stream = 2
+	if finalState["pending"] != 2 {
+		t.Errorf("pending: got %v, want 2", finalState["pending"])
+	}
+	if finalState["shipped"] != 2 {
+		t.Errorf("shipped: got %v, want 2", finalState["shipped"])
+	}
+}
+
+func TestSeedFromEmptyFileIntegration(t *testing.T) {
+	seedFile := t.TempDir() + "/empty.ndjson"
+	if err := writeFile(seedFile, ""); err != nil {
+		t.Fatal(err)
+	}
+
+	streamInput := []string{
+		`{"status":"pending"}`,
+		`{"status":"pending"}`,
+	}
+
+	sql := "SELECT status, COUNT(*) AS cnt FROM stdin SEED FROM '" + seedFile + "' GROUP BY status"
+	results := runSeedAggQuery(t, sql, streamInput)
+
+	finalState := make(map[string]float64)
+	for _, r := range results {
+		if r["op"] == "+" {
+			finalState[r["status"].(string)] = r["cnt"].(float64)
+		}
+	}
+
+	if finalState["pending"] != 2 {
+		t.Errorf("pending: got %v, want 2", finalState["pending"])
+	}
+}
+
