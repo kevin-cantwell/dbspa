@@ -793,6 +793,121 @@ func TestGroupByWithOrdinals(t *testing.T) {
 	}
 }
 
+func TestJoinClause(t *testing.T) {
+	p := New("SELECT e.user_id, u.name FROM stdin e JOIN '/tmp/users.ndjson' u ON e.user_id = u.id")
+	stmt, err := p.Parse()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// FROM
+	if stmt.From == nil {
+		t.Fatal("expected FROM clause")
+	}
+	if stmt.FromAlias != "e" {
+		t.Errorf("from alias: got %q, want %q", stmt.FromAlias, "e")
+	}
+
+	// JOIN
+	if stmt.Join == nil {
+		t.Fatal("expected JOIN clause")
+	}
+	if stmt.Join.Type != "JOIN" {
+		t.Errorf("join type: got %q, want %q", stmt.Join.Type, "JOIN")
+	}
+	if stmt.Join.Source.URI != "/tmp/users.ndjson" {
+		t.Errorf("join source: got %q, want %q", stmt.Join.Source.URI, "/tmp/users.ndjson")
+	}
+	if stmt.Join.Alias != "u" {
+		t.Errorf("join alias: got %q, want %q", stmt.Join.Alias, "u")
+	}
+	if stmt.Join.Condition == nil {
+		t.Fatal("expected ON condition")
+	}
+
+	// Check columns are QualifiedRefs
+	col0, ok := stmt.Columns[0].Expr.(*ast.QualifiedRef)
+	if !ok {
+		t.Fatalf("expected QualifiedRef, got %T", stmt.Columns[0].Expr)
+	}
+	if col0.Qualifier != "e" || col0.Name != "user_id" {
+		t.Errorf("column 0: got %s.%s, want e.user_id", col0.Qualifier, col0.Name)
+	}
+	col1, ok := stmt.Columns[1].Expr.(*ast.QualifiedRef)
+	if !ok {
+		t.Fatalf("expected QualifiedRef, got %T", stmt.Columns[1].Expr)
+	}
+	if col1.Qualifier != "u" || col1.Name != "name" {
+		t.Errorf("column 1: got %s.%s, want u.name", col1.Qualifier, col1.Name)
+	}
+
+	// ON condition
+	bin, ok := stmt.Join.Condition.(*ast.BinaryExpr)
+	if !ok || bin.Op != "=" {
+		t.Fatalf("expected = condition, got %T", stmt.Join.Condition)
+	}
+}
+
+func TestLeftJoinClause(t *testing.T) {
+	p := New("SELECT e.user_id, u.name FROM stdin e LEFT JOIN '/tmp/users.ndjson' u ON e.user_id = u.id")
+	stmt, err := p.Parse()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if stmt.Join == nil {
+		t.Fatal("expected JOIN clause")
+	}
+	if stmt.Join.Type != "LEFT JOIN" {
+		t.Errorf("join type: got %q, want %q", stmt.Join.Type, "LEFT JOIN")
+	}
+}
+
+func TestJoinWithWhereAndGroupBy(t *testing.T) {
+	p := New("SELECT u.name, COUNT(*) AS cnt FROM stdin e JOIN '/tmp/users.ndjson' u ON e.user_id = u.id WHERE e.action = 'login' GROUP BY u.name")
+	stmt, err := p.Parse()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if stmt.Join == nil {
+		t.Fatal("expected JOIN clause")
+	}
+	if stmt.Where == nil {
+		t.Fatal("expected WHERE clause")
+	}
+	if stmt.GroupBy == nil {
+		t.Fatal("expected GROUP BY clause")
+	}
+}
+
+func TestQualifiedColumnRef(t *testing.T) {
+	p := New("SELECT t.name")
+	stmt, err := p.Parse()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	ref, ok := stmt.Columns[0].Expr.(*ast.QualifiedRef)
+	if !ok {
+		t.Fatalf("expected QualifiedRef, got %T", stmt.Columns[0].Expr)
+	}
+	if ref.Qualifier != "t" || ref.Name != "name" {
+		t.Errorf("got %s.%s, want t.name", ref.Qualifier, ref.Name)
+	}
+}
+
+func TestJoinWithFormat(t *testing.T) {
+	p := New("SELECT e.user_id FROM stdin e JOIN '/tmp/data.csv' FORMAT CSV u ON e.id = u.id")
+	stmt, err := p.Parse()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if stmt.Join == nil {
+		t.Fatal("expected JOIN clause")
+	}
+	if stmt.Join.Source.Format != "CSV" {
+		t.Errorf("join format: got %q, want %q", stmt.Join.Source.Format, "CSV")
+	}
+}
+
 func containsStr(s, substr string) bool {
 	return len(s) >= len(substr) && searchString(s, substr)
 }
