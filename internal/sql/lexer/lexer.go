@@ -288,6 +288,10 @@ func (l *Lexer) tokenize() {
 		case ch == '\'':
 			l.tokens = append(l.tokens, l.readString(startLine, startCol))
 
+		case ch == '"':
+			// Double-quoted identifier (preserves case, avoids keyword clash)
+			l.tokens = append(l.tokens, l.readQuotedIdent(startLine, startCol))
+
 		case isDigit(ch):
 			l.tokens = append(l.tokens, l.readNumber(startLine, startCol))
 
@@ -464,6 +468,34 @@ func (l *Lexer) readString(line, col int) Token {
 		}
 	}
 	return Token{Type: TokenString, Literal: sb.String(), Line: line, Col: col}
+}
+
+// readQuotedIdent reads a double-quoted identifier: "column_name"
+// Returns a TokenIdent (not a keyword) with the exact case preserved.
+// Double-quote escaping: "" inside a quoted ident produces a literal ".
+func (l *Lexer) readQuotedIdent(line, col int) Token {
+	l.advance() // skip opening "
+	var sb strings.Builder
+	for {
+		if l.pos >= len(l.input) {
+			return Token{Type: TokenIllegal, Literal: "unterminated quoted identifier", Line: line, Col: col}
+		}
+		ch := l.advance()
+		if ch == '"' {
+			if l.peekChar() == '"' {
+				// escaped double quote
+				l.advance()
+				sb.WriteRune('"')
+			} else {
+				break
+			}
+		} else {
+			sb.WriteRune(ch)
+		}
+	}
+	// Always return as TokenIdent, never as a keyword — this is the point
+	// of quoting: "last" is the column named last, not the LAST keyword.
+	return Token{Type: TokenIdent, Literal: sb.String(), Line: line, Col: col}
 }
 
 func (l *Lexer) readNumber(line, col int) Token {
