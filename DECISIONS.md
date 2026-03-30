@@ -32,7 +32,7 @@ This file tracks design decisions made during development. Each entry explains w
 
 ### 2. Wire checkpointing into hot path
 
-**Status:** In progress
+**Status:** Implemented
 
 **Problem:** The checkpoint manager (`internal/engine/checkpoint.go`) is built but never called during streaming. `--stateful` is accepted as a flag but doesn't save or restore state. The accumulator state, dedup cache, and Kafka offsets are lost on restart.
 
@@ -56,7 +56,9 @@ The checkpoint is a performance optimization, not a correctness requirement. If 
 
 **Integration points:**
 - `runAccumulatingFromFiltered()` — save after each checkpoint interval
-- `runWindowedFromRecords()` — save after each window close
+- `runWindowedFromRecords()` — save after each window close (not yet wired)
 - The aggregate operator needs `Marshal()/Unmarshal()` at the operator level (not just individual accumulators)
+
+**Result:** Implemented in 3 commits. AggregateOp has MarshalState/UnmarshalState/CurrentState methods with column metadata validation. Pipeline wiring in runAccumulatingFromFiltered: restore on startup, periodic ticker save, final save at shutdown. Mutex protects group map for concurrent checkpoint saves. 3 new integration tests cover round-trip, schema mismatch, and full end-to-end save/restore/continue.
 
 ---
