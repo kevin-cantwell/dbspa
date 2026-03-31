@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"sync"
 	"testing"
 	"time"
 
@@ -570,6 +571,53 @@ func TestDDJoinOp_StreamStream_ExpiredDoesNotJoin(t *testing.T) {
 	}
 }
 
+func TestDDJoinOp_ConcurrentLeftRight(t *testing.T) {
+	// Verify concurrent left+right deltas don't race
+	op := NewDDJoinOp(
+		&ast.ColumnRef{Name: "id"},
+		&ast.ColumnRef{Name: "id"},
+		"l", "r", false,
+	)
+
+	out := make(chan Record, 1000)
+	var wg sync.WaitGroup
+
+	// Left goroutine
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 100; i++ {
+			op.ProcessLeftDelta(Batch{
+				ddRec(map[string]Value{"id": IntValue{V: int64(i)}, "side": TextValue{V: "left"}}, 1),
+			}, out)
+		}
+	}()
+
+	// Right goroutine
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 100; i++ {
+			op.ProcessRightDelta(Batch{
+				ddRec(map[string]Value{"id": IntValue{V: int64(i)}, "side": TextValue{V: "right"}}, 1),
+			}, out)
+		}
+	}()
+
+	wg.Wait()
+	close(out)
+
+	// Count results — some matches will occur depending on timing
+	count := 0
+	for range out {
+		count++
+	}
+	// With 100 left and 100 right records on overlapping keys,
+	// some joins will fire. The exact count depends on scheduling,
+	// but the important thing is no panic/race.
+	t.Logf("concurrent test produced %d joined records", count)
+}
+
 func TestDDJoinOp_StreamStream_WeightMultiplication(t *testing.T) {
 	op := NewDDJoinOp(
 		&ast.ColumnRef{Name: "id"},
@@ -592,4 +640,107 @@ func TestDDJoinOp_StreamStream_WeightMultiplication(t *testing.T) {
 	if results[0].Weight != 6 {
 		t.Errorf("expected weight=6, got %d", results[0].Weight)
 	}
+}
+
+func TestDDJoinOp_EvictAndRetract(t *testing.T) {
+	op := NewDDJoinOp(
+		&ast.ColumnRef{Name: "order_id"},
+		&ast.ColumnRef{Name: "order_id"},
+		"o", "p", false,
+	)
+
+	t0 := time.Date(2025, 1, 1, 10, 0, 0, 0, time.UTC)
+	t1 := time.Date(2025, 1, 1, 10, 5, 0, 0, time.UTC)
+	tLate := time.Date(2025, 1, 1, 10, 15, 0, 0, time.UTC)
+
+	// Both sides at t0
+	op.ProcessLeftDeltaSlice(Batch{
+		ddRecAt(map[string]Value{"order_id": IntValue{V: 1}, "amount": IntValue{V: 100}}, 1, t0),
+	})
+	op.ProcessRightDeltaSlice(Batch{
+		ddRecAt(map[string]Value{"order_id": IntValue{V: 1}, "payment_id": TextValue{V: "pay-1"}}, 1, t0),
+	})
+
+	// Record at t1 that should survive eviction
+	op.ProcessLeftDeltaSlice(Batch{
+		ddRecAt(map[string]Value{"order_id": IntValue{V: 2}, "amount": IntValue{V: 200}}, 1, tLate),
+	})
+	op.ProcessRightDeltaSlice(Batch{
+		ddRecAt(map[string]Value{"order_id": IntValue{V: 2}, "payment_id": TextValue{V: "pay-2"}}, 1, tLate),
+	})
+
+	// Evict before t1 — should evict order_id=1 from both sides
+	out := make(chan Record, 100)
+	op.EvictAndRetract(t1, out)
+	close(out)
+
+	var retractions []Record
+	for rec := range out {
+		retractions = append(retractions, rec)
+	}
+
+	// Should have retractions for the joined pair (order_id=1)
+	// Left eviction produces retraction against right, right eviction produces retraction against left
+	// But since left is evicted first and removed, right eviction won't find left matches.
+	// So we get 1 retraction (from left eviction joined against right).
+	// Then right is evicted but left arrangement no longer has order_id=1, so 0 from right eviction.
+	if len(retractions) != 1 {
+		t.Fatalf("expected 1 retraction from EvictAndRetract, got %d", len(retractions))
+	}
+	if retractions[0].Weight >= 0 {
+		t.Errorf("expected negative weight, got %d", retractions[0].Weight)
+	}
+
+	// Verify order_id=2 still in both arrangements
+	if entries := op.Left.LookupString("2"); len(entries) != 1 {
+		t.Errorf("expected order_id=2 in left arrangement, got %d entries", len(entries))
+	}
+	if entries := op.Right.LookupString("2"); len(entries) != 1 {
+		t.Errorf("expected order_id=2 in right arrangement, got %d entries", len(entries))
+	}
+}
+
+func TestDDJoinOp_EvictAndRetract_Concurrent(t *testing.T) {
+	// Verify that EvictAndRetract is safe to call concurrently with Process* methods
+	op := NewDDJoinOp(
+		&ast.ColumnRef{Name: "id"},
+		&ast.ColumnRef{Name: "id"},
+		"", "", false,
+	)
+
+	out := make(chan Record, 10000)
+	var wg sync.WaitGroup
+
+	// Writer goroutine
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 50; i++ {
+			ts := time.Date(2025, 1, 1, 10, 0, i, 0, time.UTC)
+			op.ProcessLeftDelta(Batch{
+				ddRecAt(map[string]Value{"id": IntValue{V: int64(i)}}, 1, ts),
+			}, out)
+			op.ProcessRightDelta(Batch{
+				ddRecAt(map[string]Value{"id": IntValue{V: int64(i)}}, 1, ts),
+			}, out)
+		}
+	}()
+
+	// Evictor goroutine
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 50; i++ {
+			cutoff := time.Date(2025, 1, 1, 10, 0, i, 0, time.UTC)
+			op.EvictAndRetract(cutoff, out)
+		}
+	}()
+
+	wg.Wait()
+	close(out)
+	count := 0
+	for range out {
+		count++
+	}
+	t.Logf("concurrent evict test produced %d records", count)
 }

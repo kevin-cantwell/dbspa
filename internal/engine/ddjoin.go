@@ -1,6 +1,9 @@
 package engine
 
 import (
+	"sync"
+	"time"
+
 	"github.com/kevin-cantwell/folddb/internal/sql/ast"
 )
 
@@ -13,6 +16,7 @@ import (
 // the other side's arrangement. Output weights are the product of left and right
 // weights, which ensures retractions propagate correctly through the join.
 type DDJoinOp struct {
+	mu           sync.Mutex   // protects concurrent ProcessLeftDelta/ProcessRightDelta calls
 	Left         *Arrangement // left (stream) side arrangement
 	Right        *Arrangement // right (table/CDC) side arrangement
 	LeftKeyExpr  ast.Expr     // expression for left join key
@@ -39,6 +43,9 @@ func NewDDJoinOp(leftKeyExpr, rightKeyExpr ast.Expr, leftAlias, rightAlias strin
 // Each delta record is applied to the left arrangement, then joined against
 // the right arrangement. Joined records are sent to the output channel.
 func (j *DDJoinOp) ProcessLeftDelta(delta Batch, out chan<- Record) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+
 	// Apply deltas to left arrangement
 	applied := j.Left.Apply(delta)
 
@@ -77,6 +84,9 @@ func (j *DDJoinOp) ProcessLeftDelta(delta Batch, out chan<- Record) {
 // and matched rows emitted. When a right record is removed and leaves no
 // matches, NULL rows must be re-emitted.
 func (j *DDJoinOp) ProcessRightDelta(delta Batch, out chan<- Record) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+
 	for _, rightRec := range delta {
 		key, err := Eval(j.RightKeyExpr, rightRec)
 		if err != nil || key.IsNull() {
@@ -116,6 +126,51 @@ func (j *DDJoinOp) ProcessRightDelta(delta Batch, out chan<- Record) {
 					out <- nullRow
 				}
 			}
+		}
+	}
+}
+
+// EvictAndRetract evicts expired entries from both arrangements and processes
+// the resulting retractions through the join to produce output retractions.
+// This is the safe way to run eviction — it holds the DDJoinOp mutex to prevent
+// concurrent modification during Process* calls.
+func (j *DDJoinOp) EvictAndRetract(cutoff time.Time, out chan<- Record) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+
+	// Evict from left arrangement and process retractions against right
+	leftEvicted := j.Left.EvictBefore(cutoff)
+	for _, leftRec := range leftEvicted {
+		key, err := Eval(j.LeftKeyExpr, leftRec)
+		if err != nil || key.IsNull() {
+			continue
+		}
+		rightMatches := j.Right.Lookup(key)
+		if len(rightMatches) == 0 {
+			continue
+		}
+		for _, rightRec := range rightMatches {
+			merged := j.merge(leftRec, rightRec)
+			merged.Weight = leftRec.Weight * rightRec.Weight
+			out <- merged
+		}
+	}
+
+	// Evict from right arrangement and process retractions against left
+	rightEvicted := j.Right.EvictBefore(cutoff)
+	for _, rightRec := range rightEvicted {
+		key, err := Eval(j.RightKeyExpr, rightRec)
+		if err != nil || key.IsNull() {
+			continue
+		}
+		leftMatches := j.Left.Lookup(key)
+		if len(leftMatches) == 0 {
+			continue
+		}
+		for _, leftRec := range leftMatches {
+			merged := j.merge(leftRec, rightRec)
+			merged.Weight = leftRec.Weight * rightRec.Weight
+			out <- merged
 		}
 	}
 }
