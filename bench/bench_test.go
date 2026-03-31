@@ -4,7 +4,9 @@ package bench
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
+	"math/rand"
 	"os"
 	"os/exec"
 	"testing"
@@ -354,6 +356,152 @@ func BenchmarkFormat_Parquet_GroupBy_100K(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		runFoldDBFile(b, path, "SELECT product, region, COUNT(*), SUM(total) GROUP BY product, region FORMAT PARQUET")
+	}
+	b.ReportMetric(float64(100_000)/b.Elapsed().Seconds(), "records/sec")
+}
+
+// =====================================================
+// Join benchmarks
+// =====================================================
+
+// generateTableFile creates an NDJSON file with N rows of {id, tier, name} data.
+// IDs range from 1..size. Returns the file path.
+func generateTableFile(b *testing.B, size int) string {
+	b.Helper()
+	f, err := os.CreateTemp("", "bench-table-*.ndjson")
+	if err != nil {
+		b.Fatalf("cannot create temp file: %v", err)
+	}
+	path := f.Name()
+	b.Cleanup(func() { os.Remove(path) })
+
+	tiers := []string{"gold", "silver", "bronze", "platinum", "basic"}
+	enc := json.NewEncoder(f)
+	enc.SetEscapeHTML(false)
+	for i := 1; i <= size; i++ {
+		rec := map[string]any{
+			"id":   i,
+			"tier": tiers[i%len(tiers)],
+			"name": fmt.Sprintf("user_%d", i),
+		}
+		if err := enc.Encode(rec); err != nil {
+			f.Close()
+			b.Fatalf("write error: %v", err)
+		}
+	}
+	f.Close()
+	return path
+}
+
+// generateStreamData creates NDJSON stream data with N records,
+// each having a customer_id that maps into the table range [1..tableSize].
+func generateStreamData(b *testing.B, count, tableSize int) []byte {
+	b.Helper()
+	rng := rand.New(rand.NewSource(42))
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	actions := []string{"login", "purchase", "click", "view", "logout"}
+	for i := 0; i < count; i++ {
+		rec := map[string]any{
+			"customer_id": rng.Intn(tableSize) + 1,
+			"action":      actions[rng.Intn(len(actions))],
+			"value":       rng.Intn(1000),
+		}
+		if err := enc.Encode(rec); err != nil {
+			b.Fatalf("encode error: %v", err)
+		}
+	}
+	return buf.Bytes()
+}
+
+func BenchmarkJoin_SmallTable_100K(b *testing.B) {
+	tableFile := generateTableFile(b, 100)
+	streamData := generateStreamData(b, 100_000, 100)
+	sql := fmt.Sprintf("SELECT e.action, u.tier FROM stdin e JOIN '%s' u ON e.customer_id = u.id", tableFile)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		runFoldDB(b, streamData, sql)
+	}
+	b.ReportMetric(float64(100_000)/b.Elapsed().Seconds(), "records/sec")
+}
+
+func BenchmarkJoin_LargeTable_100K(b *testing.B) {
+	tableFile := generateTableFile(b, 10_000)
+	streamData := generateStreamData(b, 100_000, 10_000)
+	sql := fmt.Sprintf("SELECT e.action, u.tier FROM stdin e JOIN '%s' u ON e.customer_id = u.id", tableFile)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		runFoldDB(b, streamData, sql)
+	}
+	b.ReportMetric(float64(100_000)/b.Elapsed().Seconds(), "records/sec")
+}
+
+func BenchmarkJoin_WithGroupBy_100K(b *testing.B) {
+	tableFile := generateTableFile(b, 100)
+	streamData := generateStreamData(b, 100_000, 100)
+	sql := fmt.Sprintf("SELECT u.tier, COUNT(*) AS cnt, SUM(e.value) AS total FROM stdin e JOIN '%s' u ON e.customer_id = u.id GROUP BY u.tier", tableFile)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		runFoldDB(b, streamData, sql)
+	}
+	b.ReportMetric(float64(100_000)/b.Elapsed().Seconds(), "records/sec")
+}
+
+// =====================================================
+// Batch compaction benchmarks
+// =====================================================
+
+// generateBatchData creates NDJSON stream data for batch compaction benchmarks.
+// highDuplication: 90% of records share one of 10 group keys.
+// lowDuplication: each record gets a distinct group key.
+func generateBatchData(b *testing.B, count int, highDuplication bool) []byte {
+	b.Helper()
+	rng := rand.New(rand.NewSource(42))
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+
+	if highDuplication {
+		groups := []string{"g0", "g1", "g2", "g3", "g4", "g5", "g6", "g7", "g8", "g9"}
+		for i := 0; i < count; i++ {
+			g := groups[rng.Intn(len(groups))]
+			rec := map[string]any{
+				"g": g,
+				"v": rng.Intn(1000),
+			}
+			if err := enc.Encode(rec); err != nil {
+				b.Fatalf("encode error: %v", err)
+			}
+		}
+	} else {
+		for i := 0; i < count; i++ {
+			rec := map[string]any{
+				"g": fmt.Sprintf("g_%d", i),
+				"v": rng.Intn(1000),
+			}
+			if err := enc.Encode(rec); err != nil {
+				b.Fatalf("encode error: %v", err)
+			}
+		}
+	}
+	return buf.Bytes()
+}
+
+func BenchmarkBatchCompaction_HighDuplication(b *testing.B) {
+	data := generateBatchData(b, 100_000, true)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		runFoldDB(b, data, "SELECT g, COUNT(*) AS cnt, SUM(v) AS total GROUP BY g")
+	}
+	b.ReportMetric(float64(100_000)/b.Elapsed().Seconds(), "records/sec")
+}
+
+func BenchmarkBatchCompaction_LowDuplication(b *testing.B) {
+	data := generateBatchData(b, 100_000, false)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		runFoldDB(b, data, "SELECT g, COUNT(*) AS cnt, SUM(v) AS total GROUP BY g")
 	}
 	b.ReportMetric(float64(100_000)/b.Elapsed().Seconds(), "records/sec")
 }
