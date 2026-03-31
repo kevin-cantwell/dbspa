@@ -1,13 +1,13 @@
 # Accumulators
 
-Accumulators are the core of FoldDB's aggregation engine. Every aggregate function (`COUNT`, `SUM`, `AVG`, etc.) is implemented as an `Accumulator` that handles both insertions and retractions.
+Accumulators are the core of FoldDB's aggregation engine. Every aggregate function (`COUNT`, `SUM`, `AVG`, etc.) is implemented as an `Accumulator` that processes [Z-set](../concepts/diff-model.md) entries -- records with integer weights representing insertions and retractions.
 
 ## Interface
 
 ```go
 type Accumulator interface {
-    Add(value Value)         // called for diff = +1
-    Retract(value Value)     // called for diff = -1
+    Add(value Value)         // called for positive weight (insertion)
+    Retract(value Value)     // called for negative weight (retraction)
     Result() Value           // current aggregate value
     HasChanged() bool        // did Result() change after the last Add/Retract?
     ResetChanged()           // clear the changed flag
@@ -18,7 +18,17 @@ type Accumulator interface {
 }
 ```
 
-The key insight: **Add and Retract are symmetric.** Every accumulator handles both. This is what makes the [diff model](../concepts/diff-model.md) work — you don't need special retraction handling per operator.
+The key insight: **Add and Retract are symmetric.** Every accumulator handles both. This is what makes the [Z-set model](../concepts/diff-model.md) work -- you don't need special retraction handling per operator.
+
+## Z-set weight semantics
+
+Accumulators process Z-set entries where the `Weight` field determines how many times `Add` or `Retract` is called:
+
+- **Weight = +1**: Call `Add` once (standard insertion).
+- **Weight = -1**: Call `Retract` once (standard retraction).
+- **Weight = +N** (N > 1): Call `Add` N times. This is multiset semantics -- "add this value N times." This arises from batch compaction when multiple identical insertions are summed.
+- **Weight = -N** (N > 1): Call `Retract` N times. Multiple retractions of the same value.
+- **Weight = 0**: Skip entirely (the insertion and retraction cancelled out during compaction).
 
 ## Implementations
 

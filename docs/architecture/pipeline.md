@@ -5,22 +5,22 @@ Every FoldDB query flows through the same pipeline, connected by Go channels wit
 ## Pipeline stages
 
 ```
-Source → Decode → [Seed] → [Dedup] → [Join] → Filter → [Aggregate] → Sink
+Source → Decode → [Seed] → [Dedup] → [Join] → Filter → [Batch] → [Aggregate] → Sink
 ```
 
 Stages in brackets are optional, depending on the query.
 
 ```
-┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐
-│  Source   │───▶│  Decode  │───▶│  Filter  │───▶│ Aggregate│───▶│   Sink   │
-│          │    │          │    │ (WHERE)  │    │(GROUP BY)│    │          │
-│ stdin    │    │ JSON     │    │          │    │          │    │ TUI      │
-│ Kafka    │    │ Avro     │    │          │    │ COUNT    │    │ Changelog│
-│ --input  │    │ Protobuf │    │          │    │ SUM      │    │ SQLite   │
-│          │    │ CSV      │    │          │    │ AVG      │    │ HTTP     │
-│          │    │ Debezium │    │          │    │ ...      │    │          │
-│          │    │ Parquet  │    │          │    │          │    │          │
-└──────────┘    └──────────┘    └──────────┘    └──────────┘    └──────────┘
+┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐
+│  Source   │───▶│  Decode  │───▶│  Filter  │───▶│  Batch   │───▶│ Aggregate│───▶│   Sink   │
+│          │    │          │    │ (WHERE)  │    │          │    │(GROUP BY)│    │          │
+│ stdin    │    │ JSON     │    │          │    │ Collect  │    │          │    │ TUI      │
+│ Kafka    │    │ Avro     │    │          │    │ 1024 or  │    │ COUNT    │    │ Changelog│
+│ --input  │    │ Protobuf │    │          │    │ 10ms     │    │ SUM      │    │ SQLite   │
+│          │    │ CSV      │    │          │    │ flush    │    │ AVG      │    │ HTTP     │
+│          │    │ Debezium │    │          │    │          │    │ ...      │    │          │
+│          │    │ Parquet  │    │          │    │          │    │          │    │          │
+└──────────┘    └──────────┘    └──────────┘    └──────────┘    └──────────┘    └──────────┘
 ```
 
 ## Query classification
@@ -73,20 +73,43 @@ Two decoder interfaces:
 
 The Debezium decoder implements `MultiDecoder` — it can emit 0-2 records per input (updates emit a retraction + insertion).
 
+## Batch processing
+
+Between the filter and the accumulator, the `BatchChannel` stage collects individual records into batches. This is a key part of FoldDB's [Z-set model](../concepts/diff-model.md) pipeline.
+
+### How batching works
+
+`BatchChannel` reads from a `chan Record` and writes to a `chan Batch` (where `Batch` is `[]Record`). It flushes on two conditions:
+
+1. **Batch full**: When the batch reaches `DefaultBatchSize` (1024 records), it is sent downstream immediately.
+2. **Timeout**: If 10ms elapses without filling a batch, the partial batch is flushed. This ensures low-latency delivery for low-throughput streams.
+
+The output channel has a buffer of 4 batches to absorb bursts without blocking the producer.
+
+### Why batching helps
+
+- **Fewer channel sends**: 1024 records move through one channel send instead of 1024 separate sends. Channel operations have non-trivial overhead (mutex acquisition, goroutine scheduling).
+- **Better cache locality**: Processing a contiguous slice of records keeps data in L1/L2 cache, compared to processing records one at a time with channel recv between each.
+- **Enables compaction**: In a future phase, batches can be compacted before aggregation -- summing Z-set weights for identical group keys, eliminating redundant accumulator updates.
+
+### Unbatching
+
+After the accumulator, `UnbatchChannel` expands batches back into individual records for the sink layer, which processes records one at a time.
+
 ## Concurrency model
 
 ```
-stdin goroutine ──chan──▶ decode+filter goroutine ──chan──▶ accumulator goroutine ──chan──▶ sink
-                                                                │
-                                                                ├── checkpoint ticker
-                                                                └── TUI render (15fps)
+stdin goroutine ──chan Record──▶ decode+filter goroutine ──chan Record──▶ BatchChannel ──chan Batch──▶ accumulator ──chan Record──▶ sink
+                                                                                                           │
+                                                                                                           ├── checkpoint ticker
+                                                                                                           └── TUI render (15fps)
 ```
 
-For Kafka: one goroutine per partition -> fan-in channel -> single accumulator goroutine.
+For Kafka: one goroutine per partition -> fan-in channel -> `BatchChannel` -> single accumulator goroutine.
 
 The accumulator is the serialization point. At 275K records/sec for O(1) aggregates, the accumulator goroutine uses ~20ms of CPU per second. The bottleneck is JSON decoding, not accumulation.
 
-Non-accumulating queries bypass the accumulator entirely — partition goroutines write filtered/projected records directly to the output channel.
+Non-accumulating queries bypass both the batch stage and the accumulator -- partition goroutines write filtered/projected records directly to the output channel.
 
 ## Sink layer
 

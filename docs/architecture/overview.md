@@ -5,33 +5,35 @@
 Every FoldDB query flows through the same pipeline:
 
 ```
-Source → Decode → [Seed] → [Dedup] → [Join] → Filter → [Aggregate] → Sink
+Source → Decode → [Seed] → [Dedup] → [Join] → Filter → [Batch] → [Aggregate] → Sink
 ```
 
-Each stage is a goroutine connected by Go channels. Backpressure propagates naturally — if the sink is slow, the upstream stages block.
+Each stage is a goroutine connected by Go channels. Backpressure propagates naturally -- if the sink is slow, the upstream stages block.
 
 ```
-┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐
-│  Source   │───▶│  Decode  │───▶│  Filter  │───▶│ Aggregate│───▶│   Sink   │
-│          │    │          │    │ (WHERE)  │    │(GROUP BY)│    │          │
-│ stdin    │    │ JSON     │    │          │    │          │    │ TUI      │
-│ Kafka    │    │ Avro     │    │          │    │ COUNT    │    │ Changelog│
-│ --input  │    │ Protobuf │    │          │    │ SUM      │    │ SQLite   │
-│          │    │ CSV      │    │          │    │ AVG      │    │ HTTP     │
-│          │    │ Debezium │    │          │    │ ...      │    │          │
-│          │    │ Parquet  │    │          │    │          │    │          │
-└──────────┘    └──────────┘    └──────────┘    └──────────┘    └──────────┘
-                                     ▲               ▲
-                                     │               │
-                              ┌──────┴──┐     ┌──────┴──┐
-                              │  Join   │     │ Window  │
-                              │         │     │ Manager │
-                              │Hash map │     │         │
-                              │from file│     │Tumbling │
-                              │         │     │Sliding  │
-                              └─────────┘     │Session  │
-                                              └─────────┘
+┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐
+│  Source   │───▶│  Decode  │───▶│  Filter  │───▶│  Batch   │───▶│ Aggregate│───▶│   Sink   │
+│          │    │          │    │ (WHERE)  │    │          │    │(GROUP BY)│    │          │
+│ stdin    │    │ JSON     │    │          │    │ Collect  │    │          │    │ TUI      │
+│ Kafka    │    │ Avro     │    │          │    │ up to    │    │ COUNT    │    │ Changelog│
+│ --input  │    │ Protobuf │    │          │    │ 1024     │    │ SUM      │    │ SQLite   │
+│          │    │ CSV      │    │          │    │ records  │    │ AVG      │    │ HTTP     │
+│          │    │ Debezium │    │          │    │ or 10ms  │    │ ...      │    │          │
+│          │    │ Parquet  │    │          │    │ flush    │    │          │    │          │
+└──────────┘    └──────────┘    └──────────┘    └──────────┘    └──────────┘    └──────────┘
+                                     ▲                               ▲
+                                     │                               │
+                              ┌──────┴──┐                     ┌──────┴──┐
+                              │  Join   │                     │ Window  │
+                              │         │                     │ Manager │
+                              │Hash map │                     │         │
+                              │from file│                     │Tumbling │
+                              │         │                     │Sliding  │
+                              └─────────┘                     │Session  │
+                                                              └─────────┘
 ```
+
+The **Batch** stage collects individual records into slices of up to 1024 entries (configurable via `DefaultBatchSize`). It flushes on two conditions: when the batch is full, or after a 10ms timeout for low-throughput streams. This amortizes channel send overhead and enables future batch compaction (summing weights for identical group keys before aggregation).
 
 ## Query Types
 
@@ -75,22 +77,25 @@ Here's what happens to a single record as it flows through a GROUP BY query:
    b'{"status":"pending","amount":100}\n'
 
 2. Decoder parses to Record:
-   Record{Columns: {"status": TextValue("pending"), "amount": IntValue(100)}, Diff: +1}
+   Record{Columns: {"status": TextValue("pending"), "amount": IntValue(100)}, Weight: +1}
 
 3. Join (if present) probes hash map:
-   Record{Columns: {"status": "pending", "amount": 100, "u.name": "Alice"}, Diff: +1}
+   Record{Columns: {"status": "pending", "amount": 100, "u.name": "Alice"}, Weight: +1}
 
 4. Filter evaluates WHERE:
-   WHERE amount > 50 → passes (amount=100)
+   WHERE amount > 50 -> passes (amount=100)
 
-5. Accumulator updates group "pending":
-   key="pending": COUNT: 41→42, SUM: 4100→4200
+5. BatchChannel collects records into a batch (up to 1024, or 10ms flush):
+   Batch[Record{...}, Record{...}, ...]
 
-6. Accumulator emits changelog:
-   Record{Columns: {"status": "pending", "count": 41, "sum": 4100}, Diff: -1}  ← retraction
-   Record{Columns: {"status": "pending", "count": 42, "sum": 4200}, Diff: +1}  ← insertion
+6. Accumulator updates group "pending":
+   key="pending": COUNT: 41->42, SUM: 4100->4200
 
-7. Sink renders:
+7. Accumulator emits changelog:
+   Record{Columns: {"status": "pending", "count": 41, "sum": 4100}, Weight: -1}  <- retraction
+   Record{Columns: {"status": "pending", "count": 42, "sum": 4200}, Weight: +1}  <- insertion
+
+8. Sink renders:
    TUI: updates the "pending" row in place
    Changelog: writes {"op":"-",...} then {"op":"+",...}
 ```
@@ -120,8 +125,8 @@ Each aggregate function (COUNT, SUM, AVG, MIN, MAX, MEDIAN, FIRST, LAST) is an A
 
 ```go
 type Accumulator interface {
-    Add(value Value)         // called for diff = +1
-    Retract(value Value)     // called for diff = -1
+    Add(value Value)         // called for positive weight (insertion)
+    Retract(value Value)     // called for negative weight (retraction)
     Result() Value           // current aggregate value
     HasChanged() bool        // did Result() change?
     Marshal() ([]byte, error)
@@ -129,7 +134,7 @@ type Accumulator interface {
 }
 ```
 
-The key insight: **Add and Retract are symmetric**. Every accumulator handles both. This is what makes the diff model work — you don't need special retraction handling per operator.
+The key insight: **Add and Retract are symmetric**. Every accumulator handles both. This is what makes the [Z-set model](../concepts/diff-model.md) work -- you don't need special retraction handling per operator. When a record has `Weight > 1`, `Add` is called multiple times (multiset semantics). When `Weight < -1`, `Retract` is called multiple times.
 
 ## Sink Layer
 
@@ -144,13 +149,15 @@ The key insight: **Add and Retract are symmetric**. Every accumulator handles bo
 ## Concurrency Model
 
 ```
-stdin reader goroutine ──channel──▶ decode+filter goroutine ──channel──▶ accumulator goroutine ──channel──▶ sink
-                                                                              │
-                                                                              ├── checkpoint ticker (periodic save)
-                                                                              └── TUI render loop (15fps)
+stdin reader goroutine ──chan Record──▶ decode+filter goroutine ──chan Record──▶ BatchChannel ──chan Batch──▶ accumulator goroutine ──chan Record──▶ sink
+                                                                                                                   │
+                                                                                                                   ├── checkpoint ticker (periodic save)
+                                                                                                                   └── TUI render loop (15fps)
 ```
 
-For Kafka: one goroutine per partition → fan-in channel → single accumulator goroutine.
+For Kafka: one goroutine per partition -> fan-in channel -> `BatchChannel` -> single accumulator goroutine.
+
+The `BatchChannel` stage sits between the filter and the accumulator. It collects individual records from the `chan Record` into `Batch` slices (up to 1024 records or 10ms timeout), then sends them on a `chan Batch`. The accumulator processes each batch as a unit. After the accumulator, records are unbatched back to `chan Record` for the sink.
 
 The accumulator is the serialization point. At 275K records/sec for O(1) aggregates, the accumulator goroutine uses ~20ms of CPU per second. The bottleneck is JSON decoding, not accumulation.
 
