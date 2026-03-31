@@ -37,7 +37,7 @@ func TestWindowedAggregateOpTumbling(t *testing.T) {
 			"latency":  IntValue{V: 50},
 		},
 		Timestamp: time.Now(),
-		Diff:      1,
+		Weight:      1,
 	}
 	in <- Record{
 		Columns: map[string]Value{
@@ -46,7 +46,7 @@ func TestWindowedAggregateOpTumbling(t *testing.T) {
 			"latency":  IntValue{V: 100},
 		},
 		Timestamp: time.Now(),
-		Diff:      1,
+		Weight:      1,
 	}
 	in <- Record{
 		Columns: map[string]Value{
@@ -55,7 +55,7 @@ func TestWindowedAggregateOpTumbling(t *testing.T) {
 			"latency":  IntValue{V: 75},
 		},
 		Timestamp: time.Now(),
-		Diff:      1,
+		Weight:      1,
 	}
 	close(in)
 
@@ -118,21 +118,21 @@ func TestWindowedAggregateGroupBy(t *testing.T) {
 			"ts":     TextValue{V: base.Add(10 * time.Second).Format(time.RFC3339)},
 			"region": TextValue{V: "us-east"},
 		},
-		Diff: 1,
+		Weight: 1,
 	}
 	in <- Record{
 		Columns: map[string]Value{
 			"ts":     TextValue{V: base.Add(20 * time.Second).Format(time.RFC3339)},
 			"region": TextValue{V: "us-west"},
 		},
-		Diff: 1,
+		Weight: 1,
 	}
 	in <- Record{
 		Columns: map[string]Value{
 			"ts":     TextValue{V: base.Add(30 * time.Second).Format(time.RFC3339)},
 			"region": TextValue{V: "us-east"},
 		},
-		Diff: 1,
+		Weight: 1,
 	}
 	close(in)
 
@@ -183,7 +183,7 @@ func TestWindowedAggregateOutputColumns(t *testing.T) {
 		Columns: map[string]Value{
 			"ts": TextValue{V: base.Add(15 * time.Second).Format(time.RFC3339)},
 		},
-		Diff: 1,
+		Weight: 1,
 	}
 	close(in)
 
@@ -241,7 +241,7 @@ func TestWindowedAggregateTumblingEmitOnClose(t *testing.T) {
 			"ts": TextValue{V: base.Add(30 * time.Second).Format(time.RFC3339)},
 			"v":  IntValue{V: 100},
 		},
-		Diff: 1,
+		Weight: 1,
 	}
 
 	// Event that pushes watermark past 10:01 (need event at 10:01:05 to get watermark = 10:01:00)
@@ -250,7 +250,7 @@ func TestWindowedAggregateTumblingEmitOnClose(t *testing.T) {
 			"ts": TextValue{V: base.Add(65 * time.Second).Format(time.RFC3339)},
 			"v":  IntValue{V: 200},
 		},
-		Diff: 1,
+		Weight: 1,
 	}
 	close(in)
 
@@ -290,7 +290,7 @@ func TestWindowedAggregateLateDataDropped(t *testing.T) {
 		Columns: map[string]Value{
 			"ts": TextValue{V: base.Add(30 * time.Second).Format(time.RFC3339)},
 		},
-		Diff: 1,
+		Weight: 1,
 	}
 
 	// Push watermark well past 10:01: event at 10:05:00
@@ -298,7 +298,7 @@ func TestWindowedAggregateLateDataDropped(t *testing.T) {
 		Columns: map[string]Value{
 			"ts": TextValue{V: base.Add(5 * time.Minute).Format(time.RFC3339)},
 		},
-		Diff: 1,
+		Weight: 1,
 	}
 
 	// Late event: 10:00:40 (window [10:00, 10:01) already closed)
@@ -306,7 +306,7 @@ func TestWindowedAggregateLateDataDropped(t *testing.T) {
 		Columns: map[string]Value{
 			"ts": TextValue{V: base.Add(40 * time.Second).Format(time.RFC3339)},
 		},
-		Diff: 1,
+		Weight: 1,
 	}
 	close(in)
 
@@ -349,13 +349,13 @@ func TestWindowedAggregateEmptyWindowNoOutput(t *testing.T) {
 	// Event at 10:00:30 (window [10:00, 10:01))
 	in <- Record{
 		Columns: map[string]Value{"ts": TextValue{V: base.Add(30 * time.Second).Format(time.RFC3339)}},
-		Diff:    1,
+		Weight:    1,
 	}
 
 	// Skip to 10:02:30 (window [10:01, 10:02) has no events)
 	in <- Record{
 		Columns: map[string]Value{"ts": TextValue{V: base.Add(150 * time.Second).Format(time.RFC3339)}},
-		Diff:    1,
+		Weight:    1,
 	}
 	close(in)
 
@@ -400,21 +400,21 @@ func TestWindowedAggregateSUM(t *testing.T) {
 			"ts": TextValue{V: base.Add(10 * time.Second).Format(time.RFC3339)},
 			"v":  IntValue{V: 10},
 		},
-		Diff: 1,
+		Weight: 1,
 	}
 	in <- Record{
 		Columns: map[string]Value{
 			"ts": TextValue{V: base.Add(20 * time.Second).Format(time.RFC3339)},
 			"v":  IntValue{V: 20},
 		},
-		Diff: 1,
+		Weight: 1,
 	}
 	in <- Record{
 		Columns: map[string]Value{
 			"ts": TextValue{V: base.Add(30 * time.Second).Format(time.RFC3339)},
 			"v":  IntValue{V: 30},
 		},
-		Diff: 1,
+		Weight: 1,
 	}
 	close(in)
 
@@ -516,7 +516,7 @@ func TestWindowedAggregate_EmitEarly_Timer(t *testing.T) {
 		Columns: map[string]Value{
 			"ts": TextValue{V: base.Add(30 * time.Second).Format(time.RFC3339)},
 		},
-		Diff: 1,
+		Weight: 1,
 	}
 
 	// Wait enough time for at least one early emission (2 tick intervals).
@@ -545,7 +545,7 @@ done:
 	// The final flush also produces a result. So we expect at least 2 insertion records.
 	insertions := 0
 	for _, r := range results {
-		if r.Diff == 1 {
+		if r.Weight == 1 {
 			insertions++
 		}
 	}
@@ -555,7 +555,7 @@ done:
 
 	// Every early-emitted record should have correct cnt value.
 	for _, r := range results {
-		if r.Diff == 1 {
+		if r.Weight == 1 {
 			cnt, ok := r.Columns["cnt"].(IntValue)
 			if !ok {
 				t.Errorf("cnt is not IntValue: %T", r.Columns["cnt"])
@@ -601,7 +601,7 @@ func TestWindowedAggregate_EmitEarly_RetractionOnUpdate(t *testing.T) {
 			"ts": TextValue{V: base.Add(10 * time.Second).Format(time.RFC3339)},
 			"v":  IntValue{V: 10},
 		},
-		Diff: 1,
+		Weight: 1,
 	}
 
 	// Wait for at least one early emission.
@@ -613,7 +613,7 @@ func TestWindowedAggregate_EmitEarly_RetractionOnUpdate(t *testing.T) {
 			"ts": TextValue{V: base.Add(20 * time.Second).Format(time.RFC3339)},
 			"v":  IntValue{V: 20},
 		},
-		Diff: 1,
+		Weight: 1,
 	}
 
 	// Wait for at least one more early emission with the updated value.
@@ -645,7 +645,7 @@ done:
 	// Verify we have at least one retraction (Diff=-1).
 	retractions := 0
 	for _, r := range results {
-		if r.Diff == -1 {
+		if r.Weight == -1 {
 			retractions++
 		}
 	}
@@ -657,7 +657,7 @@ done:
 	// Walk backwards to find the last Diff=+1 record.
 	var finalTotal Value
 	for i := len(results) - 1; i >= 0; i-- {
-		if results[i].Diff == 1 {
+		if results[i].Weight == 1 {
 			finalTotal = results[i].Columns["total"]
 			break
 		}
@@ -682,7 +682,7 @@ done:
 	var netSum int64
 	for _, r := range results {
 		if total, ok := r.Columns["total"].(IntValue); ok {
-			netSum += int64(r.Diff) * total.V
+			netSum += int64(r.Weight) * total.V
 		}
 	}
 	if netSum != 30 {

@@ -133,7 +133,7 @@ func (h *HashJoinOp) merge(streamRec, tableRec Record) Record {
 	merged := Record{
 		Columns:   make(map[string]Value, len(streamRec.Columns)+len(tableRec.Columns)),
 		Timestamp: streamRec.Timestamp,
-		Diff:      streamRec.Diff,
+		Weight:      streamRec.Weight,
 	}
 
 	// Add stream columns (unqualified and qualified)
@@ -162,7 +162,7 @@ func (h *HashJoinOp) mergeWithNulls(streamRec Record) Record {
 	merged := Record{
 		Columns:   make(map[string]Value, len(streamRec.Columns)+len(h.tableColumns)),
 		Timestamp: streamRec.Timestamp,
-		Diff:      streamRec.Diff,
+		Weight:      streamRec.Weight,
 	}
 
 	// Add stream columns

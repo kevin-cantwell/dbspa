@@ -237,7 +237,7 @@ func (s *TUISink) Write(rec engine.Record) error {
 	s.recordCount++
 	key := s.rowKey(rec)
 
-	if rec.Diff < 0 {
+	if rec.Weight < 0 {
 		// Mark as pending deletion — don't remove yet.
 		// If the next Write for this key is an insertion (retraction+insertion pair),
 		// the insertion will overwrite the values and clear the pending flag.

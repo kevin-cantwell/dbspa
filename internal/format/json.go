@@ -36,7 +36,7 @@ func (d *JSONDecoder) Decode(data []byte) (engine.Record, error) {
 	return engine.Record{
 		Columns:   cols,
 		Timestamp: time.Now(),
-		Diff:      1,
+		Weight:      1,
 	}, nil
 }
 

@@ -11,7 +11,7 @@ func TestFilterSimplePredicate(t *testing.T) {
 	rec := Record{
 		Columns:   map[string]Value{"age": IntValue{V: 30}},
 		Timestamp: time.Now(),
-		Diff:      1,
+		Weight:      1,
 	}
 	where := &ast.BinaryExpr{
 		Left:  &ast.ColumnRef{Name: "age"},
@@ -31,7 +31,7 @@ func TestFilterSimplePredicateFails(t *testing.T) {
 	rec := Record{
 		Columns:   map[string]Value{"age": IntValue{V: 20}},
 		Timestamp: time.Now(),
-		Diff:      1,
+		Weight:      1,
 	}
 	where := &ast.BinaryExpr{
 		Left:  &ast.ColumnRef{Name: "age"},
@@ -51,7 +51,7 @@ func TestFilterAnd(t *testing.T) {
 	rec := Record{
 		Columns:   map[string]Value{"a": IntValue{V: 5}, "b": IntValue{V: 10}},
 		Timestamp: time.Now(),
-		Diff:      1,
+		Weight:      1,
 	}
 	where := &ast.BinaryExpr{
 		Left: &ast.BinaryExpr{
@@ -79,7 +79,7 @@ func TestFilterOr(t *testing.T) {
 	rec := Record{
 		Columns:   map[string]Value{"a": IntValue{V: 1}, "b": IntValue{V: 10}},
 		Timestamp: time.Now(),
-		Diff:      1,
+		Weight:      1,
 	}
 	where := &ast.BinaryExpr{
 		Left: &ast.BinaryExpr{
@@ -107,7 +107,7 @@ func TestFilterNot(t *testing.T) {
 	rec := Record{
 		Columns:   map[string]Value{"x": BoolValue{V: false}},
 		Timestamp: time.Now(),
-		Diff:      1,
+		Weight:      1,
 	}
 	where := &ast.UnaryExpr{
 		Op:   "NOT",
@@ -127,7 +127,7 @@ func TestFilterNullFiltersOut(t *testing.T) {
 	rec := Record{
 		Columns:   map[string]Value{"a": NullValue{}},
 		Timestamp: time.Now(),
-		Diff:      1,
+		Weight:      1,
 	}
 	where := &ast.BinaryExpr{
 		Left:  &ast.ColumnRef{Name: "a"},
@@ -147,7 +147,7 @@ func TestFilterNilWherePassesAll(t *testing.T) {
 	rec := Record{
 		Columns:   map[string]Value{"x": IntValue{V: 1}},
 		Timestamp: time.Now(),
-		Diff:      1,
+		Weight:      1,
 	}
 	pass, err := Filter(nil, rec)
 	if err != nil {
@@ -163,7 +163,7 @@ func TestFilterNullAndTrue(t *testing.T) {
 	rec := Record{
 		Columns:   map[string]Value{"a": NullValue{}, "b": BoolValue{V: true}},
 		Timestamp: time.Now(),
-		Diff:      1,
+		Weight:      1,
 	}
 	where := &ast.BinaryExpr{
 		Left:  &ast.ColumnRef{Name: "a"},
@@ -184,7 +184,7 @@ func TestFilterNullOrTrue(t *testing.T) {
 	rec := Record{
 		Columns:   map[string]Value{"a": NullValue{}, "b": BoolValue{V: true}},
 		Timestamp: time.Now(),
-		Diff:      1,
+		Weight:      1,
 	}
 	where := &ast.BinaryExpr{
 		Left:  &ast.ColumnRef{Name: "a"},

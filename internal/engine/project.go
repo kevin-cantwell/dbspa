@@ -14,7 +14,7 @@ func Project(columns []ast.Column, rec Record) (Record, error) {
 	out := Record{
 		Columns:   make(map[string]Value, len(columns)),
 		Timestamp: rec.Timestamp,
-		Diff:      rec.Diff,
+		Weight:      rec.Weight,
 	}
 
 	for i, col := range columns {

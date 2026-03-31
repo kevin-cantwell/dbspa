@@ -54,7 +54,7 @@ func (s *SQLiteSink) Write(rec engine.Record) error {
 	// For accumulating queries with retractions, only process insertions (op=+)
 	// The UPSERT handles updates; we don't need to explicitly delete on retraction
 	// because the next insertion for that key will overwrite.
-	if s.isAccum && rec.Diff < 0 {
+	if s.isAccum && rec.Weight < 0 {
 		return nil // Skip retractions for UPSERT mode
 	}
 

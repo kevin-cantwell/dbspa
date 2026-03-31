@@ -121,7 +121,7 @@ func (op *AggregateOp) processRecord(rec Record, out chan<- Record) {
 			}
 		}
 
-		if rec.Diff >= 0 {
+		if rec.Weight >= 0 {
 			gs.accumulators[i].Add(argVal)
 		} else {
 			gs.accumulators[i].Retract(argVal)
@@ -186,7 +186,7 @@ func (op *AggregateOp) processRecord(rec Record, out chan<- Record) {
 		out <- Record{
 			Columns:   retractCols,
 			Timestamp: rec.Timestamp,
-			Diff:      -1,
+			Weight:      -1,
 		}
 	}
 
@@ -211,7 +211,7 @@ func (op *AggregateOp) processRecord(rec Record, out chan<- Record) {
 		out <- Record{
 			Columns:   resultCols,
 			Timestamp: rec.Timestamp,
-			Diff:      1,
+			Weight:      1,
 		}
 	} else {
 		// HAVING failed — this group is suppressed (no emission)
@@ -553,7 +553,7 @@ func (op *AggregateOp) CurrentState() []Record {
 		records = append(records, Record{
 			Columns:   cols,
 			Timestamp: time.Now(),
-			Diff:      1,
+			Weight:      1,
 		})
 	}
 	return records

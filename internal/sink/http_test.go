@@ -65,14 +65,14 @@ func TestHTTPSink_ResultSet(t *testing.T) {
 			"region": engine.TextValue{V: "us-east"},
 			"count":  engine.IntValue{V: 100},
 		},
-		Diff: 1,
+		Weight: 1,
 	})
 	s.Write(engine.Record{
 		Columns: map[string]engine.Value{
 			"region": engine.TextValue{V: "us-west"},
 			"count":  engine.IntValue{V: 200},
 		},
-		Diff: 1,
+		Weight: 1,
 	})
 
 	resp, err := http.Get("http://localhost:19082/")
@@ -109,7 +109,7 @@ func TestHTTPSink_Retraction(t *testing.T) {
 			"region": engine.TextValue{V: "us-east"},
 			"count":  engine.IntValue{V: 100},
 		},
-		Diff: 1,
+		Weight: 1,
 	})
 
 	// Retract
@@ -118,7 +118,7 @@ func TestHTTPSink_Retraction(t *testing.T) {
 			"region": engine.TextValue{V: "us-east"},
 			"count":  engine.IntValue{V: 100},
 		},
-		Diff: -1,
+		Weight: -1,
 	})
 
 	// Re-insert with updated value
@@ -127,7 +127,7 @@ func TestHTTPSink_Retraction(t *testing.T) {
 			"region": engine.TextValue{V: "us-east"},
 			"count":  engine.IntValue{V: 101},
 		},
-		Diff: 1,
+		Weight: 1,
 	})
 
 	resp, err := http.Get("http://localhost:19083/")
@@ -156,7 +156,7 @@ func TestHTTPSink_Schema(t *testing.T) {
 			"region": engine.TextValue{V: "us-east"},
 			"count":  engine.IntValue{V: 42},
 		},
-		Diff: 1,
+		Weight: 1,
 	})
 
 	resp, err := http.Get("http://localhost:19084/schema")
@@ -204,7 +204,7 @@ func TestHTTPSink_SSE(t *testing.T) {
 				"region": engine.TextValue{V: "eu-west"},
 				"count":  engine.IntValue{V: 500},
 			},
-			Diff: 1,
+			Weight: 1,
 		})
 	}()
 
@@ -257,7 +257,7 @@ func TestHTTPSink_OrderBy(t *testing.T) {
 				"name":  engine.TextValue{V: name},
 				"score": engine.IntValue{V: int64((i + 1) * 10)},
 			},
-			Diff: 1,
+			Weight: 1,
 		})
 	}
 

@@ -8,11 +8,11 @@ import (
 )
 
 // helper to make a record with diff
-func mkRec(diff int8, cols map[string]Value) Record {
+func mkRec(diff int, cols map[string]Value) Record {
 	return Record{
 		Columns:   cols,
 		Timestamp: time.Now(),
-		Diff:      diff,
+		Weight:      diff,
 	}
 }
 
@@ -83,16 +83,16 @@ func TestAggregateOp_BasicGroupBy(t *testing.T) {
 	}
 
 	// First: insert a cnt=1
-	if results[0].Diff != 1 {
-		t.Errorf("result[0] expected diff=+1, got %d", results[0].Diff)
+	if results[0].Weight != 1 {
+		t.Errorf("result[0] expected diff=+1, got %d", results[0].Weight)
 	}
 	if v := results[0].Columns["cnt"].(IntValue).V; v != 1 {
 		t.Errorf("result[0] cnt expected 1, got %d", v)
 	}
 
 	// Last: insert a cnt=2
-	if results[3].Diff != 1 {
-		t.Errorf("result[3] expected diff=+1, got %d", results[3].Diff)
+	if results[3].Weight != 1 {
+		t.Errorf("result[3] expected diff=+1, got %d", results[3].Weight)
 	}
 	if v := results[3].Columns["cnt"].(IntValue).V; v != 2 {
 		t.Errorf("result[3] cnt expected 2, got %d", v)
@@ -118,11 +118,11 @@ func TestAggregateOp_ChangelogRetractionInsertionAdjacent(t *testing.T) {
 	}
 
 	// Retraction and insertion should be adjacent
-	if results[1].Diff != -1 {
-		t.Errorf("result[1] expected retraction (diff=-1), got %d", results[1].Diff)
+	if results[1].Weight != -1 {
+		t.Errorf("result[1] expected retraction (diff=-1), got %d", results[1].Weight)
 	}
-	if results[2].Diff != 1 {
-		t.Errorf("result[2] expected insertion (diff=+1), got %d", results[2].Diff)
+	if results[2].Weight != 1 {
+		t.Errorf("result[2] expected insertion (diff=+1), got %d", results[2].Weight)
 	}
 
 	// Both should be for the same group key
@@ -158,7 +158,7 @@ func TestAggregateOp_HavingFilter(t *testing.T) {
 	// Second insert: cnt=2, HAVING passes -> output
 	var inserts []Record
 	for _, r := range results {
-		if r.Diff == 1 {
+		if r.Weight == 1 {
 			inserts = append(inserts, r)
 		}
 	}
@@ -198,7 +198,7 @@ func TestAggregateOp_HavingGroupPassesThenFails(t *testing.T) {
 	var lastRetract Record
 	hasRetract := false
 	for _, r := range results {
-		if r.Diff == -1 {
+		if r.Weight == -1 {
 			lastRetract = r
 			hasRetract = true
 		}
@@ -231,7 +231,7 @@ func TestAggregateOp_MultipleAggregates(t *testing.T) {
 
 	// Last insertion should have cnt=3, total=60
 	last := results[len(results)-1]
-	if last.Diff != 1 {
+	if last.Weight != 1 {
 		t.Fatal("last result should be an insertion")
 	}
 	if v := last.Columns["cnt"].(IntValue).V; v != 3 {
@@ -257,10 +257,10 @@ func TestAggregateOp_GroupRemovalCountZero(t *testing.T) {
 	if len(results) != 2 {
 		t.Fatalf("expected 2 records, got %d", len(results))
 	}
-	if results[0].Diff != 1 {
+	if results[0].Weight != 1 {
 		t.Errorf("result[0] expected +1")
 	}
-	if results[1].Diff != -1 {
+	if results[1].Weight != -1 {
 		t.Errorf("result[1] expected -1")
 	}
 }
@@ -281,7 +281,7 @@ func TestAggregateOp_GroupReinsertAfterRemoval(t *testing.T) {
 	if len(results) != 3 {
 		t.Fatalf("expected 3 records, got %d", len(results))
 	}
-	if results[2].Diff != 1 {
+	if results[2].Weight != 1 {
 		t.Errorf("result[2] expected +1 (fresh insert)")
 	}
 	if v := results[2].Columns["cnt"].(IntValue).V; v != 1 {
@@ -311,7 +311,7 @@ func TestAggregateOp_NullGroupByKey(t *testing.T) {
 	var nullGroupResults []Record
 	for _, r := range results {
 		gv := r.Columns["g"]
-		if gv.IsNull() && r.Diff == 1 {
+		if gv.IsNull() && r.Weight == 1 {
 			nullGroupResults = append(nullGroupResults, r)
 		}
 	}
@@ -345,7 +345,7 @@ func TestAggregateOp_SumRetraction(t *testing.T) {
 
 	// Final insertion should have total=20
 	last := results[len(results)-1]
-	if last.Diff != 1 {
+	if last.Weight != 1 {
 		t.Fatal("last result should be insertion")
 	}
 	if v := last.Columns["total"].(IntValue).V; v != 20 {
@@ -373,7 +373,7 @@ func TestAggregateOp_SumNullSkipped(t *testing.T) {
 	// Find last insertion for group "a"
 	var lastInsert Record
 	for _, r := range results {
-		if r.Diff == 1 {
+		if r.Weight == 1 {
 			if gv, ok := r.Columns["g"].(TextValue); ok && gv.V == "a" {
 				lastInsert = r
 			}
@@ -399,7 +399,7 @@ func TestAggregateOp_MultipleGroups(t *testing.T) {
 	// Each group gets exactly one insertion
 	inserts := make(map[string]int64)
 	for _, r := range results {
-		if r.Diff == 1 {
+		if r.Weight == 1 {
 			g := r.Columns["g"].(TextValue).V
 			inserts[g] = r.Columns["cnt"].(IntValue).V
 		}
@@ -432,7 +432,7 @@ func TestAggregateOp_AvgRetraction(t *testing.T) {
 
 	// Final: AVG should be 20.0
 	last := results[len(results)-1]
-	if last.Diff != 1 {
+	if last.Weight != 1 {
 		t.Fatal("last should be insertion")
 	}
 	if v := last.Columns["avg_v"].(FloatValue).V; v != 20.0 {
@@ -462,7 +462,7 @@ func TestAggregateOp_MinMaxRetraction(t *testing.T) {
 	results := processAndCollect(op, records)
 
 	last := results[len(results)-1]
-	if last.Diff != 1 {
+	if last.Weight != 1 {
 		t.Fatal("last should be insertion")
 	}
 	if v := last.Columns["min_v"].(IntValue).V; v != 5 {

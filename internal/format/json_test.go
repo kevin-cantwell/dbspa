@@ -159,8 +159,8 @@ func TestJSONDecodeDiffAlwaysPositive(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error: %v", err)
 	}
-	if rec.Diff != 1 {
-		t.Errorf("expected diff=1, got %d", rec.Diff)
+	if rec.Weight != 1 {
+		t.Errorf("expected diff=1, got %d", rec.Weight)
 	}
 }
 

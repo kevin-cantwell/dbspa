@@ -13,7 +13,7 @@ func makeRec(cols map[string]Value) Record {
 	return Record{
 		Columns:   cols,
 		Timestamp: time.Now(),
-		Diff:      1,
+		Weight:      1,
 	}
 }
 

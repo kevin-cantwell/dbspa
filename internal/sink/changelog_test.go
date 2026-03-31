@@ -34,7 +34,7 @@ func TestChangelogSink_InsertionHasPlusOp(t *testing.T) {
 			"name": engine.TextValue{V: "alice"},
 			"cnt":  engine.IntValue{V: 5},
 		},
-		Diff: 1,
+		Weight: 1,
 	}
 
 	if err := s.Write(rec); err != nil {
@@ -59,7 +59,7 @@ func TestChangelogSink_RetractionHasMinusOp(t *testing.T) {
 			"name": engine.TextValue{V: "alice"},
 			"cnt":  engine.IntValue{V: 5},
 		},
-		Diff: -1,
+		Weight: -1,
 	}
 
 	if err := s.Write(rec); err != nil {
@@ -86,7 +86,7 @@ func TestChangelogSink_ColumnOrderPreserved(t *testing.T) {
 			"city":  engine.TextValue{V: "nyc"},
 			"total": engine.IntValue{V: 100},
 		},
-		Diff: 1,
+		Weight: 1,
 	}
 
 	if err := s.Write(rec); err != nil {
@@ -120,7 +120,7 @@ func TestChangelogSink_NoColumnOrderSortsKeys(t *testing.T) {
 			"a": engine.IntValue{V: 2},
 			"m": engine.IntValue{V: 3},
 		},
-		Diff: 1,
+		Weight: 1,
 	}
 
 	if err := s.Write(rec); err != nil {
@@ -146,7 +146,7 @@ func TestChangelogSink_NullValues(t *testing.T) {
 		Columns: map[string]engine.Value{
 			"x": engine.NullValue{},
 		},
-		Diff: 1,
+		Weight: 1,
 	}
 
 	if err := s.Write(rec); err != nil {
@@ -177,14 +177,14 @@ func TestChangelogSink_MultipleWrites(t *testing.T) {
 			"g":   engine.TextValue{V: "a"},
 			"cnt": engine.IntValue{V: 1},
 		},
-		Diff: -1,
+		Weight: -1,
 	}
 	insert := engine.Record{
 		Columns: map[string]engine.Value{
 			"g":   engine.TextValue{V: "a"},
 			"cnt": engine.IntValue{V: 2},
 		},
-		Diff: 1,
+		Weight: 1,
 	}
 
 	if err := s.Write(retract); err != nil {
@@ -216,7 +216,7 @@ func TestJSONSink_NoOpField(t *testing.T) {
 		Columns: map[string]engine.Value{
 			"name": engine.TextValue{V: "alice"},
 		},
-		Diff: 1,
+		Weight: 1,
 	}
 
 	if err := s.Write(rec); err != nil {
@@ -238,7 +238,7 @@ func TestChangelogSink_BoolValue(t *testing.T) {
 		Columns: map[string]engine.Value{
 			"active": engine.BoolValue{V: true},
 		},
-		Diff: 1,
+		Weight: 1,
 	}
 
 	if err := s.Write(rec); err != nil {
@@ -260,7 +260,7 @@ func TestChangelogSink_FloatValue(t *testing.T) {
 		Columns: map[string]engine.Value{
 			"val": engine.FloatValue{V: 3.14},
 		},
-		Diff: 1,
+		Weight: 1,
 	}
 
 	if err := s.Write(rec); err != nil {
@@ -284,9 +284,9 @@ func TestChangelogSink_OrderBy_SortedFinalSnapshot(t *testing.T) {
 
 	// Write records in unsorted order
 	for _, rec := range []engine.Record{
-		{Columns: map[string]engine.Value{"g": engine.TextValue{V: "c"}, "cnt": engine.IntValue{V: 3}}, Diff: 1},
-		{Columns: map[string]engine.Value{"g": engine.TextValue{V: "a"}, "cnt": engine.IntValue{V: 1}}, Diff: 1},
-		{Columns: map[string]engine.Value{"g": engine.TextValue{V: "b"}, "cnt": engine.IntValue{V: 2}}, Diff: 1},
+		{Columns: map[string]engine.Value{"g": engine.TextValue{V: "c"}, "cnt": engine.IntValue{V: 3}}, Weight: 1},
+		{Columns: map[string]engine.Value{"g": engine.TextValue{V: "a"}, "cnt": engine.IntValue{V: 1}}, Weight: 1},
+		{Columns: map[string]engine.Value{"g": engine.TextValue{V: "b"}, "cnt": engine.IntValue{V: 2}}, Weight: 1},
 	} {
 		if err := s.Write(rec); err != nil {
 			t.Fatalf("Write error: %v", err)
@@ -317,9 +317,9 @@ func TestChangelogSink_OrderBy_DescSort(t *testing.T) {
 	}
 
 	for _, rec := range []engine.Record{
-		{Columns: map[string]engine.Value{"g": engine.TextValue{V: "a"}, "cnt": engine.IntValue{V: 1}}, Diff: 1},
-		{Columns: map[string]engine.Value{"g": engine.TextValue{V: "b"}, "cnt": engine.IntValue{V: 3}}, Diff: 1},
-		{Columns: map[string]engine.Value{"g": engine.TextValue{V: "c"}, "cnt": engine.IntValue{V: 2}}, Diff: 1},
+		{Columns: map[string]engine.Value{"g": engine.TextValue{V: "a"}, "cnt": engine.IntValue{V: 1}}, Weight: 1},
+		{Columns: map[string]engine.Value{"g": engine.TextValue{V: "b"}, "cnt": engine.IntValue{V: 3}}, Weight: 1},
+		{Columns: map[string]engine.Value{"g": engine.TextValue{V: "c"}, "cnt": engine.IntValue{V: 2}}, Weight: 1},
 	} {
 		if err := s.Write(rec); err != nil {
 			t.Fatalf("Write error: %v", err)
@@ -346,10 +346,10 @@ func TestChangelogSink_OrderBy_RetractedRowsExcluded(t *testing.T) {
 	}
 
 	// Insert then retract "b"
-	s.Write(engine.Record{Columns: map[string]engine.Value{"g": engine.TextValue{V: "a"}, "cnt": engine.IntValue{V: 1}}, Diff: 1})
-	s.Write(engine.Record{Columns: map[string]engine.Value{"g": engine.TextValue{V: "b"}, "cnt": engine.IntValue{V: 2}}, Diff: 1})
-	s.Write(engine.Record{Columns: map[string]engine.Value{"g": engine.TextValue{V: "b"}, "cnt": engine.IntValue{V: 2}}, Diff: -1})
-	s.Write(engine.Record{Columns: map[string]engine.Value{"g": engine.TextValue{V: "c"}, "cnt": engine.IntValue{V: 3}}, Diff: 1})
+	s.Write(engine.Record{Columns: map[string]engine.Value{"g": engine.TextValue{V: "a"}, "cnt": engine.IntValue{V: 1}}, Weight: 1})
+	s.Write(engine.Record{Columns: map[string]engine.Value{"g": engine.TextValue{V: "b"}, "cnt": engine.IntValue{V: 2}}, Weight: 1})
+	s.Write(engine.Record{Columns: map[string]engine.Value{"g": engine.TextValue{V: "b"}, "cnt": engine.IntValue{V: 2}}, Weight: -1})
+	s.Write(engine.Record{Columns: map[string]engine.Value{"g": engine.TextValue{V: "c"}, "cnt": engine.IntValue{V: 3}}, Weight: 1})
 
 	s.Close()
 	results := parseNDJSON(t, &buf)
@@ -374,8 +374,8 @@ func TestChangelogSink_NoOrderBy_NoSnapshot(t *testing.T) {
 		ColumnOrder: []string{"g"},
 	}
 
-	s.Write(engine.Record{Columns: map[string]engine.Value{"g": engine.TextValue{V: "a"}}, Diff: 1})
-	s.Write(engine.Record{Columns: map[string]engine.Value{"g": engine.TextValue{V: "b"}}, Diff: 1})
+	s.Write(engine.Record{Columns: map[string]engine.Value{"g": engine.TextValue{V: "a"}}, Weight: 1})
+	s.Write(engine.Record{Columns: map[string]engine.Value{"g": engine.TextValue{V: "b"}}, Weight: 1})
 	s.Close()
 
 	results := parseNDJSON(t, &buf)

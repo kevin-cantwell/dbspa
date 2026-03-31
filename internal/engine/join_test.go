@@ -52,9 +52,9 @@ func TestExtractEquiJoinKeys_Reversed(t *testing.T) {
 
 func TestHashJoinOp_InnerJoin(t *testing.T) {
 	tableRecords := []Record{
-		{Columns: map[string]Value{"id": IntValue{V: 1}, "name": TextValue{V: "Alice"}}, Diff: 1},
-		{Columns: map[string]Value{"id": IntValue{V: 2}, "name": TextValue{V: "Bob"}}, Diff: 1},
-		{Columns: map[string]Value{"id": IntValue{V: 3}, "name": TextValue{V: "Charlie"}}, Diff: 1},
+		{Columns: map[string]Value{"id": IntValue{V: 1}, "name": TextValue{V: "Alice"}}, Weight: 1},
+		{Columns: map[string]Value{"id": IntValue{V: 2}, "name": TextValue{V: "Bob"}}, Weight: 1},
+		{Columns: map[string]Value{"id": IntValue{V: 3}, "name": TextValue{V: "Charlie"}}, Weight: 1},
 	}
 
 	op := &HashJoinOp{
@@ -69,7 +69,7 @@ func TestHashJoinOp_InnerJoin(t *testing.T) {
 	}
 
 	// Match
-	results := op.Probe(Record{Columns: map[string]Value{"user_id": IntValue{V: 1}, "action": TextValue{V: "login"}}, Diff: 1})
+	results := op.Probe(Record{Columns: map[string]Value{"user_id": IntValue{V: 1}, "action": TextValue{V: "login"}}, Weight: 1})
 	if len(results) != 1 {
 		t.Fatalf("expected 1 result, got %d", len(results))
 	}
@@ -86,7 +86,7 @@ func TestHashJoinOp_InnerJoin(t *testing.T) {
 	}
 
 	// No match
-	results = op.Probe(Record{Columns: map[string]Value{"user_id": IntValue{V: 99}}, Diff: 1})
+	results = op.Probe(Record{Columns: map[string]Value{"user_id": IntValue{V: 99}}, Weight: 1})
 	if len(results) != 0 {
 		t.Fatalf("expected 0 results for unmatched key, got %d", len(results))
 	}
@@ -94,7 +94,7 @@ func TestHashJoinOp_InnerJoin(t *testing.T) {
 
 func TestHashJoinOp_LeftJoin(t *testing.T) {
 	tableRecords := []Record{
-		{Columns: map[string]Value{"id": IntValue{V: 1}, "name": TextValue{V: "Alice"}}, Diff: 1},
+		{Columns: map[string]Value{"id": IntValue{V: 1}, "name": TextValue{V: "Alice"}}, Weight: 1},
 	}
 
 	op := &HashJoinOp{
@@ -109,7 +109,7 @@ func TestHashJoinOp_LeftJoin(t *testing.T) {
 	}
 
 	// Match
-	results := op.Probe(Record{Columns: map[string]Value{"user_id": IntValue{V: 1}}, Diff: 1})
+	results := op.Probe(Record{Columns: map[string]Value{"user_id": IntValue{V: 1}}, Weight: 1})
 	if len(results) != 1 {
 		t.Fatalf("expected 1 result, got %d", len(results))
 	}
@@ -118,7 +118,7 @@ func TestHashJoinOp_LeftJoin(t *testing.T) {
 	}
 
 	// No match — LEFT JOIN should emit NULLs
-	results = op.Probe(Record{Columns: map[string]Value{"user_id": IntValue{V: 99}}, Diff: 1})
+	results = op.Probe(Record{Columns: map[string]Value{"user_id": IntValue{V: 99}}, Weight: 1})
 	if len(results) != 1 {
 		t.Fatalf("expected 1 result for LEFT JOIN, got %d", len(results))
 	}
@@ -132,8 +132,8 @@ func TestHashJoinOp_LeftJoin(t *testing.T) {
 
 func TestHashJoinOp_MultipleMatches(t *testing.T) {
 	tableRecords := []Record{
-		{Columns: map[string]Value{"id": IntValue{V: 1}, "item": TextValue{V: "A"}}, Diff: 1},
-		{Columns: map[string]Value{"id": IntValue{V: 1}, "item": TextValue{V: "B"}}, Diff: 1},
+		{Columns: map[string]Value{"id": IntValue{V: 1}, "item": TextValue{V: "A"}}, Weight: 1},
+		{Columns: map[string]Value{"id": IntValue{V: 1}, "item": TextValue{V: "B"}}, Weight: 1},
 	}
 
 	op := &HashJoinOp{
@@ -147,7 +147,7 @@ func TestHashJoinOp_MultipleMatches(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	results := op.Probe(Record{Columns: map[string]Value{"user_id": IntValue{V: 1}}, Diff: 1})
+	results := op.Probe(Record{Columns: map[string]Value{"user_id": IntValue{V: 1}}, Weight: 1})
 	if len(results) != 2 {
 		t.Fatalf("expected 2 results for key with 2 table matches, got %d", len(results))
 	}
@@ -155,7 +155,7 @@ func TestHashJoinOp_MultipleMatches(t *testing.T) {
 
 func TestHashJoinOp_NullKey(t *testing.T) {
 	tableRecords := []Record{
-		{Columns: map[string]Value{"id": IntValue{V: 1}, "name": TextValue{V: "Alice"}}, Diff: 1},
+		{Columns: map[string]Value{"id": IntValue{V: 1}, "name": TextValue{V: "Alice"}}, Weight: 1},
 	}
 
 	op := &HashJoinOp{
@@ -168,7 +168,7 @@ func TestHashJoinOp_NullKey(t *testing.T) {
 	}
 
 	// NULL key should not match anything
-	results := op.Probe(Record{Columns: map[string]Value{"user_id": NullValue{}}, Diff: 1})
+	results := op.Probe(Record{Columns: map[string]Value{"user_id": NullValue{}}, Weight: 1})
 	if len(results) != 0 {
 		t.Fatalf("expected 0 results for NULL key, got %d", len(results))
 	}

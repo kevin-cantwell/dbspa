@@ -13,15 +13,15 @@ func TestDedupFilter(t *testing.T) {
 
 	rec1 := Record{
 		Columns: map[string]Value{"id": TextValue{V: "abc"}},
-		Diff:    1,
+		Weight:    1,
 	}
 	rec2 := Record{
 		Columns: map[string]Value{"id": TextValue{V: "abc"}},
-		Diff:    1,
+		Weight:    1,
 	}
 	rec3 := Record{
 		Columns: map[string]Value{"id": TextValue{V: "def"}},
-		Diff:    1,
+		Weight:    1,
 	}
 
 	// First occurrence should pass
@@ -46,7 +46,7 @@ func TestDedupFilterRetractionBypass(t *testing.T) {
 
 	rec := Record{
 		Columns: map[string]Value{"id": TextValue{V: "abc"}},
-		Diff:    -1, // retraction
+		Weight:    -1, // retraction
 	}
 
 	// Retractions always pass through
@@ -61,7 +61,7 @@ func TestDedupFilterWithin(t *testing.T) {
 
 	rec := Record{
 		Columns: map[string]Value{"id": TextValue{V: "abc"}},
-		Diff:    1,
+		Weight:    1,
 	}
 
 	// First should pass
@@ -82,9 +82,9 @@ func TestDedupFilterCapacity(t *testing.T) {
 	keyExpr := &ast.ColumnRef{Name: "id"}
 	df := NewDedupFilter(keyExpr, 0, 2) // capacity of 2
 
-	r1 := Record{Columns: map[string]Value{"id": TextValue{V: "a"}}, Diff: 1}
-	r2 := Record{Columns: map[string]Value{"id": TextValue{V: "b"}}, Diff: 1}
-	r3 := Record{Columns: map[string]Value{"id": TextValue{V: "c"}}, Diff: 1}
+	r1 := Record{Columns: map[string]Value{"id": TextValue{V: "a"}}, Weight: 1}
+	r2 := Record{Columns: map[string]Value{"id": TextValue{V: "b"}}, Weight: 1}
+	r3 := Record{Columns: map[string]Value{"id": TextValue{V: "c"}}, Weight: 1}
 
 	df.ShouldDrop(r1) // adds "a"
 	df.ShouldDrop(r2) // adds "b", capacity full
@@ -102,11 +102,11 @@ func TestDedupFilterNullKey(t *testing.T) {
 
 	rec1 := Record{
 		Columns: map[string]Value{"id": NullValue{}},
-		Diff:    1,
+		Weight:    1,
 	}
 	rec2 := Record{
 		Columns: map[string]Value{"id": NullValue{}},
-		Diff:    1,
+		Weight:    1,
 	}
 
 	// First NULL key passes
@@ -139,7 +139,7 @@ func TestDedupFilterWithinWindow(t *testing.T) {
 
 			rec := Record{
 				Columns: map[string]Value{"order_id": TextValue{V: "ORD-1"}},
-				Diff:    1,
+				Weight:    1,
 			}
 
 			if df.ShouldDrop(rec) {
@@ -168,24 +168,24 @@ func TestDedupFilterLRUEviction(t *testing.T) {
 	for i := 0; i < cap+2; i++ {
 		rec := Record{
 			Columns: map[string]Value{"id": IntValue{V: int64(i)}},
-			Diff:    1,
+			Weight:    1,
 		}
 		df.ShouldDrop(rec)
 	}
 
 	// Key 0 and 1 should be evicted
-	r0 := Record{Columns: map[string]Value{"id": IntValue{V: 0}}, Diff: 1}
+	r0 := Record{Columns: map[string]Value{"id": IntValue{V: 0}}, Weight: 1}
 	if df.ShouldDrop(r0) {
 		t.Error("key 0 should have been evicted and pass through")
 	}
 
-	r1 := Record{Columns: map[string]Value{"id": IntValue{V: 1}}, Diff: 1}
+	r1 := Record{Columns: map[string]Value{"id": IntValue{V: 1}}, Weight: 1}
 	if df.ShouldDrop(r1) {
 		t.Error("key 1 should have been evicted and pass through")
 	}
 
 	// Key cap+1 should still be in cache
-	rLast := Record{Columns: map[string]Value{"id": IntValue{V: int64(cap + 1)}}, Diff: 1}
+	rLast := Record{Columns: map[string]Value{"id": IntValue{V: int64(cap + 1)}}, Weight: 1}
 	if !df.ShouldDrop(rLast) {
 		t.Error("most recent key should still be cached as duplicate")
 	}
@@ -198,7 +198,7 @@ func TestDedupFilterRetractionAlwaysPasses(t *testing.T) {
 
 	rec := Record{
 		Columns: map[string]Value{"order_id": TextValue{V: "ORD-1"}},
-		Diff:    1,
+		Weight:    1,
 	}
 	// Insert first
 	df.ShouldDrop(rec)
@@ -206,7 +206,7 @@ func TestDedupFilterRetractionAlwaysPasses(t *testing.T) {
 	// Retraction for same key
 	retract := Record{
 		Columns: map[string]Value{"order_id": TextValue{V: "ORD-1"}},
-		Diff:    -1,
+		Weight:    -1,
 	}
 	if df.ShouldDrop(retract) {
 		t.Error("retraction should never be dropped")
@@ -237,21 +237,21 @@ func TestDedupFilterCompositeKey(t *testing.T) {
 			"user_id":    TextValue{V: "alice"},
 			"session_id": TextValue{V: "s1"},
 		},
-		Diff: 1,
+		Weight: 1,
 	}
 	rec2 := Record{
 		Columns: map[string]Value{
 			"user_id":    TextValue{V: "alice"},
 			"session_id": TextValue{V: "s1"},
 		},
-		Diff: 1,
+		Weight: 1,
 	}
 	rec3 := Record{
 		Columns: map[string]Value{
 			"user_id":    TextValue{V: "alice"},
 			"session_id": TextValue{V: "s2"},
 		},
-		Diff: 1,
+		Weight: 1,
 	}
 
 	if df.ShouldDrop(rec1) {
@@ -272,11 +272,11 @@ func TestDedupFilterNullKeyEquality(t *testing.T) {
 
 	rec1 := Record{
 		Columns: map[string]Value{"nullable_col": NullValue{}},
-		Diff:    1,
+		Weight:    1,
 	}
 	rec2 := Record{
 		Columns: map[string]Value{"nullable_col": NullValue{}},
-		Diff:    1,
+		Weight:    1,
 	}
 
 	if df.ShouldDrop(rec1) {
@@ -304,7 +304,7 @@ func TestDedupFilterManyDistinctKeys(t *testing.T) {
 	for i := 0; i < 100; i++ {
 		rec := Record{
 			Columns: map[string]Value{"id": IntValue{V: int64(i)}},
-			Diff:    1,
+			Weight:    1,
 		}
 		if df.ShouldDrop(rec) {
 			t.Errorf("first occurrence of key %d should not be dropped", i)
@@ -315,7 +315,7 @@ func TestDedupFilterManyDistinctKeys(t *testing.T) {
 	for i := 0; i < 100; i++ {
 		rec := Record{
 			Columns: map[string]Value{"id": IntValue{V: int64(i)}},
-			Diff:    1,
+			Weight:    1,
 		}
 		if !df.ShouldDrop(rec) {
 			t.Errorf("key %d should be detected as duplicate", i)
@@ -330,7 +330,7 @@ func TestDedupFilterEvalError(t *testing.T) {
 
 	rec := Record{
 		Columns: map[string]Value{"id": TextValue{V: "abc"}},
-		Diff:    1,
+		Weight:    1,
 	}
 	// Column does not exist, eval may return null or error
 	// Either way, record should not be dropped

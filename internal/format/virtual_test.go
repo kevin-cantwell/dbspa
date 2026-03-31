@@ -22,7 +22,7 @@ func TestInjectKafkaVirtuals(t *testing.T) {
 		Columns: map[string]engine.Value{
 			"x": engine.IntValue{V: 1},
 		},
-		Diff: 1,
+		Weight: 1,
 	}
 
 	recs := InjectKafkaVirtuals([]engine.Record{rec}, kr)
@@ -60,7 +60,7 @@ func TestInjectKafkaVirtualsNilKey(t *testing.T) {
 	}
 	rec := engine.Record{
 		Columns: map[string]engine.Value{},
-		Diff:    1,
+		Weight:    1,
 	}
 	recs := InjectKafkaVirtuals([]engine.Record{rec}, kr)
 	if !recs[0].Columns["_key"].IsNull() {
@@ -78,7 +78,7 @@ func TestInjectKafkaVirtualsNonUTF8Key(t *testing.T) {
 	}
 	rec := engine.Record{
 		Columns: map[string]engine.Value{},
-		Diff:    1,
+		Weight:    1,
 	}
 	recs := InjectKafkaVirtuals([]engine.Record{rec}, kr)
 	keyVal := recs[0].Columns["_key"].(engine.TextValue).V

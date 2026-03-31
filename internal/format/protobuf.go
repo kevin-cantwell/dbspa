@@ -67,7 +67,7 @@ func structToRecord(s *structpb.Struct) engine.Record {
 	return engine.Record{
 		Columns:   cols,
 		Timestamp: time.Now(),
-		Diff:      1,
+		Weight:      1,
 	}
 }
 

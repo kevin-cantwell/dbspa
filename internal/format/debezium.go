@@ -167,7 +167,7 @@ func (d *DebeziumDecoder) DecodeMulti(data []byte) ([]engine.Record, error) {
 }
 
 // buildRecord parses a JSON payload and merges in virtual columns.
-func (d *DebeziumDecoder) buildRecord(payload json.RawMessage, virtuals map[string]engine.Value, ts time.Time, diff int8) (engine.Record, error) {
+func (d *DebeziumDecoder) buildRecord(payload json.RawMessage, virtuals map[string]engine.Value, ts time.Time, diff int) (engine.Record, error) {
 	var raw map[string]any
 	dec := json.NewDecoder(bytes.NewReader(payload))
 	dec.UseNumber()
@@ -185,7 +185,7 @@ func (d *DebeziumDecoder) buildRecord(payload json.RawMessage, virtuals map[stri
 	return engine.Record{
 		Columns:   cols,
 		Timestamp: ts,
-		Diff:      diff,
+		Weight:      diff,
 	}, nil
 }
 

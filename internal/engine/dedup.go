@@ -45,7 +45,7 @@ func NewDedupFilter(keyExpr ast.Expr, within time.Duration, capacity int) *Dedup
 // Retractions always pass through (returns false).
 func (df *DedupFilter) ShouldDrop(rec Record) bool {
 	// Retractions bypass dedup entirely (spec 3.8)
-	if rec.Diff < 0 {
+	if rec.Weight < 0 {
 		return false
 	}
 

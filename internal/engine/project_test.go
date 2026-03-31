@@ -15,7 +15,7 @@ func TestProjectSpecificColumns(t *testing.T) {
 			"city": TextValue{V: "NYC"},
 		},
 		Timestamp: time.Now(),
-		Diff:      1,
+		Weight:      1,
 	}
 	cols := []ast.Column{
 		{Expr: &ast.ColumnRef{Name: "name"}},
@@ -43,7 +43,7 @@ func TestProjectWithAlias(t *testing.T) {
 	rec := Record{
 		Columns:   map[string]Value{"name": TextValue{V: "alice"}},
 		Timestamp: time.Now(),
-		Diff:      1,
+		Weight:      1,
 	}
 	cols := []ast.Column{
 		{Expr: &ast.ColumnRef{Name: "name"}, Alias: "username"},
@@ -68,7 +68,7 @@ func TestProjectStar(t *testing.T) {
 			"c": IntValue{V: 3},
 		},
 		Timestamp: time.Now(),
-		Diff:      1,
+		Weight:      1,
 	}
 	cols := []ast.Column{
 		{Expr: &ast.StarExpr{}},
@@ -91,7 +91,7 @@ func TestProjectWithExpression(t *testing.T) {
 	rec := Record{
 		Columns:   map[string]Value{"a": IntValue{V: 10}, "b": IntValue{V: 3}},
 		Timestamp: time.Now(),
-		Diff:      1,
+		Weight:      1,
 	}
 	cols := []ast.Column{
 		{
@@ -119,7 +119,7 @@ func TestProjectJsonAccess(t *testing.T) {
 			"obj": JsonValue{V: map[string]any{"email": "a@b.com"}},
 		},
 		Timestamp: time.Now(),
-		Diff:      1,
+		Weight:      1,
 	}
 	cols := []ast.Column{
 		{
@@ -145,7 +145,7 @@ func TestProjectColumnNameInference(t *testing.T) {
 	rec := Record{
 		Columns:   map[string]Value{"name": TextValue{V: "alice"}},
 		Timestamp: time.Now(),
-		Diff:      1,
+		Weight:      1,
 	}
 	// No alias - should infer from ColumnRef
 	cols := []ast.Column{
@@ -164,7 +164,7 @@ func TestProjectFunctionNameInference(t *testing.T) {
 	rec := Record{
 		Columns:   map[string]Value{"x": TextValue{V: "hello"}},
 		Timestamp: time.Now(),
-		Diff:      1,
+		Weight:      1,
 	}
 	cols := []ast.Column{
 		{Expr: &ast.FunctionCall{Name: "LENGTH", Args: []ast.Expr{&ast.ColumnRef{Name: "x"}}}},
@@ -184,7 +184,7 @@ func TestProjectJsonAccessNameInference(t *testing.T) {
 			"obj": JsonValue{V: map[string]any{"email": "a@b.com"}},
 		},
 		Timestamp: time.Now(),
-		Diff:      1,
+		Weight:      1,
 	}
 	// No alias - should infer "email" from the JSON key
 	cols := []ast.Column{
@@ -208,7 +208,7 @@ func TestProjectPreservesTimestampAndDiff(t *testing.T) {
 	rec := Record{
 		Columns:   map[string]Value{"x": IntValue{V: 1}},
 		Timestamp: ts,
-		Diff:      -1,
+		Weight:      -1,
 	}
 	cols := []ast.Column{{Expr: &ast.ColumnRef{Name: "x"}}}
 	out, err := Project(cols, rec)
@@ -218,8 +218,8 @@ func TestProjectPreservesTimestampAndDiff(t *testing.T) {
 	if !out.Timestamp.Equal(ts) {
 		t.Errorf("timestamp not preserved")
 	}
-	if out.Diff != -1 {
-		t.Errorf("diff not preserved: got %d, want -1", out.Diff)
+	if out.Weight != -1 {
+		t.Errorf("diff not preserved: got %d, want -1", out.Weight)
 	}
 }
 

@@ -74,8 +74,8 @@ func TestProtobufDecoder(t *testing.T) {
 
 	// All diffs should be +1
 	for i, r := range decoded {
-		if r.Diff != 1 {
-			t.Errorf("record %d: diff=%d, want 1", i, r.Diff)
+		if r.Weight != 1 {
+			t.Errorf("record %d: diff=%d, want 1", i, r.Weight)
 		}
 	}
 }

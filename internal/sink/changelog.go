@@ -43,7 +43,7 @@ func (s *ChangelogSink) Write(rec engine.Record) error {
 			s.rows = make(map[string]map[string]engine.Value)
 		}
 		key := s.rowKey(rec)
-		if rec.Diff < 0 {
+		if rec.Weight < 0 {
 			delete(s.rows, key)
 		} else {
 			row := make(map[string]engine.Value, len(rec.Columns))
@@ -60,7 +60,7 @@ func (s *ChangelogSink) Write(rec engine.Record) error {
 func (s *ChangelogSink) writeRecord(rec engine.Record) error {
 	w := s.writer()
 	op := "+"
-	if rec.Diff < 0 {
+	if rec.Weight < 0 {
 		op = "-"
 	}
 
@@ -126,7 +126,7 @@ func (s *ChangelogSink) Close() error {
 			row := s.rows[key]
 			rec := engine.Record{
 				Columns: row,
-				Diff:    1,
+				Weight:    1,
 			}
 			if err := s.writeRecord(rec); err != nil {
 				return err

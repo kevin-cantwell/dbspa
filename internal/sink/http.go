@@ -68,7 +68,7 @@ func (s *HTTPSink) Write(rec engine.Record) error {
 	s.stats.recordCount++
 	key := s.rowKey(rec)
 
-	if rec.Diff < 0 {
+	if rec.Weight < 0 {
 		delete(s.rows, key)
 		for i, k := range s.rowOrder {
 			if k == key {
@@ -261,7 +261,7 @@ func (s *HTTPSink) snapshotRows() []map[string]any {
 
 func (s *HTTPSink) buildSSEEvent(rec engine.Record) string {
 	m := make(map[string]any, len(s.ColumnOrder)+1)
-	if rec.Diff < 0 {
+	if rec.Weight < 0 {
 		m["op"] = "-"
 	} else {
 		m["op"] = "+"

@@ -110,7 +110,7 @@ func rowToRecord(row parquet.Row, names []string, fields []parquet.Field) engine
 	}
 	return engine.Record{
 		Columns: cols,
-		Diff:    1,
+		Weight:    1,
 	}
 }
 

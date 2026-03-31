@@ -195,7 +195,7 @@ func (op *WindowedAggregateOp) emitEarlyResults(out chan<- Record) {
 				out <- Record{
 					Columns:   retraction,
 					Timestamp: wb.key.End,
-					Diff:      -1,
+					Weight:      -1,
 				}
 			}
 
@@ -203,7 +203,7 @@ func (op *WindowedAggregateOp) emitEarlyResults(out chan<- Record) {
 			out <- Record{
 				Columns:   cols,
 				Timestamp: wb.key.End,
-				Diff:      1,
+				Weight:      1,
 			}
 
 			// Save the emitted values for future retraction.
@@ -300,7 +300,7 @@ func (op *WindowedAggregateOp) processRecord(rec Record, out chan<- Record) {
 					argVal = NullValue{}
 				}
 			}
-			if rec.Diff >= 0 {
+			if rec.Weight >= 0 {
 				wgs.accumulators[i].Add(argVal)
 				wgs.count++
 			} else {
@@ -391,7 +391,7 @@ func (op *WindowedAggregateOp) emitWindowResults(wb *windowBucket, out chan<- Re
 			out <- Record{
 				Columns:   retraction,
 				Timestamp: wb.key.End,
-				Diff:      -1,
+				Weight:      -1,
 			}
 		}
 
@@ -422,7 +422,7 @@ func (op *WindowedAggregateOp) emitWindowResults(wb *windowBucket, out chan<- Re
 		out <- Record{
 			Columns:   cols,
 			Timestamp: wb.key.End,
-			Diff:      1,
+			Weight:      1,
 		}
 	}
 }

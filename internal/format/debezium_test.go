@@ -21,8 +21,8 @@ func TestDebeziumCreate(t *testing.T) {
 		t.Fatalf("expected 1 record, got %d", len(recs))
 	}
 	rec := recs[0]
-	if rec.Diff != 1 {
-		t.Errorf("expected diff=+1, got %d", rec.Diff)
+	if rec.Weight != 1 {
+		t.Errorf("expected diff=+1, got %d", rec.Weight)
 	}
 	// Check payload columns
 	if rec.Get("name").String() != "alice" {
@@ -56,8 +56,8 @@ func TestDebeziumSnapshotRead(t *testing.T) {
 	if len(recs) != 1 {
 		t.Fatalf("expected 1 record, got %d", len(recs))
 	}
-	if recs[0].Diff != 1 {
-		t.Errorf("expected diff=+1, got %d", recs[0].Diff)
+	if recs[0].Weight != 1 {
+		t.Errorf("expected diff=+1, got %d", recs[0].Weight)
 	}
 }
 
@@ -79,16 +79,16 @@ func TestDebeziumUpdateFull(t *testing.T) {
 	}
 
 	// First: retraction of old state
-	if recs[0].Diff != -1 {
-		t.Errorf("expected first record diff=-1, got %d", recs[0].Diff)
+	if recs[0].Weight != -1 {
+		t.Errorf("expected first record diff=-1, got %d", recs[0].Weight)
 	}
 	if recs[0].Get("status").String() != "pending" {
 		t.Errorf("expected retraction status=pending, got %s", recs[0].Get("status").String())
 	}
 
 	// Second: insertion of new state
-	if recs[1].Diff != 1 {
-		t.Errorf("expected second record diff=+1, got %d", recs[1].Diff)
+	if recs[1].Weight != 1 {
+		t.Errorf("expected second record diff=+1, got %d", recs[1].Weight)
 	}
 	if recs[1].Get("status").String() != "shipped" {
 		t.Errorf("expected insertion status=shipped, got %s", recs[1].Get("status").String())
@@ -112,8 +112,8 @@ func TestDebeziumUpdateNullBefore(t *testing.T) {
 	if len(recs) != 1 {
 		t.Fatalf("expected 1 record (insertion only, retraction skipped), got %d", len(recs))
 	}
-	if recs[0].Diff != 1 {
-		t.Errorf("expected diff=+1, got %d", recs[0].Diff)
+	if recs[0].Weight != 1 {
+		t.Errorf("expected diff=+1, got %d", recs[0].Weight)
 	}
 }
 
@@ -149,8 +149,8 @@ func TestDebeziumDelete(t *testing.T) {
 	if len(recs) != 1 {
 		t.Fatalf("expected 1 record, got %d", len(recs))
 	}
-	if recs[0].Diff != -1 {
-		t.Errorf("expected diff=-1, got %d", recs[0].Diff)
+	if recs[0].Weight != -1 {
+		t.Errorf("expected diff=-1, got %d", recs[0].Weight)
 	}
 	if recs[0].Get("name").String() != "alice" {
 		t.Errorf("expected name=alice, got %s", recs[0].Get("name").String())
