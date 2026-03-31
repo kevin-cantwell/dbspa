@@ -47,10 +47,10 @@ Debezium records have an `op` field and `before`/`after` payloads. FoldDB unwrap
 
 | Debezium `op` | FoldDB records emitted |
 |---|---|
-| `c` (create) | 1 record: `(after, diff=+1)` |
-| `u` (update) | 2 records: `(before, diff=-1)` then `(after, diff=+1)` |
-| `d` (delete) | 1 record: `(before, diff=-1)` |
-| `r` (snapshot read) | 1 record: `(after, diff=+1)` |
+| `c` (create) | 1 record: `(after, weight=+1)` |
+| `u` (update) | 2 records: `(before, weight=-1)` then `(after, weight=+1)` |
+| `d` (delete) | 1 record: `(before, weight=-1)` |
+| `r` (snapshot read) | 1 record: `(after, weight=+1)` |
 | `t` (truncate) | Ignored (logged at warn level) |
 
 When `FORMAT DEBEZIUM` is specified, [virtual columns](sql.md#debezium-virtual-columns) (`_op`, `_before`, `_after`, `_table`, `_db`, `_ts`, `_source`) are available.

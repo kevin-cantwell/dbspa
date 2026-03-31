@@ -217,7 +217,7 @@ DEDUPLICATE BY order_id WITHIN '10 minutes'
 DEDUPLICATE BY order_id WITHIN '10 minutes' CAPACITY 500000
 ```
 
-Default cache capacity: 100,000 entries. LRU eviction when exceeded. Retractions (`diff=-1`) always pass through unconditionally.
+Default cache capacity: 100,000 entries. LRU eviction when exceeded. Retractions (negative weight) always pass through unconditionally.
 
 ## ORDER BY
 
