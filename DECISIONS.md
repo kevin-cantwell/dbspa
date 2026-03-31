@@ -162,3 +162,25 @@ GROUP BY region
 **Result:** Implemented in 3 commits. Parser + AST, pipeline wiring for both accumulating and windowed paths, 3 parser tests + 3 integration tests.
 
 ---
+
+### 7. Z-set formalization
+
+**Status:** In progress
+
+**Problem:** FoldDB's diff model (Diff int8, +1/-1) is an informal version of Z-sets from DBSP (Feldera's foundation). The informal approach works for simple operators but becomes fragile for complex queries (HAVING with retractions, multi-way joins, nested aggregation). It also prevents batch processing, which is needed to close the performance gap with DuckDB.
+
+**Design:**
+
+Phase 1 — Type change: Replace `Record.Diff int8` with `Record.Weight int`. All operators use Weight. Existing behavior preserved (Weight=+1 and -1 are equivalent to old Diff). This is the foundation.
+
+Phase 2 — Batch pipeline: Replace `chan Record` with `chan []Record`. Operators process batches. Configurable batch size (default 1024).
+
+Phase 3 — Batch compaction: Before aggregation, compact per group key — sum weights for identical keys, eliminating redundant accumulator updates.
+
+Phase 4 — Operator fusion: Fuse filter+project, filter+project+aggregate for common cases.
+
+**Why now:** The whole point of FoldDB is to close the gap between streaming and batch. Z-sets are the mathematical foundation that makes this possible. Deferring it accumulates tech debt.
+
+**Reference:** Budiu et al., "DBSP: Automatic Incremental View Maintenance" (VLDB 2023). Z-sets = multisets with integer weights. Every relational operator has a provably correct incremental version over Z-set deltas.
+
+---
