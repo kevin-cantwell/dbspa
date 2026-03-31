@@ -1,0 +1,64 @@
+site_name: FoldDB
+site_description: Streaming SQL with incremental aggregation
+site_url: https://folddb.cantwell.dev
+
+theme:
+  name: material
+  palette:
+    scheme: slate
+    primary: teal
+    accent: cyan
+  features:
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - content.code.copy
+    - search.highlight
+  icon:
+    repo: fontawesome/brands/github
+
+repo_url: https://github.com/kevin-cantwell/folddb
+repo_name: kevin-cantwell/folddb
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - Getting Started:
+    - Install: getting-started/install.md
+    - Quickstart: getting-started/quickstart.md
+    - Examples: getting-started/examples.md
+  - Concepts:
+    - Streams vs Tables: concepts/streams-vs-tables.md
+    - The Diff Model: concepts/diff-model.md
+    - Changelog Output: concepts/changelog-output.md
+    - Windowing: concepts/windowing.md
+    - Joins: concepts/joins.md
+  - Architecture:
+    - Overview: architecture/overview.md
+    - SQL Parser: architecture/parser.md
+    - Accumulators: architecture/accumulators.md
+    - Execution Pipeline: architecture/pipeline.md
+    - Checkpointing: architecture/checkpointing.md
+    - Performance: architecture/performance.md
+  - Reference:
+    - SQL Dialect: reference/sql.md
+    - CLI: reference/cli.md
+    - Formats: reference/formats.md
+    - Configuration: reference/configuration.md
+  - Contributing:
+    - Development: contributing/development.md
+    - Decisions: contributing/decisions.md
