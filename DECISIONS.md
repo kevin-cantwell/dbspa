@@ -189,5 +189,47 @@ Phase 4 — Operator fusion: Fuse filter+project, filter+project+aggregate for c
 - Phase 3: CompactBatch sums weights per fingerprint, drops zero-weight. Fixed processRecord to apply |weight| times.
 - Phase 4: FusedAggregateProcessor eliminates intermediate channel + goroutine. 22% end-to-end improvement.
 - Total: 2.2M record GROUP BY went from 10s → 7.8s (22% faster overall)
+- Output format: changed from op:"+"/"-" to _weight:N (true Z-set deltas)
+
+---
+
+### 8. Differential Dataflow Join Operator
+
+**Status:** In progress
+
+**Problem:** The current join is a plain hash join — loads a file into a hash map, probes per stream record. It doesn't handle table-side changes. If reference data changes (via CDC), previously-emitted join results are stale and never corrected.
+
+**Design:**
+
+Implement the DBSP join formula:
+```
+delta(A JOIN B) = (delta_A JOIN B) UNION (A JOIN delta_B) UNION (delta_A JOIN delta_B)
+```
+
+**Core abstraction: Arrangement**
+
+An indexed Z-set that supports:
+- `Apply(delta []Record)` — merge weighted entries
+- `Lookup(key) []Record` — find all entries matching a join key
+- `Scan() []Record` — iterate all entries
+
+Both sides of the join maintain an arrangement. When a delta arrives on either side, it's joined against the other side's arrangement and the results (with multiplied weights) are emitted.
+
+**Architecture:**
+
+```
+Left source (stream) ──delta──▶ Left Arrangement ──┐
+                                                    ├──▶ DD Join ──▶ output delta
+Right source (file/CDC) ──delta──▶ Right Arrangement ──┘
+```
+
+**Weight multiplication:** output weight = left_weight × right_weight. This is what makes the algebra correct — a retraction on either side produces retractions in the output.
+
+**Join types unified:**
+- Stream-to-file: right arrangement loaded once, never receives deltas
+- Stream-to-CDC: right arrangement seeded from initial load, receives Debezium deltas
+- Stream-to-stream: both arrangements receive deltas (interval window bounds retention)
+
+**LEFT JOIN:** When a left record has no match in the right arrangement, emit a NULL-filled row with the left record's weight. When a match later appears, retract the NULL row and emit the matched row.
 
 ---
