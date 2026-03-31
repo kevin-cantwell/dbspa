@@ -959,6 +959,56 @@ func TestSeedFromWithJoin(t *testing.T) {
 	}
 }
 
+func TestJoinWithinInterval(t *testing.T) {
+	p := New("SELECT o.order_id, p.payment_id FROM 'kafka://broker/orders' o JOIN 'kafka://broker/payments' p ON o.order_id = p.order_id WITHIN INTERVAL '10 minutes'")
+	stmt, err := p.Parse()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if stmt.Join == nil {
+		t.Fatal("expected JOIN clause")
+	}
+	if stmt.Join.Within == nil {
+		t.Fatal("expected WITHIN clause on JOIN")
+	}
+	if *stmt.Join.Within != "10 minutes" {
+		t.Errorf("within: got %q, want %q", *stmt.Join.Within, "10 minutes")
+	}
+	if stmt.Join.Source.URI != "kafka://broker/payments" {
+		t.Errorf("join source: got %q, want %q", stmt.Join.Source.URI, "kafka://broker/payments")
+	}
+}
+
+func TestJoinWithoutWithin(t *testing.T) {
+	// Without WITHIN, the clause should parse fine (Within is nil)
+	p := New("SELECT * FROM stdin o JOIN '/tmp/users.ndjson' u ON o.id = u.id")
+	stmt, err := p.Parse()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if stmt.Join.Within != nil {
+		t.Errorf("expected nil Within for file join, got %q", *stmt.Join.Within)
+	}
+}
+
+func TestJoinWithinWithGroupBy(t *testing.T) {
+	p := New("SELECT o.order_id, COUNT(*) FROM 'kafka://broker/orders' o JOIN 'kafka://broker/payments' p ON o.order_id = p.order_id WITHIN INTERVAL '5 minutes' GROUP BY o.order_id")
+	stmt, err := p.Parse()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if stmt.Join == nil || stmt.Join.Within == nil {
+		t.Fatal("expected JOIN with WITHIN clause")
+	}
+	if *stmt.Join.Within != "5 minutes" {
+		t.Errorf("within: got %q, want %q", *stmt.Join.Within, "5 minutes")
+	}
+	if stmt.GroupBy == nil {
+		t.Fatal("expected GROUP BY clause")
+	}
+}
+
 func containsStr(s, substr string) bool {
 	return len(s) >= len(substr) && searchString(s, substr)
 }

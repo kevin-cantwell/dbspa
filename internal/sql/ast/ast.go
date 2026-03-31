@@ -38,6 +38,7 @@ type JoinClause struct {
 	Source    *TableSource // the file/URI to join against
 	Alias     string       // optional alias
 	Condition Expr         // the ON expression
+	Within    *string      // optional: interval bound duration string for stream-stream joins
 }
 
 func (*JoinClause) nodeTag() {}

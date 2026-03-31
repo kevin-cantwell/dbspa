@@ -449,11 +449,27 @@ func (p *Parser) parseJoinClause() (*ast.JoinClause, error) {
 		return nil, err
 	}
 
+	// Parse optional WITHIN INTERVAL '<duration>'
+	var within *string
+	if p.lex.Peek().Type == lexer.TokenWithin {
+		p.lex.Next() // consume WITHIN
+		if err := p.expect(lexer.TokenInterval); err != nil {
+			return nil, err
+		}
+		tok := p.lex.Peek()
+		if tok.Type != lexer.TokenString {
+			return nil, p.errorf(tok, "expected duration string after WITHIN INTERVAL, got %q", tok.Literal)
+		}
+		p.lex.Next()
+		within = &tok.Literal
+	}
+
 	return &ast.JoinClause{
 		Type:      joinType,
 		Source:    src,
 		Alias:     alias,
 		Condition: cond,
+		Within:    within,
 	}, nil
 }
 
@@ -1156,7 +1172,8 @@ func isClauseKeyword(tt lexer.TokenType) bool {
 	case lexer.TokenFrom, lexer.TokenWhere, lexer.TokenGroup, lexer.TokenHaving,
 		lexer.TokenOrder, lexer.TokenLimit, lexer.TokenWindow, lexer.TokenEmit,
 		lexer.TokenEvent, lexer.TokenWatermark, lexer.TokenDeduplicate,
-		lexer.TokenFormat, lexer.TokenJoin, lexer.TokenLeft, lexer.TokenOn:
+		lexer.TokenFormat, lexer.TokenJoin, lexer.TokenLeft, lexer.TokenOn,
+		lexer.TokenWithin:
 		return true
 	}
 	return false
