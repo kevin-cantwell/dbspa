@@ -527,51 +527,196 @@ func runAccumulating(ctx context.Context, stmt *ast.SelectStatement, src *source
 		joinedCh = applyJoin(ctx, joinOp, decodedCh)
 	}
 
-	// Apply WHERE filter
-	filteredCh := make(chan engine.Record)
-	var inputCount atomic.Int64
-	go func() {
-		defer close(filteredCh)
-		for rec := range joinedCh {
-			inputCount.Add(1)
-			if stmt.Where != nil {
-				pass, err := engine.Filter(stmt.Where, rec)
-				if err != nil || !pass {
-					continue
-				}
-			}
-			select {
-			case filteredCh <- rec:
-			case <-ctx.Done():
-				return
-			}
-		}
-	}()
-
-	return runAccumulatingFromFiltered(ctx, stmt, filteredCh, &inputCount, flags)
+	// Batch unfiltered records. WHERE filtering is fused with aggregation
+	// inside runAccumulatingFromBatches via FusedAggregateProcessor.
+	return runAccumulatingFromRecords(ctx, stmt, joinedCh, flags)
 }
 
 func runAccumulatingFromRecords(ctx context.Context, stmt *ast.SelectStatement, recordCh <-chan engine.Record, flags cliFlags) error {
-	filteredCh := make(chan engine.Record)
+	// Batch unfiltered records. The FusedAggregateProcessor applies WHERE
+	// filtering and aggregation in a single pass per batch, eliminating the
+	// intermediate filtered channel and second batch/unbatch cycle.
 	var inputCount atomic.Int64
-	go func() {
-		defer close(filteredCh)
-		for rec := range recordCh {
-			inputCount.Add(1)
-			if stmt.Where != nil {
-				pass, err := engine.Filter(stmt.Where, rec)
-				if err != nil || !pass {
-					continue
+	batchedCh := engine.BatchChannel(recordCh, engine.DefaultBatchSize)
+	return runAccumulatingFromBatches(ctx, stmt, batchedCh, &inputCount, flags)
+}
+
+// runAccumulatingFromBatches is the fused accumulating path. It takes pre-batched
+// unfiltered records and applies WHERE filter + aggregation in a single pass per
+// batch via FusedAggregateProcessor. This eliminates the intermediate filtered
+// channel and second batch/unbatch cycle that runAccumulatingFromFiltered requires.
+func runAccumulatingFromBatches(ctx context.Context, stmt *ast.SelectStatement, batchedCh <-chan engine.Batch, inputCount *atomic.Int64, flags cliFlags) error {
+	aggCols, err := engine.ParseAggColumns(stmt.Columns, stmt.GroupBy)
+	if err != nil {
+		return fmt.Errorf("aggregate setup error: %w", err)
+	}
+
+	columnOrder := make([]string, len(aggCols))
+	for i, col := range aggCols {
+		columnOrder[i] = col.Alias
+	}
+
+	aggOp := engine.NewAggregateOp(aggCols, stmt.GroupBy, stmt.Having)
+
+	// Convert AST ORDER BY to sink OrderBySpec
+	orderBy := resolveOrderBy(stmt.OrderBy)
+
+	var snk sink.Sink
+	if isTTY() {
+		tui := &sink.TUISink{
+			Writer:      os.Stdout,
+			ColumnOrder: columnOrder,
+			OrderBy:     orderBy,
+		}
+		tui.InputCount = inputCount
+		tui.Start()
+		snk = tui
+	} else {
+		snk = &sink.ChangelogSink{
+			Writer:      os.Stdout,
+			ColumnOrder: columnOrder,
+			OrderBy:     orderBy,
+		}
+	}
+
+	// Set up checkpointing if --stateful
+	restoredFromCheckpoint := false
+	var cpMgr *engine.CheckpointManager
+	if flags.stateful {
+		cpMgr, err = engine.NewCheckpointManager(flags.sql, flags.stateDir, flags.checkpointInterval)
+		if err != nil {
+			return fmt.Errorf("checkpoint setup error: %w", err)
+		}
+
+		// Restore from existing checkpoint
+		cp, loadErr := cpMgr.Load()
+		if loadErr != nil {
+			fmt.Fprintf(os.Stderr, "Warning: cannot load checkpoint: %v (starting fresh)\n", loadErr)
+		} else if cp != nil && cp.State != nil {
+			if restoreErr := aggOp.UnmarshalState(cp.State); restoreErr != nil {
+				fmt.Fprintf(os.Stderr, "Warning: cannot restore state: %v (starting fresh)\n", restoreErr)
+			} else {
+				restoredFromCheckpoint = true
+				// Re-emit current state to sink so TUI/changelog shows existing data
+				for _, rec := range aggOp.CurrentState() {
+					if writeErr := snk.Write(rec); writeErr != nil {
+						return fmt.Errorf("output error during state restore: %w", writeErr)
+					}
 				}
 			}
-			select {
-			case filteredCh <- rec:
-			case <-ctx.Done():
-				return
+		}
+	}
+
+	// SEED FROM: load seed file and feed directly to aggregator (skip if checkpoint restored).
+	// Seed records are already WHERE-filtered by loadSeedRecords, so we bypass
+	// the fused processor's filter and send them straight to the aggregate.
+	if stmt.Seed != nil && !restoredFromCheckpoint {
+		seedRecords, seedErr := loadSeedRecords(stmt)
+		if seedErr != nil {
+			return fmt.Errorf("seed load error: %w", seedErr)
+		}
+		if len(seedRecords) > 0 {
+			seedOutCh := make(chan engine.Record, 256)
+			go func() {
+				aggOp.ProcessBatch(engine.Batch(seedRecords), seedOutCh)
+				close(seedOutCh)
+			}()
+			for rec := range seedOutCh {
+				if err := snk.Write(rec); err != nil {
+					return fmt.Errorf("output error during seed: %w", err)
+				}
 			}
 		}
+	}
+
+	// saveCheckpoint is a helper for periodic and final saves.
+	saveCheckpoint := func() {
+		if cpMgr == nil {
+			return
+		}
+		stateBytes, marshalErr := aggOp.MarshalState()
+		if marshalErr != nil {
+			fmt.Fprintf(os.Stderr, "Warning: checkpoint marshal error: %v\n", marshalErr)
+			return
+		}
+		cpData := &engine.CheckpointData{
+			State: stateBytes,
+		}
+		if saveErr := cpMgr.Save(cpData); saveErr != nil {
+			fmt.Fprintf(os.Stderr, "Warning: checkpoint save error: %v\n", saveErr)
+		}
+	}
+
+	// Start periodic checkpoint ticker
+	var ticker *time.Ticker
+	var tickerDone chan struct{}
+	if cpMgr != nil {
+		interval := flags.checkpointInterval
+		if interval == 0 {
+			interval = 5 * time.Second
+		}
+		ticker = time.NewTicker(interval)
+		tickerDone = make(chan struct{})
+		go func() {
+			defer close(tickerDone)
+			for {
+				select {
+				case <-ticker.C:
+					saveCheckpoint()
+				case <-ctx.Done():
+					return
+				}
+			}
+		}()
+	}
+
+	// Fused filter+aggregate: WHERE filtering and aggregation happen in a
+	// single pass per batch, eliminating the intermediate record channel.
+	fused := &engine.FusedAggregateProcessor{
+		Where:       stmt.Where,
+		AggregateOp: aggOp,
+		InputCount:  inputCount,
+	}
+
+	aggOutCh := make(chan engine.Record)
+	go func() {
+		fused.ProcessBatches(batchedCh, aggOutCh)
 	}()
-	return runAccumulatingFromFiltered(ctx, stmt, filteredCh, &inputCount, flags)
+
+	limit := stmt.Limit
+	count := 0
+	var exitErr error
+loop:
+	for {
+		select {
+		case rec, ok := <-aggOutCh:
+			if !ok {
+				exitErr = snk.Close()
+				break loop
+			}
+			if limit != nil && count >= *limit {
+				exitErr = snk.Close()
+				break loop
+			}
+			if err := snk.Write(rec); err != nil {
+				exitErr = fmt.Errorf("output error: %w", err)
+				break loop
+			}
+			count++
+		case <-ctx.Done():
+			exitErr = snk.Close()
+			break loop
+		}
+	}
+
+	// Final checkpoint save at shutdown
+	if ticker != nil {
+		ticker.Stop()
+	}
+	_ = tickerDone
+	saveCheckpoint()
+
+	return exitErr
 }
 
 func runAccumulatingFromFiltered(ctx context.Context, stmt *ast.SelectStatement, filteredCh <-chan engine.Record, inputCount *atomic.Int64, flags cliFlags) error {
