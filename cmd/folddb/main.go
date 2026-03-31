@@ -440,10 +440,14 @@ func runNonAccumulatingFromRecords(ctx context.Context, stmt *ast.SelectStatemen
 	}
 
 	snk := &sink.JSONSink{Writer: os.Stdout}
+
+	// Batch records before filter+projection to amortize channel overhead.
+	batchedCh := engine.BatchChannel(recordCh, engine.DefaultBatchSize)
+
 	outputCh := make(chan engine.Record)
 
 	go func() {
-		pipeline.Process(recordCh, outputCh)
+		pipeline.ProcessBatches(batchedCh, outputCh)
 	}()
 
 	limit := stmt.Limit
@@ -705,9 +709,12 @@ func runAccumulatingFromFiltered(ctx context.Context, stmt *ast.SelectStatement,
 		}()
 	}
 
+	// Batch records before aggregation to amortize channel overhead.
+	batchedCh := engine.BatchChannel(filteredCh, engine.DefaultBatchSize)
+
 	aggOutCh := make(chan engine.Record)
 	go func() {
-		aggOp.Process(filteredCh, aggOutCh)
+		aggOp.ProcessBatches(batchedCh, aggOutCh)
 	}()
 
 	limit := stmt.Limit
@@ -1430,9 +1437,12 @@ func runServeAccumulatingFromRecords(ctx context.Context, stmt *ast.SelectStatem
 	}
 	aggOp := engine.NewAggregateOp(aggCols, stmt.GroupBy, stmt.Having)
 
+	// Batch records before aggregation to amortize channel overhead.
+	batchedCh := engine.BatchChannel(filteredCh, engine.DefaultBatchSize)
+
 	aggOutCh := make(chan engine.Record)
 	go func() {
-		aggOp.Process(filteredCh, aggOutCh)
+		aggOp.ProcessBatches(batchedCh, aggOutCh)
 	}()
 
 	for {
@@ -1498,9 +1508,12 @@ func runServeNonAccumulatingFromRecords(ctx context.Context, stmt *ast.SelectSta
 		Where:   stmt.Where,
 	}
 
+	// Batch records before filter+projection to amortize channel overhead.
+	batchedCh := engine.BatchChannel(recordCh, engine.DefaultBatchSize)
+
 	outputCh := make(chan engine.Record)
 	go func() {
-		pipeline.Process(recordCh, outputCh)
+		pipeline.ProcessBatches(batchedCh, outputCh)
 	}()
 
 	for {
