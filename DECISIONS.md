@@ -268,6 +268,63 @@ Both goroutines call ProcessLeftDelta/ProcessRightDelta respectively. DDJoinOp h
 
 **For stdin, two-source joins aren't possible** (only one stdin). Both sources must be Kafka topics, files, or one of each.
 
-**Result:** Implemented in 4 commits. WITHIN INTERVAL clause in parser/AST, Arrangement.EvictBefore with retraction output, DDJoinOp.EvictAndRetract for atomic eviction+retraction, sync.Mutex on DDJoinOp for concurrent access, pipeline wiring for two Kafka consumers + eviction goroutine. 12 new tests including concurrency with race detector.
+**Result:** Implemented in 4 commits. WITHIN INTERVAL clause in parser/AST, Arrangement.EvictBefore with retraction output, DDJoinOp.EvictAndRetract for atomic eviction+retraction, sync.Mutex on DDJoinOp for concurrent access. Refactored to single multi-topic Kafka consumer. 12 new tests including concurrency with race detector.
+
+---
+
+### 10. DuckDB Integration
+
+**Status:** In progress
+
+**Problem:** FoldDB can only read files via `--input` with its own decoders. For table-side queries (Parquet, CSV, databases), DuckDB is orders of magnitude faster (70x on batch queries). The original PRD envisioned DuckDB as the table-side engine with FoldDB handling the streaming layer.
+
+**Design:**
+
+DuckDB serves as the **table query engine** for the right side of joins and for standalone file queries. FoldDB's streaming engine handles Kafka/stdin/CDC.
+
+**Architecture:**
+```
+Stream source ──▶ FoldDB pipeline ──▶ DD Join ──▶ Output
+                                        ▲
+DuckDB query ──▶ Result as Arrangement ──┘
+```
+
+**Use cases:**
+
+1. **Direct file query** — `FROM '/path/to/file.parquet'` routes to DuckDB instead of FoldDB's Parquet decoder. DuckDB handles the SQL (predicate pushdown, column pruning) natively.
+
+2. **Join against DuckDB query** — `JOIN (SELECT * FROM '/data/users.parquet' WHERE active) u ON ...` executes the subquery in DuckDB, loads the result into a DD join arrangement.
+
+3. **Remote database** — `FROM 'pg://host/db/table'` routes to DuckDB's Postgres scanner.
+
+**Implementation approach:**
+
+Phase 1: Embed DuckDB via `github.com/marcboeker/go-duckdb` (CGo). Add a `DuckDBSource` that:
+- Takes a SQL query string and a source path
+- Executes via DuckDB
+- Returns results as `[]engine.Record`
+- For joins: loads results into a DD join arrangement
+
+Phase 2: Route file URIs (`.parquet`, `.csv`) and database URIs (`pg://`, `mysql://`) to DuckDB automatically. FoldDB's own file decoders become the fallback for streaming formats.
+
+**Syntax:**
+```sql
+-- DuckDB handles the file query natively
+SELECT * FROM '/data/orders.parquet' WHERE region = 'us-east'
+
+-- Stream joined against DuckDB table
+SELECT e.*, u.name
+FROM 'kafka://broker/events' e
+JOIN '/data/users.parquet' u ON e.user_id = u.id
+
+-- DuckDB scans Postgres
+SELECT * FROM 'pg://host/db/orders' WHERE status = 'pending'
+```
+
+**Trade-offs:**
+- CGo dependency (already have it for SQLite via modernc.org, but DuckDB is heavier)
+- Binary size increases (~40MB for DuckDB)
+- Cross-compilation gets harder
+- But: 70x performance on batch queries is worth it
 
 ---
