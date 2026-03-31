@@ -78,10 +78,12 @@ func (op *AggregateOp) Process(in <-chan Record, out chan<- Record) error {
 }
 
 // ProcessBatch applies aggregation to all records in a batch, emitting
-// results to out. This is initially equivalent to calling processRecord
-// in a loop, but provides the hook for Phase 3 batch compaction.
+// results to out. Before processing, the batch is compacted: records with
+// identical column fingerprints have their weights summed, and entries
+// whose net weight is zero are dropped entirely.
 func (op *AggregateOp) ProcessBatch(batch Batch, out chan<- Record) {
-	for _, rec := range batch {
+	compacted := CompactBatch(batch)
+	for _, rec := range compacted {
 		op.processRecord(rec, out)
 	}
 }
@@ -125,7 +127,14 @@ func (op *AggregateOp) processRecord(rec Record, out chan<- Record) {
 		op.keyOrder = append(op.keyOrder, keyStr)
 	}
 
-	// Apply Add or Retract to each accumulator
+	// Apply Add or Retract to each accumulator.
+	// Weight magnitude determines how many times the operation is applied.
+	// This is essential for correctness with batch compaction (Phase 3),
+	// where multiple identical records are merged into one with weight > 1.
+	absWeight := rec.Weight
+	if absWeight < 0 {
+		absWeight = -absWeight
+	}
 	for i, col := range op.Columns {
 		if !col.IsAggregate {
 			continue
@@ -141,10 +150,12 @@ func (op *AggregateOp) processRecord(rec Record, out chan<- Record) {
 			}
 		}
 
-		if rec.Weight >= 0 {
-			gs.accumulators[i].Add(argVal)
-		} else {
-			gs.accumulators[i].Retract(argVal)
+		for w := 0; w < absWeight; w++ {
+			if rec.Weight >= 0 {
+				gs.accumulators[i].Add(argVal)
+			} else {
+				gs.accumulators[i].Retract(argVal)
+			}
 		}
 	}
 
