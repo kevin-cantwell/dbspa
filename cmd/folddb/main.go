@@ -259,11 +259,11 @@ func run() error {
 	isAccumulating := stmt.GroupBy != nil
 	isWindowed := stmt.Window != nil
 
-	// Build hash join operator if JOIN is present
-	var joinOp *engine.HashJoinOp
+	// Build DD join operator if JOIN is present
+	var joinOp *engine.DDJoinOp
 	if stmt.Join != nil {
 		var err error
-		joinOp, err = buildJoinOp(stmt)
+		joinOp, err = buildDDJoinOp(stmt)
 		if err != nil {
 			return err
 		}
@@ -331,7 +331,7 @@ func getSQL(q *QueryCmd) (string, error) {
 	return "", fmt.Errorf("usage: folddb <SQL> or folddb -f <file.sql>")
 }
 
-func runKafka(ctx context.Context, stmt *ast.SelectStatement, dec format.Decoder, isAccumulating, isWindowed bool, flags cliFlags, dl *deadLetterWriter, joinOp *engine.HashJoinOp) error {
+func runKafka(ctx context.Context, stmt *ast.SelectStatement, dec format.Decoder, isAccumulating, isWindowed bool, flags cliFlags, dl *deadLetterWriter, joinOp *engine.DDJoinOp) error {
 	cfg, err := source.ParseKafkaURI(stmt.From.URI)
 	if err != nil {
 		return err
@@ -379,7 +379,7 @@ func runKafka(ctx context.Context, stmt *ast.SelectStatement, dec format.Decoder
 	return runNonAccumulatingFromRecords(ctx, stmt, finalCh)
 }
 
-func runNonAccumulating(ctx context.Context, stmt *ast.SelectStatement, src *source.Stdin, dec format.Decoder, dl *deadLetterWriter, joinOp *engine.HashJoinOp) error {
+func runNonAccumulating(ctx context.Context, stmt *ast.SelectStatement, src *source.Stdin, dec format.Decoder, dl *deadLetterWriter, joinOp *engine.DDJoinOp) error {
 	recordCh := make(chan engine.Record)
 
 	// Stream decoders handle their own framing — bypass line-based reading.
@@ -480,7 +480,7 @@ func runNonAccumulatingFromRecords(ctx context.Context, stmt *ast.SelectStatemen
 	}
 }
 
-func runAccumulating(ctx context.Context, stmt *ast.SelectStatement, src *source.Stdin, dec format.Decoder, flags cliFlags, dl *deadLetterWriter, joinOp *engine.HashJoinOp) error {
+func runAccumulating(ctx context.Context, stmt *ast.SelectStatement, src *source.Stdin, dec format.Decoder, flags cliFlags, dl *deadLetterWriter, joinOp *engine.DDJoinOp) error {
 	// Stream decoders handle their own framing — bypass line-based reading.
 	if sd, ok := dec.(format.StreamDecoder); ok {
 		recordCh := make(chan engine.Record)
@@ -722,7 +722,7 @@ loop:
 
 
 // runWindowed handles windowed aggregation from stdin source.
-func runWindowed(ctx context.Context, stmt *ast.SelectStatement, src *source.Stdin, dec format.Decoder, flags cliFlags, dl *deadLetterWriter, joinOp *engine.HashJoinOp) error {
+func runWindowed(ctx context.Context, stmt *ast.SelectStatement, src *source.Stdin, dec format.Decoder, flags cliFlags, dl *deadLetterWriter, joinOp *engine.DDJoinOp) error {
 	recordCh := make(chan engine.Record)
 
 	// Stream decoders handle their own framing — bypass line-based reading.
@@ -1224,10 +1224,10 @@ func runServe(c *ServeCmd) error {
 
 	isAccumulating := stmt.GroupBy != nil
 
-	// Build hash join operator if JOIN is present
-	var joinOp *engine.HashJoinOp
+	// Build DD join operator if JOIN is present
+	var joinOp *engine.DDJoinOp
 	if stmt.Join != nil {
-		joinOp, err = buildJoinOp(stmt)
+		joinOp, err = buildDDJoinOp(stmt)
 		if err != nil {
 			return err
 		}
@@ -1295,7 +1295,7 @@ func runServe(c *ServeCmd) error {
 	return runServeNonAccumulating(runCtx, stmt, inputSrc, dec, httpSink, joinOp)
 }
 
-func runServeKafka(ctx context.Context, stmt *ast.SelectStatement, dec format.Decoder, isAccumulating bool, snk *sink.HTTPSink, c *ServeCmd, joinOp *engine.HashJoinOp) error {
+func runServeKafka(ctx context.Context, stmt *ast.SelectStatement, dec format.Decoder, isAccumulating bool, snk *sink.HTTPSink, c *ServeCmd, joinOp *engine.DDJoinOp) error {
 	cfg, err := source.ParseKafkaURI(stmt.From.URI)
 	if err != nil {
 		return err
@@ -1338,7 +1338,7 @@ func runServeKafka(ctx context.Context, stmt *ast.SelectStatement, dec format.De
 	return runServeNonAccumulatingFromRecords(ctx, stmt, finalCh, snk)
 }
 
-func runServeAccumulating(ctx context.Context, stmt *ast.SelectStatement, src *source.Stdin, dec format.Decoder, snk *sink.HTTPSink, joinOp *engine.HashJoinOp) error {
+func runServeAccumulating(ctx context.Context, stmt *ast.SelectStatement, src *source.Stdin, dec format.Decoder, snk *sink.HTTPSink, joinOp *engine.DDJoinOp) error {
 	recordCh := make(chan engine.Record)
 
 	if sd, ok := dec.(format.StreamDecoder); ok {
@@ -1429,7 +1429,7 @@ func runServeAccumulatingFromRecords(ctx context.Context, stmt *ast.SelectStatem
 	}
 }
 
-func runServeNonAccumulating(ctx context.Context, stmt *ast.SelectStatement, src *source.Stdin, dec format.Decoder, snk *sink.HTTPSink, joinOp *engine.HashJoinOp) error {
+func runServeNonAccumulating(ctx context.Context, stmt *ast.SelectStatement, src *source.Stdin, dec format.Decoder, snk *sink.HTTPSink, joinOp *engine.DDJoinOp) error {
 	recordCh := make(chan engine.Record)
 
 	if sd, ok := dec.(format.StreamDecoder); ok {
@@ -1591,8 +1591,10 @@ func loadSeedRecords(stmt *ast.SelectStatement) ([]engine.Record, error) {
 	return filtered, nil
 }
 
-// buildJoinOp constructs a HashJoinOp from the parsed JOIN clause.
-func buildJoinOp(stmt *ast.SelectStatement) (*engine.HashJoinOp, error) {
+// buildDDJoinOp constructs a DDJoinOp from the parsed JOIN clause.
+// The right (table) side is loaded into the right arrangement as initial state.
+// The left (stream) side arrangement starts empty and receives deltas during streaming.
+func buildDDJoinOp(stmt *ast.SelectStatement) (*engine.DDJoinOp, error) {
 	join := stmt.Join
 
 	// Load table file
@@ -1614,31 +1616,30 @@ func buildJoinOp(stmt *ast.SelectStatement) (*engine.HashJoinOp, error) {
 		return nil, fmt.Errorf("join key extraction error: %w", err)
 	}
 
-	op := &engine.HashJoinOp{
-		StreamKeyExpr: streamKey,
-		TableKeyExpr:  tableKey,
-		LeftJoin:      join.Type == "LEFT JOIN",
-		StreamAlias:   streamAlias,
-		TableAlias:    tableAlias,
-	}
+	op := engine.NewDDJoinOp(streamKey, tableKey, streamAlias, tableAlias, join.Type == "LEFT JOIN")
 
-	if err := op.BuildIndex(tableRecords); err != nil {
-		return nil, fmt.Errorf("join index build error: %w", err)
+	// Load table records into right arrangement as initial state
+	tableBatch := make(engine.Batch, len(tableRecords))
+	for i, rec := range tableRecords {
+		if rec.Weight == 0 {
+			rec.Weight = 1
+		}
+		tableBatch[i] = rec
 	}
+	op.Right.Apply(tableBatch)
 
-	// Debug log — only show with --explain
-	_ = len(tableRecords) // suppress unused if we remove the log
 	return op, nil
 }
 
-// applyJoin wraps a record channel with join probing, emitting joined records.
-func applyJoin(ctx context.Context, joinOp *engine.HashJoinOp, in <-chan engine.Record) <-chan engine.Record {
-	out := make(chan engine.Record)
+// applyJoin wraps a record channel with DD join, processing each stream record
+// as a left delta against the right arrangement.
+func applyJoin(ctx context.Context, joinOp *engine.DDJoinOp, in <-chan engine.Record) <-chan engine.Record {
+	out := make(chan engine.Record, 256)
 	go func() {
 		defer close(out)
 		for rec := range in {
-			joined := joinOp.Probe(rec)
-			for _, jr := range joined {
+			results := joinOp.ProcessLeftDeltaSlice(engine.Batch{rec})
+			for _, jr := range results {
 				select {
 				case out <- jr:
 				case <-ctx.Done():
