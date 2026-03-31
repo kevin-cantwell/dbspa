@@ -183,4 +183,11 @@ Phase 4 — Operator fusion: Fuse filter+project, filter+project+aggregate for c
 
 **Reference:** Budiu et al., "DBSP: Automatic Incremental View Maintenance" (VLDB 2023). Z-sets = multisets with integer weights. Every relational operator has a provably correct incremental version over Z-set deltas.
 
+**Results:**
+- Phase 1: Diff int8 → Weight int (mechanical rename, all tests pass)
+- Phase 2: Batch pipeline with BatchChannel (1024 records / 10ms flush). ~40% faster filter/project.
+- Phase 3: CompactBatch sums weights per fingerprint, drops zero-weight. Fixed processRecord to apply |weight| times.
+- Phase 4: FusedAggregateProcessor eliminates intermediate channel + goroutine. 22% end-to-end improvement.
+- Total: 2.2M record GROUP BY went from 10s → 7.8s (22% faster overall)
+
 ---
