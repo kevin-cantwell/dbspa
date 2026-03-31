@@ -232,4 +232,6 @@ Right source (file/CDC) ──delta──▶ Right Arrangement ──┘
 
 **LEFT JOIN:** When a left record has no match in the right arrangement, emit a NULL-filled row with the left record's weight. When a match later appears, retract the NULL row and emit the matched row.
 
+**Result:** Implemented in 4 commits. Arrangement (indexed Z-set with Apply/Lookup/Scan), DDJoinOp with ProcessLeftDelta/ProcessRightDelta, weight multiplication (left*right), LEFT JOIN NULL transitions, pipeline wiring. 10 tests including CDC right-side change propagation: customer name change retracts old join results and emits corrected ones. Old HashJoinOp preserved as reference.
+
 ---
