@@ -3,6 +3,8 @@ package engine
 import (
 	"testing"
 	"time"
+
+	"github.com/kevin-cantwell/folddb/internal/sql/ast"
 )
 
 func TestBatchChannel_FullBatch(t *testing.T) {
@@ -320,6 +322,289 @@ func BenchmarkAggregate_RecordAtATime(b *testing.B) {
 
 func BenchmarkAggregate_Batched(b *testing.B) {
 	records := makeBenchRecords(b.N)
+	cols := []AggColumn{
+		{Alias: "total", IsAggregate: true, AggFunc: "COUNT", IsStar: true, GroupByIdx: -1},
+	}
+
+	in := make(chan Record, 256)
+	out := make(chan Record, 256)
+
+	go func() {
+		defer close(in)
+		for _, r := range records {
+			in <- r
+		}
+	}()
+
+	batched := BatchChannel(in, DefaultBatchSize)
+
+	op := NewAggregateOp(cols, nil, nil)
+	go func() {
+		op.ProcessBatches(batched, out)
+	}()
+
+	for range out {
+	}
+}
+
+// --- CompactBatch tests ---
+
+func TestCompactBatch_OppositeWeightsCancel(t *testing.T) {
+	// Two records with same columns but opposite weights should cancel out
+	batch := make(Batch, CompactBatchThreshold+2)
+	// Fill with unique filler records to exceed threshold
+	for i := 0; i < CompactBatchThreshold; i++ {
+		batch[i] = Record{
+			Columns: map[string]Value{"x": IntValue{V: int64(i + 100)}},
+			Weight:  1,
+		}
+	}
+	// Add a pair that should cancel
+	batch[CompactBatchThreshold] = Record{
+		Columns: map[string]Value{"x": IntValue{V: 42}},
+		Weight:  1,
+	}
+	batch[CompactBatchThreshold+1] = Record{
+		Columns: map[string]Value{"x": IntValue{V: 42}},
+		Weight:  -1,
+	}
+
+	result := CompactBatch(batch)
+
+	// The cancelling pair should be gone
+	for _, rec := range result {
+		if v, ok := rec.Get("x").(IntValue); ok && v.V == 42 {
+			t.Fatalf("expected x=42 to be cancelled, but found it with weight=%d", rec.Weight)
+		}
+	}
+	if len(result) != CompactBatchThreshold {
+		t.Fatalf("expected %d records after compaction, got %d", CompactBatchThreshold, len(result))
+	}
+}
+
+func TestCompactBatch_SameWeightAccumulates(t *testing.T) {
+	// Two inserts of the same record should merge into weight=+2
+	batch := make(Batch, CompactBatchThreshold+2)
+	for i := 0; i < CompactBatchThreshold; i++ {
+		batch[i] = Record{
+			Columns: map[string]Value{"x": IntValue{V: int64(i + 100)}},
+			Weight:  1,
+		}
+	}
+	batch[CompactBatchThreshold] = Record{
+		Columns: map[string]Value{"x": IntValue{V: 99}},
+		Weight:  1,
+	}
+	batch[CompactBatchThreshold+1] = Record{
+		Columns: map[string]Value{"x": IntValue{V: 99}},
+		Weight:  1,
+	}
+
+	result := CompactBatch(batch)
+
+	found := false
+	for _, rec := range result {
+		if v, ok := rec.Get("x").(IntValue); ok && v.V == 99 {
+			if rec.Weight != 2 {
+				t.Fatalf("expected weight=2 for x=99, got weight=%d", rec.Weight)
+			}
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("expected to find x=99 in compacted batch")
+	}
+}
+
+func TestCompactBatch_MixedBatchReducesSize(t *testing.T) {
+	// Build a batch with many duplicates — compaction should reduce it
+	n := 100
+	batch := make(Batch, n)
+	for i := 0; i < n; i++ {
+		// Only 5 distinct values
+		batch[i] = Record{
+			Columns: map[string]Value{"x": IntValue{V: int64(i % 5)}},
+			Weight:  1,
+		}
+	}
+
+	result := CompactBatch(batch)
+
+	if len(result) != 5 {
+		t.Fatalf("expected 5 unique records after compaction, got %d", len(result))
+	}
+
+	// Each should have weight=20 (100 records / 5 distinct values)
+	for _, rec := range result {
+		if rec.Weight != 20 {
+			t.Fatalf("expected weight=20, got weight=%d for %v", rec.Weight, rec.Get("x"))
+		}
+	}
+}
+
+func TestCompactBatch_BelowThresholdReturnsUnchanged(t *testing.T) {
+	// Small batch should be returned as-is (no compaction overhead)
+	batch := Batch{
+		{Columns: map[string]Value{"x": IntValue{V: 1}}, Weight: 1},
+		{Columns: map[string]Value{"x": IntValue{V: 1}}, Weight: -1},
+	}
+
+	result := CompactBatch(batch)
+
+	// Should NOT be compacted because batch is below threshold
+	if len(result) != 2 {
+		t.Fatalf("expected 2 records (no compaction below threshold), got %d", len(result))
+	}
+}
+
+func TestCompactBatch_CorrectnessSameAsUncompacted(t *testing.T) {
+	// Build a batch with insertions and retractions for a COUNT(*) aggregation
+	// and verify compacted processing produces identical final state.
+	n := 200
+	batch := make(Batch, n)
+	for i := 0; i < n; i++ {
+		batch[i] = Record{
+			Columns: map[string]Value{"region": TextValue{V: "us-east"}, "amount": IntValue{V: int64(i % 10)}},
+			Weight:  1,
+		}
+	}
+	// Add some retractions
+	for i := 0; i < 50; i++ {
+		batch = append(batch, Record{
+			Columns: map[string]Value{"region": TextValue{V: "us-east"}, "amount": IntValue{V: int64(i % 10)}},
+			Weight:  -1,
+		})
+	}
+
+	cols := []AggColumn{
+		{Alias: "region", Expr: &ast.ColumnRef{Name: "region"}, GroupByIdx: 0},
+		{Alias: "total", IsAggregate: true, AggFunc: "COUNT", IsStar: true, GroupByIdx: -1},
+	}
+	groupBy := []ast.Expr{&ast.ColumnRef{Name: "region"}}
+
+	// Non-compacted: process the full batch record-at-a-time
+	op1 := NewAggregateOp(cols, groupBy, nil)
+	in1 := make(chan Record, len(batch))
+	for _, r := range batch {
+		in1 <- r
+	}
+	close(in1)
+	out1 := make(chan Record, 1000)
+	op1.Process(in1, out1)
+
+	var results1 []Record
+	for r := range out1 {
+		results1 = append(results1, r)
+	}
+
+	// Compacted: process via ProcessBatch (which calls CompactBatch)
+	op2 := NewAggregateOp(cols, groupBy, nil)
+	out2 := make(chan Record, 1000)
+	op2.ProcessBatch(batch, out2)
+	close(out2)
+
+	var results2 []Record
+	for r := range out2 {
+		results2 = append(results2, r)
+	}
+
+	// Both should arrive at the same final count.
+	// Get final insertion record from each.
+	var final1, final2 Record
+	for _, r := range results1 {
+		if r.Weight > 0 {
+			final1 = r
+		}
+	}
+	for _, r := range results2 {
+		if r.Weight > 0 {
+			final2 = r
+		}
+	}
+
+	v1 := final1.Get("total").(IntValue).V
+	v2 := final2.Get("total").(IntValue).V
+	if v1 != v2 {
+		t.Fatalf("correctness violation: non-compacted count=%d, compacted count=%d", v1, v2)
+	}
+	// 200 inserts - 50 retracts = 150
+	if v1 != 150 {
+		t.Fatalf("expected final count=150, got %d", v1)
+	}
+}
+
+// --- GroupByKey tests ---
+
+func TestGroupByKey_PartitionsByKey(t *testing.T) {
+	batch := Batch{
+		{Columns: map[string]Value{"region": TextValue{V: "us-east"}, "x": IntValue{V: 1}}, Weight: 1},
+		{Columns: map[string]Value{"region": TextValue{V: "us-west"}, "x": IntValue{V: 2}}, Weight: 1},
+		{Columns: map[string]Value{"region": TextValue{V: "us-east"}, "x": IntValue{V: 3}}, Weight: 1},
+		{Columns: map[string]Value{"region": TextValue{V: "eu"}, "x": IntValue{V: 4}}, Weight: 1},
+		{Columns: map[string]Value{"region": TextValue{V: "us-west"}, "x": IntValue{V: 5}}, Weight: 1},
+	}
+
+	keyExprs := []ast.Expr{&ast.ColumnRef{Name: "region"}}
+	groups := GroupByKey(batch, keyExprs)
+
+	if len(groups) != 3 {
+		t.Fatalf("expected 3 groups, got %d", len(groups))
+	}
+
+	// Count records per group
+	for key, sub := range groups {
+		switch {
+		case len(sub) == 2:
+			// us-east or us-west
+		case len(sub) == 1:
+			// eu
+		default:
+			t.Fatalf("unexpected group %s with %d records", key, len(sub))
+		}
+	}
+}
+
+// --- Compaction benchmarks ---
+
+func BenchmarkCompactBatch_HighDuplication(b *testing.B) {
+	// Batch with lots of duplicates — compaction should help
+	batch := make(Batch, 1024)
+	for i := range batch {
+		batch[i] = Record{
+			Columns: map[string]Value{"x": IntValue{V: int64(i % 10)}},
+			Weight:  1,
+		}
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		CompactBatch(batch)
+	}
+}
+
+func BenchmarkCompactBatch_NoDuplication(b *testing.B) {
+	// Batch with all unique records — compaction is pure overhead
+	batch := make(Batch, 1024)
+	for i := range batch {
+		batch[i] = Record{
+			Columns: map[string]Value{"x": IntValue{V: int64(i)}},
+			Weight:  1,
+		}
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		CompactBatch(batch)
+	}
+}
+
+func BenchmarkAggregate_BatchedWithCompaction(b *testing.B) {
+	// Same as BenchmarkAggregate_Batched but with duplicates to exercise compaction
+	records := make([]Record, b.N)
+	for i := range records {
+		records[i] = Record{
+			Columns: map[string]Value{"x": IntValue{V: int64(i % 100)}},
+			Weight:  1,
+		}
+	}
 	cols := []AggColumn{
 		{Alias: "total", IsAggregate: true, AggFunc: "COUNT", IsStar: true, GroupByIdx: -1},
 	}
