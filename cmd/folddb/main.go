@@ -259,9 +259,22 @@ func run() error {
 	isAccumulating := stmt.GroupBy != nil
 	isWindowed := stmt.Window != nil
 
+	// Detect stream-stream join: both FROM and JOIN are Kafka URIs
+	isStreamStreamJoin := false
+	if stmt.Join != nil && stmt.From != nil {
+		leftIsKafka := strings.HasPrefix(stmt.From.URI, "kafka://")
+		rightIsKafka := strings.HasPrefix(stmt.Join.Source.URI, "kafka://")
+		isStreamStreamJoin = leftIsKafka && rightIsKafka
+	}
+
+	// Validate: stream-stream joins require WITHIN interval
+	if isStreamStreamJoin && stmt.Join.Within == nil {
+		return fmt.Errorf("stream-stream joins require a WITHIN INTERVAL clause to bound retention")
+	}
+
 	// Build DD join operator if JOIN is present
 	var joinOp *engine.DDJoinOp
-	if stmt.Join != nil {
+	if stmt.Join != nil && !isStreamStreamJoin {
 		var err error
 		joinOp, err = buildDDJoinOp(stmt)
 		if err != nil {
@@ -283,6 +296,12 @@ func run() error {
 	if stmt.From != nil {
 		fromURI = stmt.From.URI
 	}
+
+	// Stream-stream Kafka join: both sides are Kafka topics
+	if isStreamStreamJoin {
+		return runStreamStreamKafka(runCtx, stmt, dec, isAccumulating, isWindowed, flags, dlWriter)
+	}
+
 	if fromURI != "" && strings.HasPrefix(fromURI, "kafka://") {
 		return runKafka(runCtx, stmt, dec, isAccumulating, isWindowed, flags, dlWriter, joinOp)
 	}
@@ -377,6 +396,119 @@ func runKafka(ctx context.Context, stmt *ast.SelectStatement, dec format.Decoder
 		return runAccumulatingFromRecords(ctx, stmt, finalCh, flags)
 	}
 	return runNonAccumulatingFromRecords(ctx, stmt, finalCh)
+}
+
+func runStreamStreamKafka(ctx context.Context, stmt *ast.SelectStatement, dec format.Decoder, isAccumulating, isWindowed bool, flags cliFlags, dl *deadLetterWriter) error {
+	join := stmt.Join
+
+	// Parse WITHIN interval
+	withinDuration, err := engine.ParseDuration(*join.Within)
+	if err != nil {
+		return fmt.Errorf("invalid WITHIN interval: %w", err)
+	}
+
+	// Parse both Kafka URIs
+	leftCfg, err := source.ParseKafkaURI(stmt.From.URI)
+	if err != nil {
+		return fmt.Errorf("left source: %w", err)
+	}
+	rightCfg, err := source.ParseKafkaURI(join.Source.URI)
+	if err != nil {
+		return fmt.Errorf("right source: %w", err)
+	}
+
+	// Extract join keys
+	streamAlias := stmt.FromAlias
+	tableAlias := join.Alias
+	streamKey, tableKey, err := engine.ExtractEquiJoinKeys(join.Condition, streamAlias, tableAlias)
+	if err != nil {
+		return fmt.Errorf("join key extraction error: %w", err)
+	}
+
+	// Create DD join operator with empty arrangements (both sides are streams)
+	joinOp := engine.NewDDJoinOp(streamKey, tableKey, streamAlias, tableAlias, join.Type == "LEFT JOIN")
+
+	// Right side decoder (may have different format)
+	rightFormatStr := ""
+	if join.Source != nil {
+		rightFormatStr = join.Source.Format
+	}
+	rightDec, err := format.NewDecoder(rightFormatStr)
+	if err != nil {
+		return fmt.Errorf("right source decoder: %w", err)
+	}
+
+	// Start both Kafka consumers
+	leftKafka := source.NewKafka(ctx, leftCfg)
+	rightKafka := source.NewKafka(ctx, rightCfg)
+	leftKafkaCh := leftKafka.Read()
+	rightKafkaCh := rightKafka.Read()
+
+	// Output channel for joined records
+	outCh := make(chan engine.Record, 256)
+
+	// Left goroutine: read left Kafka, decode, ProcessLeftDelta
+	go func() {
+		for kr := range leftKafkaCh {
+			if kr.Value == nil {
+				continue
+			}
+			recs, err := decodeWithCSVHeader(dec, kr.Value)
+			if err != nil {
+				handleDeserError(dl, err, kr.Value, kr.Offset, int64(kr.Partition))
+				continue
+			}
+			recs = format.InjectKafkaVirtuals(recs, kr)
+			for _, rec := range recs {
+				joinOp.ProcessLeftDelta(engine.Batch{rec}, outCh)
+			}
+		}
+	}()
+
+	// Right goroutine: read right Kafka, decode, ProcessRightDelta
+	go func() {
+		for kr := range rightKafkaCh {
+			if kr.Value == nil {
+				continue
+			}
+			recs, err := decodeWithCSVHeader(rightDec, kr.Value)
+			if err != nil {
+				handleDeserError(dl, err, kr.Value, kr.Offset, int64(kr.Partition))
+				continue
+			}
+			recs = format.InjectKafkaVirtuals(recs, kr)
+			for _, rec := range recs {
+				joinOp.ProcessRightDelta(engine.Batch{rec}, outCh)
+			}
+		}
+	}()
+
+	// Eviction goroutine: periodically evict expired entries
+	evictInterval := withinDuration / 10
+	if evictInterval < time.Second {
+		evictInterval = time.Second
+	}
+	go func() {
+		ticker := time.NewTicker(evictInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				cutoff := time.Now().Add(-withinDuration)
+				joinOp.EvictAndRetract(cutoff, outCh)
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
+	if isWindowed {
+		return runWindowedFromRecords(ctx, stmt, outCh, flags)
+	}
+	if isAccumulating {
+		return runAccumulatingFromRecords(ctx, stmt, outCh, flags)
+	}
+	return runNonAccumulatingFromRecords(ctx, stmt, outCh)
 }
 
 func runNonAccumulating(ctx context.Context, stmt *ast.SelectStatement, src *source.Stdin, dec format.Decoder, dl *deadLetterWriter, joinOp *engine.DDJoinOp) error {
@@ -1223,6 +1355,18 @@ func runServe(c *ServeCmd) error {
 	}
 
 	isAccumulating := stmt.GroupBy != nil
+
+	// Validate stream-stream join in serve mode
+	if stmt.Join != nil && stmt.From != nil {
+		leftIsKafka := strings.HasPrefix(stmt.From.URI, "kafka://")
+		rightIsKafka := strings.HasPrefix(stmt.Join.Source.URI, "kafka://")
+		if leftIsKafka && rightIsKafka {
+			if stmt.Join.Within == nil {
+				return fmt.Errorf("stream-stream joins require a WITHIN INTERVAL clause to bound retention")
+			}
+			return fmt.Errorf("stream-stream joins are not yet supported in serve mode")
+		}
+	}
 
 	// Build DD join operator if JOIN is present
 	var joinOp *engine.DDJoinOp
