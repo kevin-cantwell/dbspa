@@ -235,3 +235,35 @@ Right source (file/CDC) ──delta──▶ Right Arrangement ──┘
 **Result:** Implemented in 4 commits. Arrangement (indexed Z-set with Apply/Lookup/Scan), DDJoinOp with ProcessLeftDelta/ProcessRightDelta, weight multiplication (left*right), LEFT JOIN NULL transitions, pipeline wiring. 10 tests including CDC right-side change propagation: customer name change retracts old join results and emits corrected ones. Old HashJoinOp preserved as reference.
 
 ---
+
+### 9. Stream-Stream Joins
+
+**Status:** In progress
+
+**Problem:** The current DD join only handles stream-to-file (right side is static). Stream-stream joins are needed for correlating two live data sources — e.g., matching orders to payments, correlating clicks to purchases.
+
+**Design:**
+
+The DD join operator already supports bidirectional deltas (ProcessLeftDelta + ProcessRightDelta). Stream-stream joins need:
+
+1. **Two concurrent source readers** feeding into the same DDJoinOp
+2. **Time-bounded retention** — arrangements can't grow forever. An interval bound limits how long entries are kept.
+3. **Syntax** — `FROM 'kafka://broker/orders' o JOIN 'kafka://broker/payments' p ON o.order_id = p.order_id AND p.ts BETWEEN o.ts AND o.ts + INTERVAL '10 minutes'`
+
+**The interval bound is mandatory.** Without it, both arrangements grow indefinitely. The spec (Section 9.3) requires a time bound for stream-stream joins — FoldDB errors if none is specified.
+
+**Architecture:**
+
+```
+Kafka topic A ──goroutine──▶ Left Arrangement  ──┐
+                                                   ├──▶ DDJoinOp ──▶ output
+Kafka topic B ──goroutine──▶ Right Arrangement ──┘
+```
+
+Both goroutines call ProcessLeftDelta/ProcessRightDelta respectively. The DDJoinOp is already thread-safe (arrangements have RWMutex).
+
+**Retention/eviction:** A background goroutine periodically scans arrangements and evicts entries older than the interval bound. Evicted entries produce retractions through the join (weight=-1).
+
+**For stdin, two-source joins aren't possible** (only one stdin). Both sources must be Kafka topics, files, or one of each.
+
+---
