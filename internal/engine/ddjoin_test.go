@@ -16,6 +16,15 @@ func ddRec(cols map[string]Value, weight int) Record {
 	}
 }
 
+// Helper to create a record with a specific timestamp.
+func ddRecAt(cols map[string]Value, weight int, ts time.Time) Record {
+	return Record{
+		Columns:   cols,
+		Timestamp: ts,
+		Weight:    weight,
+	}
+}
+
 func TestDDJoinOp_InnerJoin_StreamToFile(t *testing.T) {
 	// Simulate the current stream-to-file use case through DD join.
 	// Right side is loaded once (file), left side receives stream deltas.
@@ -394,5 +403,193 @@ func TestDDJoinOp_RightSideChanges_MultipleLeftRecords(t *testing.T) {
 	}
 	if insertions != 2 {
 		t.Errorf("expected 2 insertions, got %d", insertions)
+	}
+}
+
+func TestArrangement_EvictBefore(t *testing.T) {
+	a := NewArrangement(&ast.ColumnRef{Name: "id"})
+
+	t0 := time.Date(2025, 1, 1, 10, 0, 0, 0, time.UTC)
+	t1 := time.Date(2025, 1, 1, 10, 5, 0, 0, time.UTC)
+	t2 := time.Date(2025, 1, 1, 10, 10, 0, 0, time.UTC)
+
+	// Insert records at different times
+	a.Apply(Batch{
+		ddRecAt(map[string]Value{"id": IntValue{V: 1}, "name": TextValue{V: "Alice"}}, 1, t0),
+		ddRecAt(map[string]Value{"id": IntValue{V: 2}, "name": TextValue{V: "Bob"}}, 1, t1),
+		ddRecAt(map[string]Value{"id": IntValue{V: 3}, "name": TextValue{V: "Charlie"}}, 1, t2),
+	})
+
+	// Evict before t1 — should remove Alice (t0 < t1)
+	cutoff := t1
+	evicted := a.EvictBefore(cutoff)
+	if len(evicted) != 1 {
+		t.Fatalf("expected 1 evicted record, got %d", len(evicted))
+	}
+	if evicted[0].Weight != -1 {
+		t.Errorf("evicted weight should be -1, got %d", evicted[0].Weight)
+	}
+	if v := evicted[0].Columns["name"]; v.String() != "Alice" {
+		t.Errorf("expected evicted record to be Alice, got %v", v)
+	}
+
+	// Verify arrangement state: Bob and Charlie remain
+	if entries := a.LookupString("1"); len(entries) != 0 {
+		t.Errorf("expected Alice removed from arrangement, got %d entries", len(entries))
+	}
+	if entries := a.LookupString("2"); len(entries) != 1 {
+		t.Errorf("expected Bob still in arrangement, got %d entries", len(entries))
+	}
+	if entries := a.LookupString("3"); len(entries) != 1 {
+		t.Errorf("expected Charlie still in arrangement, got %d entries", len(entries))
+	}
+}
+
+func TestArrangement_EvictBefore_Empty(t *testing.T) {
+	a := NewArrangement(&ast.ColumnRef{Name: "id"})
+	evicted := a.EvictBefore(time.Now())
+	if len(evicted) != 0 {
+		t.Errorf("expected 0 evicted from empty arrangement, got %d", len(evicted))
+	}
+}
+
+func TestArrangement_EvictBefore_NothingExpired(t *testing.T) {
+	a := NewArrangement(&ast.ColumnRef{Name: "id"})
+	future := time.Date(2025, 12, 31, 0, 0, 0, 0, time.UTC)
+	a.Apply(Batch{
+		ddRecAt(map[string]Value{"id": IntValue{V: 1}}, 1, future),
+	})
+	evicted := a.EvictBefore(time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC))
+	if len(evicted) != 0 {
+		t.Errorf("expected 0 evicted (all in future), got %d", len(evicted))
+	}
+}
+
+func TestDDJoinOp_StreamStream_BothSides(t *testing.T) {
+	// Two streams, matching records arrive on both sides → joined output emitted
+	op := NewDDJoinOp(
+		&ast.ColumnRef{Name: "order_id"},
+		&ast.ColumnRef{Name: "order_id"},
+		"o", "p", false,
+	)
+
+	// Left stream: order arrives
+	results := op.ProcessLeftDeltaSlice(Batch{
+		ddRec(map[string]Value{"order_id": IntValue{V: 1}, "amount": IntValue{V: 100}}, 1),
+	})
+	// No right-side records yet → no output
+	if len(results) != 0 {
+		t.Fatalf("expected 0 results before right arrives, got %d", len(results))
+	}
+
+	// Right stream: payment arrives for same order
+	results = op.ProcessRightDeltaSlice(Batch{
+		ddRec(map[string]Value{"order_id": IntValue{V: 1}, "payment_id": TextValue{V: "pay-1"}}, 1),
+	})
+	// Now both sides have a match → should produce 1 joined row
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result after both sides arrive, got %d", len(results))
+	}
+	if results[0].Weight != 1 {
+		t.Errorf("expected weight=1, got %d", results[0].Weight)
+	}
+	if v := results[0].Columns["o.amount"]; v == nil || v.String() != "100" {
+		t.Errorf("expected o.amount=100, got %v", v)
+	}
+	if v := results[0].Columns["p.payment_id"]; v == nil || v.String() != "pay-1" {
+		t.Errorf("expected p.payment_id=pay-1, got %v", v)
+	}
+}
+
+func TestDDJoinOp_StreamStream_EvictionRetractions(t *testing.T) {
+	// Eviction removes old entries and produces join retractions
+	op := NewDDJoinOp(
+		&ast.ColumnRef{Name: "order_id"},
+		&ast.ColumnRef{Name: "order_id"},
+		"o", "p", false,
+	)
+
+	t0 := time.Date(2025, 1, 1, 10, 0, 0, 0, time.UTC)
+	t1 := time.Date(2025, 1, 1, 10, 5, 0, 0, time.UTC)
+
+	// Left stream: order at t0
+	op.ProcessLeftDeltaSlice(Batch{
+		ddRecAt(map[string]Value{"order_id": IntValue{V: 1}, "amount": IntValue{V: 100}}, 1, t0),
+	})
+
+	// Right stream: payment at t1
+	results := op.ProcessRightDeltaSlice(Batch{
+		ddRecAt(map[string]Value{"order_id": IntValue{V: 1}, "payment_id": TextValue{V: "pay-1"}}, 1, t1),
+	})
+	if len(results) != 1 {
+		t.Fatalf("expected 1 join result, got %d", len(results))
+	}
+
+	// Evict left entries before t1 (removes the order)
+	cutoff := t1
+	leftEvicted := op.Left.EvictBefore(cutoff)
+	if len(leftEvicted) != 1 {
+		t.Fatalf("expected 1 evicted from left, got %d", len(leftEvicted))
+	}
+
+	// Process the eviction through the join → should produce retraction
+	retractions := op.ProcessLeftDeltaSlice(leftEvicted)
+	if len(retractions) != 1 {
+		t.Fatalf("expected 1 retraction from eviction, got %d", len(retractions))
+	}
+	if retractions[0].Weight >= 0 {
+		t.Errorf("expected negative weight (retraction), got %d", retractions[0].Weight)
+	}
+}
+
+func TestDDJoinOp_StreamStream_ExpiredDoesNotJoin(t *testing.T) {
+	// After eviction, a record arriving for the evicted key should not join
+	op := NewDDJoinOp(
+		&ast.ColumnRef{Name: "order_id"},
+		&ast.ColumnRef{Name: "order_id"},
+		"o", "p", false,
+	)
+
+	t0 := time.Date(2025, 1, 1, 10, 0, 0, 0, time.UTC)
+	tEvict := time.Date(2025, 1, 1, 10, 11, 0, 0, time.UTC)
+
+	// Left stream: order at t0
+	op.ProcessLeftDeltaSlice(Batch{
+		ddRecAt(map[string]Value{"order_id": IntValue{V: 1}, "amount": IntValue{V: 100}}, 1, t0),
+	})
+
+	// Evict everything before tEvict
+	op.Left.EvictBefore(tEvict)
+
+	// Right stream: payment arrives after eviction — no match
+	results := op.ProcessRightDeltaSlice(Batch{
+		ddRecAt(map[string]Value{"order_id": IntValue{V: 1}, "payment_id": TextValue{V: "pay-late"}}, 1, tEvict),
+	})
+	if len(results) != 0 {
+		t.Fatalf("expected 0 results after eviction, got %d", len(results))
+	}
+}
+
+func TestDDJoinOp_StreamStream_WeightMultiplication(t *testing.T) {
+	op := NewDDJoinOp(
+		&ast.ColumnRef{Name: "id"},
+		&ast.ColumnRef{Name: "id"},
+		"", "", false,
+	)
+
+	// Left with weight=3
+	op.ProcessLeftDeltaSlice(Batch{
+		ddRec(map[string]Value{"id": IntValue{V: 1}, "a": TextValue{V: "x"}}, 3),
+	})
+
+	// Right with weight=2 → output weight = 3 * 2 = 6
+	results := op.ProcessRightDeltaSlice(Batch{
+		ddRec(map[string]Value{"id": IntValue{V: 1}, "b": TextValue{V: "y"}}, 2),
+	})
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+	if results[0].Weight != 6 {
+		t.Errorf("expected weight=6, got %d", results[0].Weight)
 	}
 }

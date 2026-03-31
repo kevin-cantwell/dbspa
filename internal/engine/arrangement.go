@@ -2,6 +2,7 @@ package engine
 
 import (
 	"sync"
+	"time"
 
 	"github.com/kevin-cantwell/folddb/internal/sql/ast"
 )
@@ -104,6 +105,35 @@ func (a *Arrangement) ColumnNames() []string {
 		names = append(names, k)
 	}
 	return names
+}
+
+// EvictBefore removes all entries with Timestamp before the given cutoff time.
+// Returns the evicted entries as a batch with negated weights, so the join
+// operator can emit retractions for expired join results.
+func (a *Arrangement) EvictBefore(cutoff time.Time) Batch {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	var evicted Batch
+	for key, entries := range a.index {
+		var kept []Record
+		for _, rec := range entries {
+			if rec.Timestamp.Before(cutoff) {
+				// Negate weight for retraction
+				retraction := rec
+				retraction.Weight = -rec.Weight
+				evicted = append(evicted, retraction)
+			} else {
+				kept = append(kept, rec)
+			}
+		}
+		if len(kept) == 0 {
+			delete(a.index, key)
+		} else {
+			a.index[key] = kept
+		}
+	}
+	return evicted
 }
 
 // recordColumnsFingerprint returns a fingerprint based only on column values
