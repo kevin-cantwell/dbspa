@@ -261,11 +261,7 @@ func (s *HTTPSink) snapshotRows() []map[string]any {
 
 func (s *HTTPSink) buildSSEEvent(rec engine.Record) string {
 	m := make(map[string]any, len(s.ColumnOrder)+1)
-	if rec.Weight < 0 {
-		m["op"] = "-"
-	} else {
-		m["op"] = "+"
-	}
+	m["_weight"] = rec.Weight
 	for _, col := range s.ColumnOrder {
 		if v, ok := rec.Columns[col]; ok {
 			m[col] = v.ToJSON()

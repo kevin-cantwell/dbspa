@@ -188,16 +188,16 @@ func TestE2EGroupByBasic(t *testing.T) {
 	if len(results) != 4 {
 		t.Fatalf("expected 4 changelog lines, got %d: %v", len(results), results)
 	}
-	if results[0]["op"] != "+" || results[0]["status"] != "pending" {
+	if results[0]["_weight"] != float64(1) || results[0]["status"] != "pending" {
 		t.Errorf("unexpected line 0: %v", results[0])
 	}
-	if results[1]["op"] != "+" || results[1]["status"] != "complete" {
+	if results[1]["_weight"] != float64(1) || results[1]["status"] != "complete" {
 		t.Errorf("unexpected line 1: %v", results[1])
 	}
-	if results[2]["op"] != "-" || results[2]["status"] != "pending" {
+	if results[2]["_weight"] != float64(-1) || results[2]["status"] != "pending" {
 		t.Errorf("unexpected line 2: %v", results[2])
 	}
-	if results[3]["op"] != "+" || results[3]["status"] != "pending" {
+	if results[3]["_weight"] != float64(1) || results[3]["status"] != "pending" {
 		t.Errorf("unexpected line 3: %v", results[3])
 	}
 	// Check final pending values
@@ -249,7 +249,7 @@ func TestE2EGroupByHaving(t *testing.T) {
 	// Only NYC should appear (total 300 > 100)
 	var inserts []map[string]any
 	for _, r := range results {
-		if r["op"] == "+" {
+		if r["_weight"] == float64(1) {
 			inserts = append(inserts, r)
 		}
 	}
@@ -505,7 +505,7 @@ func TestE2EGroupByCountStar(t *testing.T) {
 	// Find the last insert for each dept
 	lastInsert := make(map[string]map[string]any)
 	for _, r := range results {
-		if r["op"] == "+" {
+		if r["_weight"] == float64(1) {
 			dept := r["dept"].(string)
 			lastInsert[dept] = r
 		}
@@ -532,7 +532,7 @@ func TestE2EGroupByMultipleAggregates(t *testing.T) {
 	// Find the last insert
 	var last map[string]any
 	for _, r := range results {
-		if r["op"] == "+" {
+		if r["_weight"] == float64(1) {
 			last = r
 		}
 	}
@@ -569,7 +569,7 @@ func TestE2EGroupByHavingFilter(t *testing.T) {
 
 	var inserts []map[string]any
 	for _, r := range results {
-		if r["op"] == "+" {
+		if r["_weight"] == float64(1) {
 			inserts = append(inserts, r)
 		}
 	}
@@ -617,7 +617,7 @@ func TestE2EGroupByCountWithNullValues(t *testing.T) {
 	// Find last insert for group "a"
 	var last map[string]any
 	for _, r := range results {
-		if r["op"] == "+" && r["g"] == "a" {
+		if r["_weight"] == float64(1) && r["g"] == "a" {
 			last = r
 		}
 	}
@@ -645,7 +645,7 @@ func TestE2EGroupBySumWithNulls(t *testing.T) {
 
 	var last map[string]any
 	for _, r := range results {
-		if r["op"] == "+" && r["g"] == "a" {
+		if r["_weight"] == float64(1) && r["g"] == "a" {
 			last = r
 		}
 	}
@@ -664,25 +664,25 @@ func TestE2EChangelogFormat(t *testing.T) {
 		`SELECT g, SUM(v) AS total GROUP BY g`,
 		input)
 
-	// Verify changelog format: all records have "op" field
+	// Verify changelog format: all records have "_weight" field
 	for i, r := range results {
-		op, ok := r["op"]
+		w, ok := r["_weight"]
 		if !ok {
-			t.Errorf("result[%d] missing 'op' field", i)
+			t.Errorf("result[%d] missing '_weight' field", i)
 		}
-		if op != "+" && op != "-" {
-			t.Errorf("result[%d] invalid op=%v", i, op)
+		if w != float64(1) && w != float64(-1) {
+			t.Errorf("result[%d] invalid _weight=%v", i, w)
 		}
 	}
 
 	// Verify retraction/insertion pairs are adjacent
 	if len(results) >= 3 {
 		// Second record should be a retraction, third an insertion
-		if results[1]["op"] != "-" {
-			t.Errorf("expected retraction at index 1, got op=%v", results[1]["op"])
+		if results[1]["_weight"] != float64(-1) {
+			t.Errorf("expected retraction at index 1, got _weight=%v", results[1]["_weight"])
 		}
-		if results[2]["op"] != "+" {
-			t.Errorf("expected insertion at index 2, got op=%v", results[2]["op"])
+		if results[2]["_weight"] != float64(1) {
+			t.Errorf("expected insertion at index 2, got _weight=%v", results[2]["_weight"])
 		}
 	}
 }
@@ -699,7 +699,7 @@ func TestE2EGroupByFirstLast(t *testing.T) {
 
 	var last map[string]any
 	for _, r := range results {
-		if r["op"] == "+" && r["g"] == "a" {
+		if r["_weight"] == float64(1) && r["g"] == "a" {
 			last = r
 		}
 	}
@@ -734,7 +734,7 @@ func TestE2EGroupByGroupRemoval(t *testing.T) {
 	// Both groups should have cnt=1
 	inserts := make(map[string]float64)
 	for _, r := range results {
-		if r["op"] == "+" {
+		if r["_weight"] == float64(1) {
 			inserts[r["g"].(string)] = r["cnt"].(float64)
 		}
 	}
@@ -762,7 +762,7 @@ func TestE2EGroupByExpressionModulo(t *testing.T) {
 	// Find last inserts per parity
 	lastInsert := make(map[float64]float64) // parity -> count
 	for _, r := range results {
-		if r["op"] == "+" {
+		if r["_weight"] == float64(1) {
 			lastInsert[r["parity"].(float64)] = r["c"].(float64)
 		}
 	}
@@ -788,7 +788,7 @@ func TestE2EGroupByWhereFilter(t *testing.T) {
 
 	var last map[string]any
 	for _, r := range results {
-		if r["op"] == "+" {
+		if r["_weight"] == float64(1) {
 			last = r
 		}
 	}
@@ -897,10 +897,10 @@ func TestE2EGroupByRegression(t *testing.T) {
 				t.Fatal("expected at least one result")
 			}
 
-			// Find last "+" for the expected group
+			// Find last insertion for the expected group
 			var last map[string]any
 			for _, r := range results {
-				if r["op"] == "+" && (tt.wantLast["g"] == nil || r["g"] == tt.wantLast["g"]) {
+				if r["_weight"] == float64(1) && (tt.wantLast["g"] == nil || r["g"] == tt.wantLast["g"]) {
 					last = r
 				}
 			}
@@ -1237,7 +1237,7 @@ func TestSeedFromIntegration(t *testing.T) {
 	// Find final state: last insertion for each status
 	finalState := make(map[string]float64)
 	for _, r := range results {
-		if r["op"] == "+" {
+		if r["_weight"] == float64(1) {
 			finalState[r["status"].(string)] = r["cnt"].(float64)
 		}
 	}
@@ -1274,7 +1274,7 @@ func TestSeedFromWithWhereIntegration(t *testing.T) {
 
 	finalState := make(map[string]float64)
 	for _, r := range results {
-		if r["op"] == "+" {
+		if r["_weight"] == float64(1) {
 			finalState[r["status"].(string)] = r["cnt"].(float64)
 		}
 	}
@@ -1304,7 +1304,7 @@ func TestSeedFromEmptyFileIntegration(t *testing.T) {
 
 	finalState := make(map[string]float64)
 	for _, r := range results {
-		if r["op"] == "+" {
+		if r["_weight"] == float64(1) {
 			finalState[r["status"].(string)] = r["cnt"].(float64)
 		}
 	}

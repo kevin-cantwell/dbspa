@@ -233,8 +233,8 @@ func TestHTTPSink_SSE(t *testing.T) {
 	if err := json.Unmarshal([]byte(eventData), &event); err != nil {
 		t.Fatalf("failed to parse SSE event: %v", err)
 	}
-	if event["op"] != "+" {
-		t.Errorf("expected op +, got %v", event["op"])
+	if event["_weight"] != float64(1) {
+		t.Errorf("expected _weight 1, got %v", event["_weight"])
 	}
 	if event["region"] != "eu-west" {
 		t.Errorf("expected region eu-west, got %v", event["region"])

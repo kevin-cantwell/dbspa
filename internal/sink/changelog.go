@@ -13,7 +13,7 @@ import (
 )
 
 // ChangelogSink writes accumulating query results as changelog NDJSON.
-// Each line includes an "op" field: "+" for insert, "-" for retract.
+// Each line includes a "_weight" field: 1 for insert, -1 for retract.
 type ChangelogSink struct {
 	Writer      io.Writer
 	ColumnOrder []string
@@ -29,7 +29,7 @@ func (s *ChangelogSink) writer() *bufio.Writer {
 	return s.bw
 }
 
-// Write serializes the record as a changelog JSON line with an "op" field.
+// Write serializes the record as a changelog JSON line with a Z-set weight.
 // When OrderBy is set, it also accumulates the current state for a sorted final snapshot.
 func (s *ChangelogSink) Write(rec engine.Record) error {
 	// Always emit the streaming diff
@@ -59,14 +59,9 @@ func (s *ChangelogSink) Write(rec engine.Record) error {
 
 func (s *ChangelogSink) writeRecord(rec engine.Record) error {
 	w := s.writer()
-	op := "+"
-	if rec.Weight < 0 {
-		op = "-"
-	}
 
-	w.WriteString(`{"op":"`)
-	w.WriteString(op)
-	w.WriteByte('"')
+	w.WriteString(`{"_weight":`)
+	w.WriteString(strconv.Itoa(rec.Weight))
 
 	if len(s.ColumnOrder) > 0 {
 		for _, col := range s.ColumnOrder {

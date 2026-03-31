@@ -515,17 +515,17 @@ function handleRecord(data) {
     // Accumulating table — update state, batch render
     try {
       const obj = JSON.parse(data);
-      const op = obj.op || '+';
+      const weight = obj._weight || 1;
 
       if (!accCols) {
-        accCols = Object.keys(obj).filter(k => k !== 'op');
+        accCols = Object.keys(obj).filter(k => k !== '_weight');
       }
 
       // Build key from string-valued columns
       const keyCols = accCols.filter(c => typeof obj[c] === 'string');
       const key = keyCols.length > 0 ? keyCols.map(c => obj[c]).join('\0') : JSON.stringify(obj);
 
-      if (op === '-') {
+      if (weight < 0) {
         accState.delete(key);
       } else {
         accState.set(key, { data: obj, fresh: true });
@@ -552,8 +552,8 @@ function flushLines() {
     div.className = 'line';
     try {
       const obj = JSON.parse(data);
-      if (obj.op === '+') { div.className = 'line line-insert'; }
-      else if (obj.op === '-') { div.className = 'line line-retract'; }
+      if (obj._weight > 0) { div.className = 'line line-insert'; }
+      else if (obj._weight < 0) { div.className = 'line line-retract'; }
     } catch {}
     div.textContent = data;
     frag.appendChild(div);

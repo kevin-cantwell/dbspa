@@ -78,18 +78,18 @@ echo ""
 echo -e "${YELLOW}--- Plain Orders Tests ---${NC}"
 
 # Test 1: COUNT(*)
-fdb=$(cat "$TMPDIR/orders.ndjson" | "$FOLDDB" "SELECT COUNT(*) AS cnt" 2>/dev/null | grep '"op":"+"' | tail -1 | python3 -c "import sys,json; print(json.loads(sys.stdin.read())['cnt'])")
+fdb=$(cat "$TMPDIR/orders.ndjson" | "$FOLDDB" "SELECT COUNT(*) AS cnt" 2>/dev/null | grep '"_weight":1' | tail -1 | python3 -c "import sys,json; print(json.loads(sys.stdin.read())['cnt'])")
 ddb=$("$DUCKDB" -noheader -csv -c "SELECT COUNT(*) FROM read_ndjson_auto('$TMPDIR/orders.ndjson')")
 check "COUNT(*)" "$fdb" "$ddb"
 
 # Test 2: COUNT per status
-fdb=$(cat "$TMPDIR/orders.ndjson" | "$FOLDDB" "SELECT status, COUNT(*) AS cnt GROUP BY status" 2>/dev/null | grep '"op":"+"' | python3 -c "
+fdb=$(cat "$TMPDIR/orders.ndjson" | "$FOLDDB" "SELECT status, COUNT(*) AS cnt GROUP BY status" 2>/dev/null | grep '"_weight":1' | python3 -c "
 import sys, json
 state = {}
 for line in sys.stdin:
     obj = json.loads(line)
-    if obj['op'] == '+': state[obj['status']] = obj['cnt']
-    elif obj['op'] == '-' and obj['status'] in state: del state[obj['status']]
+    if obj['_weight'] == 1: state[obj['status']] = obj['cnt']
+    elif obj['_weight'] == -1 and obj['status'] in state: del state[obj['status']]
 for k in sorted(state): print(f'{k}:{state[k]}')
 ")
 
@@ -97,13 +97,13 @@ ddb=$("$DUCKDB" -noheader -csv -c "SELECT status, COUNT(*) FROM read_ndjson_auto
 check "COUNT per status" "$fdb" "$ddb"
 
 # Test 3: SUM(total) per region
-fdb=$(cat "$TMPDIR/orders.ndjson" | "$FOLDDB" "SELECT region, SUM(total) AS revenue GROUP BY region" 2>/dev/null | grep '"op":"+"' | python3 -c "
+fdb=$(cat "$TMPDIR/orders.ndjson" | "$FOLDDB" "SELECT region, SUM(total) AS revenue GROUP BY region" 2>/dev/null | grep '"_weight":1' | python3 -c "
 import sys, json
 state = {}
 for line in sys.stdin:
     obj = json.loads(line)
-    if obj['op'] == '+': state[obj['region']] = round(obj['revenue'], 2)
-    elif obj['op'] == '-' and obj['region'] in state: del state[obj['region']]
+    if obj['_weight'] == 1: state[obj['region']] = round(obj['revenue'], 2)
+    elif obj['_weight'] == -1 and obj['region'] in state: del state[obj['region']]
 for k in sorted(state): print(f'{k}:{state[k]}')
 ")
 
@@ -111,31 +111,31 @@ ddb=$("$DUCKDB" -noheader -csv -c "SELECT region, ROUND(SUM(total), 2) FROM read
 check "SUM(total) per region" "$fdb" "$ddb"
 
 # Test 4: AVG(total) overall
-fdb=$(cat "$TMPDIR/orders.ndjson" | "$FOLDDB" "SELECT AVG(total) AS avg_total" 2>/dev/null | grep '"op":"+"' | tail -1 | python3 -c "import sys,json; print(round(json.loads(sys.stdin.read())['avg_total'], 4))")
+fdb=$(cat "$TMPDIR/orders.ndjson" | "$FOLDDB" "SELECT AVG(total) AS avg_total" 2>/dev/null | grep '"_weight":1' | tail -1 | python3 -c "import sys,json; print(round(json.loads(sys.stdin.read())['avg_total'], 4))")
 ddb=$("$DUCKDB" -noheader -csv -c "SELECT ROUND(AVG(total), 4) FROM read_ndjson_auto('$TMPDIR/orders.ndjson')")
 check "AVG(total)" "$fdb" "$ddb"
 
 # Test 5: MIN/MAX
-fdb_min=$(cat "$TMPDIR/orders.ndjson" | "$FOLDDB" "SELECT MIN(total) AS min_total" 2>/dev/null | grep '"op":"+"' | tail -1 | python3 -c "import sys,json; print(json.loads(sys.stdin.read())['min_total'])")
-fdb_max=$(cat "$TMPDIR/orders.ndjson" | "$FOLDDB" "SELECT MAX(total) AS max_total" 2>/dev/null | grep '"op":"+"' | tail -1 | python3 -c "import sys,json; print(json.loads(sys.stdin.read())['max_total'])")
+fdb_min=$(cat "$TMPDIR/orders.ndjson" | "$FOLDDB" "SELECT MIN(total) AS min_total" 2>/dev/null | grep '"_weight":1' | tail -1 | python3 -c "import sys,json; print(json.loads(sys.stdin.read())['min_total'])")
+fdb_max=$(cat "$TMPDIR/orders.ndjson" | "$FOLDDB" "SELECT MAX(total) AS max_total" 2>/dev/null | grep '"_weight":1' | tail -1 | python3 -c "import sys,json; print(json.loads(sys.stdin.read())['max_total'])")
 ddb_min=$("$DUCKDB" -noheader -csv -c "SELECT MIN(total) FROM read_ndjson_auto('$TMPDIR/orders.ndjson')")
 ddb_max=$("$DUCKDB" -noheader -csv -c "SELECT MAX(total) FROM read_ndjson_auto('$TMPDIR/orders.ndjson')")
 check "MIN(total)" "$fdb_min" "$ddb_min"
 check "MAX(total)" "$fdb_max" "$ddb_max"
 
 # Test 6: WHERE filter + COUNT
-fdb=$(cat "$TMPDIR/orders.ndjson" | "$FOLDDB" "SELECT COUNT(*) AS cnt WHERE status = 'pending'" 2>/dev/null | grep '"op":"+"' | tail -1 | python3 -c "import sys,json; print(json.loads(sys.stdin.read())['cnt'])")
+fdb=$(cat "$TMPDIR/orders.ndjson" | "$FOLDDB" "SELECT COUNT(*) AS cnt WHERE status = 'pending'" 2>/dev/null | grep '"_weight":1' | tail -1 | python3 -c "import sys,json; print(json.loads(sys.stdin.read())['cnt'])")
 ddb=$("$DUCKDB" -noheader -csv -c "SELECT COUNT(*) FROM read_ndjson_auto('$TMPDIR/orders.ndjson') WHERE status = 'pending'")
 check "WHERE + COUNT" "$fdb" "$ddb"
 
 # Test 7: GROUP BY + HAVING
-fdb=$(cat "$TMPDIR/orders.ndjson" | "$FOLDDB" "SELECT region, COUNT(*) AS cnt GROUP BY region HAVING COUNT(*) > $(( COUNT / 10 ))" 2>/dev/null | grep '"op":"+"' | python3 -c "
+fdb=$(cat "$TMPDIR/orders.ndjson" | "$FOLDDB" "SELECT region, COUNT(*) AS cnt GROUP BY region HAVING COUNT(*) > $(( COUNT / 10 ))" 2>/dev/null | grep '"_weight":1' | python3 -c "
 import sys, json
 state = {}
 for line in sys.stdin:
     obj = json.loads(line)
-    if obj['op'] == '+': state[obj['region']] = obj['cnt']
-    elif obj['op'] == '-' and obj['region'] in state: del state[obj['region']]
+    if obj['_weight'] == 1: state[obj['region']] = obj['cnt']
+    elif obj['_weight'] == -1 and obj['region'] in state: del state[obj['region']]
 for k in sorted(state): print(f'{k}:{state[k]}')
 ")
 ddb=$("$DUCKDB" -noheader -csv -c "SELECT region, COUNT(*) FROM read_ndjson_auto('$TMPDIR/orders.ndjson') GROUP BY region HAVING COUNT(*) > $(( COUNT / 10 )) ORDER BY region" | while IFS=, read -r r c; do echo "$r:$c"; done)
@@ -155,14 +155,14 @@ echo -e "${YELLOW}--- CDC Retraction Tests ---${NC}"
 # DuckDB needs to replay the CDC logic manually.
 
 # Test 8: Count creates
-fdb=$(cat "$TMPDIR/orders_cdc.ndjson" | "$FOLDDB" "SELECT COUNT(*) AS creates WHERE _op = 'c' FORMAT DEBEZIUM" 2>/dev/null | grep '"op":"+"' | tail -1 | python3 -c "import sys,json; print(json.loads(sys.stdin.read())['creates'])")
+fdb=$(cat "$TMPDIR/orders_cdc.ndjson" | "$FOLDDB" "SELECT COUNT(*) AS creates WHERE _op = 'c' FORMAT DEBEZIUM" 2>/dev/null | grep '"_weight":1' | tail -1 | python3 -c "import sys,json; print(json.loads(sys.stdin.read())['creates'])")
 ddb=$("$DUCKDB" -noheader -csv -c "SELECT COUNT(*) FROM read_ndjson_auto('$TMPDIR/orders_cdc.ndjson') WHERE op = 'c'")
 check "CDC create count" "$fdb" "$ddb"
 
 # Test 9: Count of net active orders (creates minus deletes)
 # folddb with Debezium handles retractions — COUNT(*) reflects net state.
 # DuckDB needs manual CDC replay: creates add, deletes subtract.
-fdb=$(cat "$TMPDIR/orders_cdc.ndjson" | "$FOLDDB" "SELECT COUNT(*) AS active FORMAT DEBEZIUM" 2>/dev/null | grep '"op":"+"' | tail -1 | python3 -c "import sys,json; print(json.loads(sys.stdin.read())['active'])")
+fdb=$(cat "$TMPDIR/orders_cdc.ndjson" | "$FOLDDB" "SELECT COUNT(*) AS active FORMAT DEBEZIUM" 2>/dev/null | grep '"_weight":1' | tail -1 | python3 -c "import sys,json; print(json.loads(sys.stdin.read())['active'])")
 ddb=$("$DUCKDB" -noheader -csv -c "
   SELECT SUM(CASE WHEN op = 'c' THEN 1 WHEN op = 'd' THEN -1 ELSE 0 END)
   FROM read_ndjson_auto('$TMPDIR/orders_cdc.ndjson')

@@ -25,7 +25,7 @@ func parseNDJSON(t *testing.T, buf *bytes.Buffer) []map[string]any {
 	return results
 }
 
-func TestChangelogSink_InsertionHasPlusOp(t *testing.T) {
+func TestChangelogSink_InsertionHasPositiveWeight(t *testing.T) {
 	var buf bytes.Buffer
 	s := &ChangelogSink{Writer: &buf}
 
@@ -45,12 +45,12 @@ func TestChangelogSink_InsertionHasPlusOp(t *testing.T) {
 	if len(results) != 1 {
 		t.Fatalf("expected 1 line, got %d: %q", len(results), buf.String())
 	}
-	if results[0]["op"] != "+" {
-		t.Errorf("expected op='+', got %v", results[0]["op"])
+	if results[0]["_weight"] != float64(1) {
+		t.Errorf("expected _weight=1, got %v", results[0]["_weight"])
 	}
 }
 
-func TestChangelogSink_RetractionHasMinusOp(t *testing.T) {
+func TestChangelogSink_RetractionHasNegativeWeight(t *testing.T) {
 	var buf bytes.Buffer
 	s := &ChangelogSink{Writer: &buf}
 
@@ -68,8 +68,8 @@ func TestChangelogSink_RetractionHasMinusOp(t *testing.T) {
 
 	s.Close()
 	results := parseNDJSON(t, &buf)
-	if results[0]["op"] != "-" {
-		t.Errorf("expected op='-', got %v", results[0]["op"])
+	if results[0]["_weight"] != float64(-1) {
+		t.Errorf("expected _weight=-1, got %v", results[0]["_weight"])
 	}
 }
 
@@ -95,9 +95,9 @@ func TestChangelogSink_ColumnOrderPreserved(t *testing.T) {
 	s.Close()
 
 	line := strings.TrimSpace(buf.String())
-	// "op" should come first, then columns in specified order
-	if !strings.HasPrefix(line, `{"op":"+"`) {
-		t.Errorf("expected line to start with op, got: %s", line)
+	// "_weight" should come first, then columns in specified order
+	if !strings.HasPrefix(line, `{"_weight":1`) {
+		t.Errorf("expected line to start with _weight, got: %s", line)
 	}
 
 	// Verify the column order by checking byte positions
@@ -129,7 +129,7 @@ func TestChangelogSink_NoColumnOrderSortsKeys(t *testing.T) {
 	s.Close()
 
 	line := strings.TrimSpace(buf.String())
-	// Keys should be sorted: op, a, m, z
+	// Keys should be sorted: _weight, a, m, z
 	aIdx := strings.Index(line, `"a"`)
 	mIdx := strings.Index(line, `"m"`)
 	zIdx := strings.Index(line, `"z"`)
@@ -199,16 +199,16 @@ func TestChangelogSink_MultipleWrites(t *testing.T) {
 	if len(results) != 2 {
 		t.Fatalf("expected 2 lines, got %d", len(results))
 	}
-	if results[0]["op"] != "-" {
+	if results[0]["_weight"] != float64(-1) {
 		t.Errorf("first line should be retraction")
 	}
-	if results[1]["op"] != "+" {
+	if results[1]["_weight"] != float64(1) {
 		t.Errorf("second line should be insertion")
 	}
 }
 
-func TestJSONSink_NoOpField(t *testing.T) {
-	// Non-accumulating queries use JSONSink which omits "op"
+func TestJSONSink_NoWeightField(t *testing.T) {
+	// Non-accumulating queries use JSONSink which omits "_weight"
 	var buf bytes.Buffer
 	s := &JSONSink{Writer: &buf}
 
@@ -225,8 +225,8 @@ func TestJSONSink_NoOpField(t *testing.T) {
 
 	s.Close()
 	results := parseNDJSON(t, &buf)
-	if _, ok := results[0]["op"]; ok {
-		t.Error("JSONSink should not include 'op' field")
+	if _, ok := results[0]["_weight"]; ok {
+		t.Error("JSONSink should not include '_weight' field")
 	}
 }
 
