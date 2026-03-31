@@ -238,7 +238,7 @@ Right source (file/CDC) ──delta──▶ Right Arrangement ──┘
 
 ### 9. Stream-Stream Joins
 
-**Status:** In progress
+**Status:** Implemented
 
 **Problem:** The current DD join only handles stream-to-file (right side is static). Stream-stream joins are needed for correlating two live data sources — e.g., matching orders to payments, correlating clicks to purchases.
 
@@ -248,9 +248,9 @@ The DD join operator already supports bidirectional deltas (ProcessLeftDelta + P
 
 1. **Two concurrent source readers** feeding into the same DDJoinOp
 2. **Time-bounded retention** — arrangements can't grow forever. An interval bound limits how long entries are kept.
-3. **Syntax** — `FROM 'kafka://broker/orders' o JOIN 'kafka://broker/payments' p ON o.order_id = p.order_id AND p.ts BETWEEN o.ts AND o.ts + INTERVAL '10 minutes'`
+3. **Syntax** — `FROM 'kafka://broker/orders' o JOIN 'kafka://broker/payments' p ON o.order_id = p.order_id WITHIN INTERVAL '10 minutes'`
 
-**The interval bound is mandatory.** Without it, both arrangements grow indefinitely. The spec (Section 9.3) requires a time bound for stream-stream joins — FoldDB errors if none is specified.
+**The interval bound is mandatory.** Without it, both arrangements grow indefinitely. FoldDB errors if WITHIN is missing for stream-stream joins.
 
 **Architecture:**
 
@@ -258,12 +258,16 @@ The DD join operator already supports bidirectional deltas (ProcessLeftDelta + P
 Kafka topic A ──goroutine──▶ Left Arrangement  ──┐
                                                    ├──▶ DDJoinOp ──▶ output
 Kafka topic B ──goroutine──▶ Right Arrangement ──┘
+                                                   ▲
+Eviction ticker ──────────────────────────────────┘
 ```
 
-Both goroutines call ProcessLeftDelta/ProcessRightDelta respectively. The DDJoinOp is already thread-safe (arrangements have RWMutex).
+Both goroutines call ProcessLeftDelta/ProcessRightDelta respectively. DDJoinOp has a sync.Mutex for thread safety.
 
-**Retention/eviction:** A background goroutine periodically scans arrangements and evicts entries older than the interval bound. Evicted entries produce retractions through the join (weight=-1).
+**Retention/eviction:** A background goroutine calls EvictAndRetract at `withinDuration/10` intervals. Evicted entries produce retractions through the join (negated weights). EvictAndRetract holds the DDJoinOp mutex to prevent concurrent modification during eviction.
 
 **For stdin, two-source joins aren't possible** (only one stdin). Both sources must be Kafka topics, files, or one of each.
+
+**Result:** Implemented in 4 commits. WITHIN INTERVAL clause in parser/AST, Arrangement.EvictBefore with retraction output, DDJoinOp.EvictAndRetract for atomic eviction+retraction, sync.Mutex on DDJoinOp for concurrent access, pipeline wiring for two Kafka consumers + eviction goroutine. 12 new tests including concurrency with race detector.
 
 ---
