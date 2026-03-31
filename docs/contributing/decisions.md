@@ -118,7 +118,26 @@ GROUP BY region
 
 ---
 
-## 7. At-least-once delivery
+## 7. Z-set formalization
+
+**Problem:** FoldDB's diff model (`Diff int8`, limited to +1/-1) was an informal version of Z-sets from DBSP (Feldera's foundation). The informal approach worked for simple operators but became fragile for complex queries (HAVING with retractions, multi-way joins, nested aggregation). It also prevented batch processing, which is needed to close the performance gap with DuckDB.
+
+**Decision:** Formalize the data model as Z-sets with full integer weights (`Record.Weight int`), and introduce a batch pipeline.
+
+- **Phase 1 -- Type change**: Replace `Record.Diff int8` with `Record.Weight int`. All operators use Weight. Existing behavior preserved (Weight=+1 and -1 are equivalent to old Diff).
+- **Phase 2 -- Batch pipeline**: Replace `chan Record` with `chan []Record` (via `BatchChannel`). Operators process batches. Configurable batch size (default 1024), 10ms flush timeout.
+- **Phase 3 -- Batch compaction** (planned): Before aggregation, compact per group key -- sum weights for identical keys, eliminating redundant accumulator updates.
+- **Phase 4 -- Operator fusion** (planned): Fuse filter+project, filter+project+aggregate for common cases.
+
+**Why now:** The whole point of FoldDB is to close the gap between streaming and batch. Z-sets are the mathematical foundation that makes this possible. Deferring it accumulates tech debt.
+
+**Reference:** Budiu et al., "DBSP: Automatic Incremental View Maintenance" (VLDB 2023). Z-sets = multisets with integer weights. Every relational operator has a provably correct incremental version over Z-set deltas.
+
+**Result:** Phase 1 and Phase 2 implemented. ~40% improvement for filter/project queries, ~11% for aggregation. Phases 3-4 planned.
+
+---
+
+## 8. At-least-once delivery
 
 **Problem:** Should FoldDB provide exactly-once output semantics?
 
@@ -137,7 +156,7 @@ Exactly-once would require transactional coordination between the output sink an
 
 ---
 
-## 8. Single-goroutine accumulator
+## 9. Single-goroutine accumulator
 
 **Problem:** Should the accumulator be sharded across goroutines for parallelism?
 
@@ -149,7 +168,7 @@ At 200K records/sec with O(1) aggregates, the accumulator goroutine consumes ~20
 
 ---
 
-## 9. PostgreSQL dialect alignment
+## 10. PostgreSQL dialect alignment
 
 **Problem:** Which SQL dialect should FoldDB follow?
 
@@ -159,7 +178,7 @@ Streaming extensions (`WINDOW TUMBLING`, `EMIT`, `EVENT TIME BY`, etc.) are Fold
 
 ---
 
-## 10. Pure Go SQLite
+## 11. Pure Go SQLite
 
 **Problem:** `github.com/mattn/go-sqlite3` requires CGo. Should we use it for performance?
 
