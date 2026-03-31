@@ -38,3 +38,30 @@ func (p *Pipeline) Process(in <-chan Record, out chan<- Record) error {
 	}
 	return nil
 }
+
+// ProcessBatches reads batches from in, applies filter and projection to each
+// record in each batch, and sends results to out. It closes out when in is
+// exhausted. This amortizes channel overhead for non-accumulating queries.
+func (p *Pipeline) ProcessBatches(in <-chan Batch, out chan<- Record) error {
+	defer close(out)
+
+	for batch := range in {
+		for _, rec := range batch {
+			pass, err := Filter(p.Where, rec)
+			if err != nil {
+				continue
+			}
+			if !pass {
+				continue
+			}
+
+			projected, err := Project(p.Columns, rec)
+			if err != nil {
+				continue
+			}
+
+			out <- projected
+		}
+	}
+	return nil
+}

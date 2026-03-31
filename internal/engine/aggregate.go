@@ -77,6 +77,26 @@ func (op *AggregateOp) Process(in <-chan Record, out chan<- Record) error {
 	return nil
 }
 
+// ProcessBatch applies aggregation to all records in a batch, emitting
+// results to out. This is initially equivalent to calling processRecord
+// in a loop, but provides the hook for Phase 3 batch compaction.
+func (op *AggregateOp) ProcessBatch(batch Batch, out chan<- Record) {
+	for _, rec := range batch {
+		op.processRecord(rec, out)
+	}
+}
+
+// ProcessBatches reads batches from in, applies aggregation to each batch,
+// and sends changelog records to out. It closes out when in is exhausted.
+func (op *AggregateOp) ProcessBatches(in <-chan Batch, out chan<- Record) error {
+	defer close(out)
+
+	for batch := range in {
+		op.ProcessBatch(batch, out)
+	}
+	return nil
+}
+
 func (op *AggregateOp) processRecord(rec Record, out chan<- Record) {
 	op.mu.Lock()
 	defer op.mu.Unlock()
