@@ -152,6 +152,101 @@ func (k *Kafka) createClient() (KafkaClient, error) {
 	return cl, nil
 }
 
+// KafkaMultiTopicRecord extends KafkaRecord with the topic name,
+// used for stream-stream joins where a single consumer reads from
+// multiple topics and dispatches by topic.
+type KafkaMultiTopicRecord struct {
+	KafkaRecord
+	Topic string
+}
+
+// NewKafkaMultiTopic creates a Kafka source that consumes from multiple topics
+// using a single consumer connection. This is more efficient than creating
+// separate consumers per topic (one TCP connection, one consumer group).
+func NewKafkaMultiTopic(ctx context.Context, broker string, topics []string, offset string, group string) (*KafkaMultiTopic, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	return &KafkaMultiTopic{
+		broker: broker,
+		topics: topics,
+		offset: offset,
+		group:  group,
+		ctx:    ctx,
+		cancel: cancel,
+	}, nil
+}
+
+// KafkaMultiTopic reads from multiple topics on a single consumer.
+type KafkaMultiTopic struct {
+	broker string
+	topics []string
+	offset string
+	group  string
+	ctx    context.Context
+	cancel context.CancelFunc
+}
+
+// Read starts consuming from all topics and returns a channel of records
+// tagged with their source topic.
+func (k *KafkaMultiTopic) Read() <-chan KafkaMultiTopicRecord {
+	ch := make(chan KafkaMultiTopicRecord, 256)
+	go func() {
+		defer close(ch)
+
+		opts := []kgo.Opt{
+			kgo.SeedBrokers(k.broker),
+			kgo.ConsumeTopics(k.topics...),
+		}
+
+		switch k.offset {
+		case "earliest":
+			opts = append(opts, kgo.ConsumeResetOffset(kgo.NewOffset().AtStart()))
+		default:
+			opts = append(opts, kgo.ConsumeResetOffset(kgo.NewOffset().AtEnd()))
+		}
+
+		if k.group != "" {
+			opts = append(opts, kgo.ConsumerGroup(k.group))
+		}
+
+		cl, err := kgo.NewClient(opts...)
+		if err != nil {
+			fmt.Printf("Error: cannot connect to %s — %v\n", k.broker, err)
+			return
+		}
+		defer cl.Close()
+
+		for {
+			fetches := cl.PollFetches(k.ctx)
+			if k.ctx.Err() != nil {
+				return
+			}
+			fetches.EachRecord(func(r *kgo.Record) {
+				rec := KafkaMultiTopicRecord{
+					KafkaRecord: KafkaRecord{
+						Value:     r.Value,
+						Key:       r.Key,
+						Offset:    r.Offset,
+						Partition: r.Partition,
+						Timestamp: r.Timestamp,
+					},
+					Topic: r.Topic,
+				}
+				select {
+				case ch <- rec:
+				case <-k.ctx.Done():
+					return
+				}
+			})
+		}
+	}()
+	return ch
+}
+
+// Stop cancels the consumer context.
+func (k *KafkaMultiTopic) Stop() {
+	k.cancel()
+}
+
 // EncodeKafkaKey encodes a Kafka message key as a UTF-8 string.
 // Non-UTF-8 keys are base64-encoded with a "b64:" prefix per spec 12.5.
 func EncodeKafkaKey(key []byte) string {

@@ -438,47 +438,52 @@ func runStreamStreamKafka(ctx context.Context, stmt *ast.SelectStatement, dec fo
 		return fmt.Errorf("right source decoder: %w", err)
 	}
 
-	// Start both Kafka consumers
-	leftKafka := source.NewKafka(ctx, leftCfg)
-	rightKafka := source.NewKafka(ctx, rightCfg)
-	leftKafkaCh := leftKafka.Read()
-	rightKafkaCh := rightKafka.Read()
+	// Single Kafka consumer reading from both topics
+	leftTopic := leftCfg.Topic
+	rightTopic := rightCfg.Topic
+	offset := leftCfg.Offset // use left side's offset config
+	group := leftCfg.Group
+	if rightCfg.Group != "" && group == "" {
+		group = rightCfg.Group
+	}
+
+	multiConsumer, err := source.NewKafkaMultiTopic(ctx, leftCfg.Broker, []string{leftTopic, rightTopic}, offset, group)
+	if err != nil {
+		return fmt.Errorf("kafka consumer error: %w", err)
+	}
+	multiCh := multiConsumer.Read()
 
 	// Output channel for joined records
 	outCh := make(chan engine.Record, 256)
 
-	// Left goroutine: read left Kafka, decode, ProcessLeftDelta
+	// Single dispatch goroutine: route by topic to left/right delta processing
 	go func() {
-		for kr := range leftKafkaCh {
+		for kr := range multiCh {
 			if kr.Value == nil {
 				continue
 			}
-			recs, err := decodeWithCSVHeader(dec, kr.Value)
+			// Pick decoder based on topic
+			var topicDec format.Decoder
+			if kr.Topic == rightTopic {
+				topicDec = rightDec
+			} else {
+				topicDec = dec
+			}
+			recs, err := decodeWithCSVHeader(topicDec, kr.Value)
 			if err != nil {
 				handleDeserError(dl, err, kr.Value, kr.Offset, int64(kr.Partition))
 				continue
 			}
-			recs = format.InjectKafkaVirtuals(recs, kr)
-			for _, rec := range recs {
-				joinOp.ProcessLeftDelta(engine.Batch{rec}, outCh)
-			}
-		}
-	}()
-
-	// Right goroutine: read right Kafka, decode, ProcessRightDelta
-	go func() {
-		for kr := range rightKafkaCh {
-			if kr.Value == nil {
-				continue
-			}
-			recs, err := decodeWithCSVHeader(rightDec, kr.Value)
-			if err != nil {
-				handleDeserError(dl, err, kr.Value, kr.Offset, int64(kr.Partition))
-				continue
-			}
-			recs = format.InjectKafkaVirtuals(recs, kr)
-			for _, rec := range recs {
-				joinOp.ProcessRightDelta(engine.Batch{rec}, outCh)
+			recs = format.InjectKafkaVirtuals(recs, kr.KafkaRecord)
+			// Dispatch by topic
+			if kr.Topic == rightTopic {
+				for _, rec := range recs {
+					joinOp.ProcessRightDelta(engine.Batch{rec}, outCh)
+				}
+			} else {
+				for _, rec := range recs {
+					joinOp.ProcessLeftDelta(engine.Batch{rec}, outCh)
+				}
 			}
 		}
 	}()
