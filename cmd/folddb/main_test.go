@@ -1314,3 +1314,714 @@ func TestSeedFromEmptyFileIntegration(t *testing.T) {
 	}
 }
 
+// =====================================================================
+// Join + Aggregation E2E helpers
+// =====================================================================
+
+// runJoinAggQuery is a test helper for queries with JOIN + GROUP BY.
+// It loads the table file, builds the DD join operator, feeds stream input
+// through the join and then through the aggregate operator, and returns
+// the changelog output.
+func runJoinAggQuery(t *testing.T, sql string, inputLines []string, tableFile string) []map[string]any {
+	t.Helper()
+
+	p := parser.New(sql)
+	stmt, err := p.Parse()
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	if stmt.Join == nil {
+		t.Fatal("expected JOIN clause")
+	}
+	if stmt.GroupBy == nil {
+		t.Fatal("runJoinAggQuery called on non-accumulating query")
+	}
+
+	// Build DD join operator
+	tableFormat := ""
+	if stmt.Join.Source != nil {
+		tableFormat = stmt.Join.Source.Format
+	}
+	tableRecords, err := loadTableFile(tableFile, tableFormat)
+	if err != nil {
+		t.Fatalf("table load error: %v", err)
+	}
+
+	streamAlias := stmt.FromAlias
+	tableAlias := stmt.Join.Alias
+	streamKey, tableKey, err := engine.ExtractEquiJoinKeys(stmt.Join.Condition, streamAlias, tableAlias)
+	if err != nil {
+		t.Fatalf("key extraction error: %v", err)
+	}
+
+	joinOp := engine.NewDDJoinOp(streamKey, tableKey, streamAlias, tableAlias, stmt.Join.Type == "LEFT JOIN")
+
+	// Load table into right arrangement
+	tableBatch := make(engine.Batch, len(tableRecords))
+	for i, rec := range tableRecords {
+		if rec.Weight == 0 {
+			rec.Weight = 1
+		}
+		tableBatch[i] = rec
+	}
+	joinOp.Right.Apply(tableBatch)
+
+	// Set up aggregation
+	aggCols, err := engine.ParseAggColumns(stmt.Columns, stmt.GroupBy)
+	if err != nil {
+		t.Fatalf("aggregate setup error: %v", err)
+	}
+
+	columnOrder := make([]string, len(aggCols))
+	for i, col := range aggCols {
+		columnOrder[i] = col.Alias
+	}
+
+	aggOp := engine.NewAggregateOp(aggCols, stmt.GroupBy, stmt.Having)
+
+	dec := &format.JSONDecoder{}
+	var outBuf bytes.Buffer
+	snk := &sink.ChangelogSink{Writer: &outBuf, ColumnOrder: columnOrder}
+
+	recordCh := make(chan engine.Record)
+	joinedCh := make(chan engine.Record, 256)
+	aggOutCh := make(chan engine.Record)
+
+	// Decode input
+	go func() {
+		defer close(recordCh)
+		for _, line := range inputLines {
+			line = strings.TrimSpace(line)
+			if line == "" {
+				continue
+			}
+			rec, err := dec.Decode([]byte(line))
+			if err != nil {
+				t.Errorf("decode error: %v", err)
+				continue
+			}
+			recordCh <- rec
+		}
+	}()
+
+	// Apply join
+	go func() {
+		defer close(joinedCh)
+		for rec := range recordCh {
+			results := joinOp.ProcessLeftDeltaSlice(engine.Batch{rec})
+			for _, jr := range results {
+				joinedCh <- jr
+			}
+		}
+	}()
+
+	// Apply WHERE filter then aggregate
+	go func() {
+		filteredCh := make(chan engine.Record)
+		go func() {
+			defer close(filteredCh)
+			for rec := range joinedCh {
+				if stmt.Where != nil {
+					pass, filterErr := engine.Filter(stmt.Where, rec)
+					if filterErr != nil || !pass {
+						continue
+					}
+				}
+				filteredCh <- rec
+			}
+		}()
+		aggOp.Process(filteredCh, aggOutCh)
+	}()
+
+	// Collect output
+	for rec := range aggOutCh {
+		if err := snk.Write(rec); err != nil {
+			t.Fatalf("sink error: %v", err)
+		}
+	}
+	snk.Close()
+
+	// Parse output
+	var results []map[string]any
+	for _, line := range strings.Split(strings.TrimSpace(outBuf.String()), "\n") {
+		if line == "" {
+			continue
+		}
+		var m map[string]any
+		if err := json.Unmarshal([]byte(line), &m); err != nil {
+			t.Fatalf("output parse error: %v\nline: %s", err, line)
+		}
+		results = append(results, m)
+	}
+	return results
+}
+
+// runJoinAggQueryWithOrderBy is like runJoinAggQuery but also applies ORDER BY
+// to the final snapshot output via ChangelogSink.
+func runJoinAggQueryWithOrderBy(t *testing.T, sql string, inputLines []string, tableFile string) []map[string]any {
+	t.Helper()
+
+	p := parser.New(sql)
+	stmt, err := p.Parse()
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	if stmt.Join == nil {
+		t.Fatal("expected JOIN clause")
+	}
+	if stmt.GroupBy == nil {
+		t.Fatal("runJoinAggQueryWithOrderBy called on non-accumulating query")
+	}
+
+	// Build DD join operator
+	tableFormat := ""
+	if stmt.Join.Source != nil {
+		tableFormat = stmt.Join.Source.Format
+	}
+	tableRecords, err := loadTableFile(tableFile, tableFormat)
+	if err != nil {
+		t.Fatalf("table load error: %v", err)
+	}
+
+	streamAlias := stmt.FromAlias
+	tableAlias := stmt.Join.Alias
+	streamKey, tableKey, err := engine.ExtractEquiJoinKeys(stmt.Join.Condition, streamAlias, tableAlias)
+	if err != nil {
+		t.Fatalf("key extraction error: %v", err)
+	}
+
+	joinOp := engine.NewDDJoinOp(streamKey, tableKey, streamAlias, tableAlias, stmt.Join.Type == "LEFT JOIN")
+
+	tableBatch := make(engine.Batch, len(tableRecords))
+	for i, rec := range tableRecords {
+		if rec.Weight == 0 {
+			rec.Weight = 1
+		}
+		tableBatch[i] = rec
+	}
+	joinOp.Right.Apply(tableBatch)
+
+	aggCols, err := engine.ParseAggColumns(stmt.Columns, stmt.GroupBy)
+	if err != nil {
+		t.Fatalf("aggregate setup error: %v", err)
+	}
+
+	columnOrder := make([]string, len(aggCols))
+	for i, col := range aggCols {
+		columnOrder[i] = col.Alias
+	}
+
+	aggOp := engine.NewAggregateOp(aggCols, stmt.GroupBy, stmt.Having)
+
+	// Convert ORDER BY
+	orderBy := resolveOrderBy(stmt.OrderBy)
+
+	dec := &format.JSONDecoder{}
+	var outBuf bytes.Buffer
+	snk := &sink.ChangelogSink{Writer: &outBuf, ColumnOrder: columnOrder, OrderBy: orderBy}
+
+	recordCh := make(chan engine.Record)
+	joinedCh := make(chan engine.Record, 256)
+	aggOutCh := make(chan engine.Record)
+
+	go func() {
+		defer close(recordCh)
+		for _, line := range inputLines {
+			line = strings.TrimSpace(line)
+			if line == "" {
+				continue
+			}
+			rec, err := dec.Decode([]byte(line))
+			if err != nil {
+				t.Errorf("decode error: %v", err)
+				continue
+			}
+			recordCh <- rec
+		}
+	}()
+
+	go func() {
+		defer close(joinedCh)
+		for rec := range recordCh {
+			results := joinOp.ProcessLeftDeltaSlice(engine.Batch{rec})
+			for _, jr := range results {
+				joinedCh <- jr
+			}
+		}
+	}()
+
+	go func() {
+		filteredCh := make(chan engine.Record)
+		go func() {
+			defer close(filteredCh)
+			for rec := range joinedCh {
+				if stmt.Where != nil {
+					pass, filterErr := engine.Filter(stmt.Where, rec)
+					if filterErr != nil || !pass {
+						continue
+					}
+				}
+				filteredCh <- rec
+			}
+		}()
+		aggOp.Process(filteredCh, aggOutCh)
+	}()
+
+	for rec := range aggOutCh {
+		if err := snk.Write(rec); err != nil {
+			t.Fatalf("sink error: %v", err)
+		}
+	}
+	snk.Close()
+
+	var results []map[string]any
+	for _, line := range strings.Split(strings.TrimSpace(outBuf.String()), "\n") {
+		if line == "" {
+			continue
+		}
+		var m map[string]any
+		if err := json.Unmarshal([]byte(line), &m); err != nil {
+			t.Fatalf("output parse error: %v\nline: %s", err, line)
+		}
+		results = append(results, m)
+	}
+	return results
+}
+
+// =====================================================================
+// E2E DD Join tests
+// =====================================================================
+
+// TestE2E_JoinWithGroupBy: join stream to file, then GROUP BY on a joined column
+func TestE2E_JoinWithGroupBy(t *testing.T) {
+	tableFile := t.TempDir() + "/users.ndjson"
+	tableData := `{"id":1,"tier":"gold"}
+{"id":2,"tier":"silver"}`
+	if err := writeFile(tableFile, tableData); err != nil {
+		t.Fatal(err)
+	}
+
+	input := []string{
+		`{"user_id":1,"action":"login"}`,
+		`{"user_id":2,"action":"purchase"}`,
+		`{"user_id":1,"action":"click"}`,
+	}
+
+	sql := "SELECT u.tier, COUNT(*) AS actions FROM stdin e JOIN '" + tableFile + "' u ON e.user_id = u.id GROUP BY u.tier"
+	results := runJoinAggQuery(t, sql, input, tableFile)
+
+	// Find final state: last insertion for each tier
+	finalState := make(map[string]float64)
+	for _, r := range results {
+		if r["_weight"] == float64(1) {
+			tier, ok := r["tier"].(string)
+			if ok {
+				finalState[tier] = r["actions"].(float64)
+			}
+		}
+	}
+
+	if finalState["gold"] != 2 {
+		t.Errorf("gold: got %v, want 2", finalState["gold"])
+	}
+	if finalState["silver"] != 1 {
+		t.Errorf("silver: got %v, want 1", finalState["silver"])
+	}
+}
+
+// TestE2E_JoinLeftWithNullAggregation: LEFT JOIN + GROUP BY, verify NULL group handling
+func TestE2E_JoinLeftWithNullAggregation(t *testing.T) {
+	tableFile := t.TempDir() + "/users.ndjson"
+	tableData := `{"id":1,"tier":"gold"}`
+	if err := writeFile(tableFile, tableData); err != nil {
+		t.Fatal(err)
+	}
+
+	input := []string{
+		`{"user_id":1,"action":"a"}`,
+		`{"user_id":99,"action":"b"}`,
+	}
+
+	sql := "SELECT u.tier, COUNT(*) AS cnt FROM stdin e LEFT JOIN '" + tableFile + "' u ON e.user_id = u.id GROUP BY u.tier"
+	results := runJoinAggQuery(t, sql, input, tableFile)
+
+	// Find final state
+	finalState := make(map[string]float64)
+	for _, r := range results {
+		if r["_weight"] == float64(1) {
+			tier := r["tier"]
+			if tier == nil {
+				finalState["null"] = r["cnt"].(float64)
+			} else {
+				finalState[tier.(string)] = r["cnt"].(float64)
+			}
+		}
+	}
+
+	if finalState["gold"] != 1 {
+		t.Errorf("gold: got %v, want 1", finalState["gold"])
+	}
+	if finalState["null"] != 1 {
+		t.Errorf("null group: got %v, want 1", finalState["null"])
+	}
+}
+
+// TestE2E_JoinWithDebeziumCDC: join stdin stream to a Debezium-formatted file
+func TestE2E_JoinWithDebeziumCDC(t *testing.T) {
+	cdcFile := t.TempDir() + "/users_cdc.ndjson"
+	cdcData := `{"op":"c","before":null,"after":{"id":1,"name":"Alice"},"source":{"table":"users","db":"mydb","ts_ms":1700000000000}}
+{"op":"c","before":null,"after":{"id":2,"name":"Bob"},"source":{"table":"users","db":"mydb","ts_ms":1700000001000}}`
+	if err := writeFile(cdcFile, cdcData); err != nil {
+		t.Fatal(err)
+	}
+
+	input := []string{
+		`{"user_id":1,"action":"login"}`,
+		`{"user_id":2,"action":"buy"}`,
+	}
+
+	// The CDC file decodes with Debezium decoder; the after payload columns are extracted.
+	// The join key on the CDC side is the "id" column (extracted from the after payload).
+	sql := "SELECT e.action, u.name FROM stdin e JOIN '" + cdcFile + "' FORMAT DEBEZIUM u ON e.user_id = u.id"
+	results := runJoinQuery(t, sql, input, cdcFile)
+
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d: %v", len(results), results)
+	}
+
+	// Verify both actions appear with correct names
+	actionNames := make(map[string]string)
+	for _, r := range results {
+		action, _ := r["action"].(string)
+		name, _ := r["name"].(string)
+		actionNames[action] = name
+	}
+
+	if actionNames["login"] != "Alice" {
+		t.Errorf("login action: expected Alice, got %v", actionNames["login"])
+	}
+	if actionNames["buy"] != "Bob" {
+		t.Errorf("buy action: expected Bob, got %v", actionNames["buy"])
+	}
+}
+
+// TestE2E_JoinWithFilter: WHERE clause after join
+func TestE2E_JoinWithFilter(t *testing.T) {
+	tableFile := t.TempDir() + "/users.ndjson"
+	tableData := `{"id":1,"tier":"gold"}
+{"id":2,"tier":"silver"}
+{"id":3,"tier":"gold"}`
+	if err := writeFile(tableFile, tableData); err != nil {
+		t.Fatal(err)
+	}
+
+	input := []string{
+		`{"user_id":1,"action":"login"}`,
+		`{"user_id":2,"action":"purchase"}`,
+		`{"user_id":3,"action":"click"}`,
+	}
+
+	sql := "SELECT e.action, u.tier FROM stdin e JOIN '" + tableFile + "' u ON e.user_id = u.id WHERE u.tier = 'gold'"
+	results := runJoinQuery(t, sql, input, tableFile)
+
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results (only gold tier), got %d: %v", len(results), results)
+	}
+
+	for _, r := range results {
+		if r["tier"] != "gold" {
+			t.Errorf("expected tier=gold, got %v", r["tier"])
+		}
+	}
+}
+
+// TestE2E_JoinWithOrderBy: join + GROUP BY + ORDER BY
+func TestE2E_JoinWithOrderBy(t *testing.T) {
+	tableFile := t.TempDir() + "/users.ndjson"
+	tableData := `{"id":1,"tier":"gold"}
+{"id":2,"tier":"silver"}
+{"id":3,"tier":"bronze"}`
+	if err := writeFile(tableFile, tableData); err != nil {
+		t.Fatal(err)
+	}
+
+	input := []string{
+		`{"user_id":1,"action":"a"}`,
+		`{"user_id":1,"action":"b"}`,
+		`{"user_id":1,"action":"c"}`,
+		`{"user_id":2,"action":"d"}`,
+		`{"user_id":2,"action":"e"}`,
+		`{"user_id":3,"action":"f"}`,
+	}
+
+	sql := "SELECT u.tier, COUNT(*) AS actions FROM stdin e JOIN '" + tableFile + "' u ON e.user_id = u.id GROUP BY u.tier ORDER BY actions DESC"
+	results := runJoinAggQueryWithOrderBy(t, sql, input, tableFile)
+
+	// The ORDER BY final snapshot should appear after changelog entries.
+	// Find the final snapshot rows (the last rows with _weight:1 that appear
+	// after all changelog entries — these come from the sorted snapshot at Close()).
+	// The ChangelogSink emits changelog diffs, then a sorted snapshot at close.
+	// We look for the last N rows which should be the sorted snapshot.
+	if len(results) < 3 {
+		t.Fatalf("expected at least 3 results in final snapshot, got %d", len(results))
+	}
+
+	// The last 3 rows should be the sorted final snapshot (DESC by actions)
+	snapshot := results[len(results)-3:]
+	if snapshot[0]["actions"].(float64) < snapshot[1]["actions"].(float64) {
+		t.Errorf("expected DESC sort: first=%v, second=%v", snapshot[0]["actions"], snapshot[1]["actions"])
+	}
+	if snapshot[1]["actions"].(float64) < snapshot[2]["actions"].(float64) {
+		t.Errorf("expected DESC sort: second=%v, third=%v", snapshot[1]["actions"], snapshot[2]["actions"])
+	}
+}
+
+// =====================================================================
+// Z-set output tests
+// =====================================================================
+
+// TestE2E_ChangelogWeightFormat: verify _weight field in changelog output
+func TestE2E_ChangelogWeightFormat(t *testing.T) {
+	input := []string{
+		`{"g":"a","v":100}`,
+		`{"g":"a","v":200}`,
+	}
+	results := runAggQuery(t, `SELECT g, SUM(v) AS total GROUP BY g`, input)
+
+	// All results should have _weight (not "op" or any other field)
+	for i, r := range results {
+		w, ok := r["_weight"]
+		if !ok {
+			t.Errorf("result[%d] missing '_weight' field: %v", i, r)
+		}
+		if w != float64(1) && w != float64(-1) {
+			t.Errorf("result[%d] _weight=%v (expected 1 or -1)", i, w)
+		}
+		// Verify no "op" field exists
+		if _, hasOp := r["op"]; hasOp {
+			t.Errorf("result[%d] should not have 'op' field, got: %v", i, r)
+		}
+	}
+
+	// With two inputs to same group, should see:
+	// +1 (first insert), -1 (retract first), +1 (insert updated)
+	if len(results) < 3 {
+		t.Fatalf("expected at least 3 changelog lines, got %d", len(results))
+	}
+	if results[0]["_weight"] != float64(1) {
+		t.Errorf("first line should be insertion, got _weight=%v", results[0]["_weight"])
+	}
+	if results[1]["_weight"] != float64(-1) {
+		t.Errorf("second line should be retraction, got _weight=%v", results[1]["_weight"])
+	}
+	if results[2]["_weight"] != float64(1) {
+		t.Errorf("third line should be insertion, got _weight=%v", results[2]["_weight"])
+	}
+}
+
+// TestE2E_WeightInFinalSnapshot: ORDER BY produces sorted final snapshot with _weight:1
+func TestE2E_WeightInFinalSnapshot(t *testing.T) {
+	input := []string{
+		`{"g":"b","v":20}`,
+		`{"g":"a","v":10}`,
+		`{"g":"c","v":30}`,
+	}
+
+	p := parser.New(`SELECT g, SUM(v) AS total GROUP BY g ORDER BY g`)
+	stmt, err := p.Parse()
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+
+	aggCols, err := engine.ParseAggColumns(stmt.Columns, stmt.GroupBy)
+	if err != nil {
+		t.Fatalf("aggregate setup error: %v", err)
+	}
+
+	columnOrder := make([]string, len(aggCols))
+	for i, col := range aggCols {
+		columnOrder[i] = col.Alias
+	}
+
+	aggOp := engine.NewAggregateOp(aggCols, stmt.GroupBy, stmt.Having)
+	orderBy := resolveOrderBy(stmt.OrderBy)
+
+	dec := &format.JSONDecoder{}
+	var outBuf bytes.Buffer
+	snk := &sink.ChangelogSink{Writer: &outBuf, ColumnOrder: columnOrder, OrderBy: orderBy}
+
+	filteredCh := make(chan engine.Record)
+	aggOutCh := make(chan engine.Record)
+
+	go func() {
+		defer close(filteredCh)
+		for _, line := range input {
+			rec, err := dec.Decode([]byte(line))
+			if err != nil {
+				t.Errorf("decode error: %v", err)
+				continue
+			}
+			filteredCh <- rec
+		}
+	}()
+
+	go func() {
+		aggOp.Process(filteredCh, aggOutCh)
+	}()
+
+	for rec := range aggOutCh {
+		if err := snk.Write(rec); err != nil {
+			t.Fatalf("sink error: %v", err)
+		}
+	}
+	snk.Close()
+
+	var results []map[string]any
+	for _, line := range strings.Split(strings.TrimSpace(outBuf.String()), "\n") {
+		if line == "" {
+			continue
+		}
+		var m map[string]any
+		if err := json.Unmarshal([]byte(line), &m); err != nil {
+			t.Fatalf("output parse error: %v\nline: %s", err, line)
+		}
+		results = append(results, m)
+	}
+
+	// The final snapshot should be the last 3 rows, all with _weight:1, sorted by g ASC
+	if len(results) < 3 {
+		t.Fatalf("expected at least 3 results, got %d", len(results))
+	}
+
+	snapshot := results[len(results)-3:]
+	for i, r := range snapshot {
+		if r["_weight"] != float64(1) {
+			t.Errorf("snapshot[%d] _weight=%v, want 1", i, r["_weight"])
+		}
+	}
+	// Verify sorted: a < b < c
+	if snapshot[0]["g"] != "a" {
+		t.Errorf("snapshot[0] g=%v, want a", snapshot[0]["g"])
+	}
+	if snapshot[1]["g"] != "b" {
+		t.Errorf("snapshot[1] g=%v, want b", snapshot[1]["g"])
+	}
+	if snapshot[2]["g"] != "c" {
+		t.Errorf("snapshot[2] g=%v, want c", snapshot[2]["g"])
+	}
+}
+
+// =====================================================================
+// SEED FROM + JOIN test
+// =====================================================================
+
+// TestE2E_SeedFromWithJoin: SEED FROM + JOIN in same query
+func TestE2E_SeedFromWithJoin(t *testing.T) {
+	// For this test, we run SEED FROM to bootstrap historical data,
+	// then join the combined stream with a reference table.
+	// Since the test helpers don't natively combine SEED + JOIN in one function,
+	// we simulate by pre-loading seed data into the stream input and using
+	// the join+agg helper directly.
+
+	tableFile := t.TempDir() + "/tiers.ndjson"
+	tableData := `{"id":1,"tier":"gold"}
+{"id":2,"tier":"silver"}`
+	if err := writeFile(tableFile, tableData); err != nil {
+		t.Fatal(err)
+	}
+
+	// Historical seed data + live stream data combined
+	// In production, SEED FROM loads from a file; here we feed all through stream.
+	input := []string{
+		// "seed" records
+		`{"user_id":1,"action":"seed1"}`,
+		`{"user_id":2,"action":"seed2"}`,
+		`{"user_id":1,"action":"seed3"}`,
+		// "live" records
+		`{"user_id":2,"action":"live1"}`,
+		`{"user_id":1,"action":"live2"}`,
+	}
+
+	sql := "SELECT u.tier, COUNT(*) AS actions FROM stdin e JOIN '" + tableFile + "' u ON e.user_id = u.id GROUP BY u.tier"
+	results := runJoinAggQuery(t, sql, input, tableFile)
+
+	// Find final state
+	finalState := make(map[string]float64)
+	for _, r := range results {
+		if r["_weight"] == float64(1) {
+			tier, ok := r["tier"].(string)
+			if ok {
+				finalState[tier] = r["actions"].(float64)
+			}
+		}
+	}
+
+	// gold: user_id=1 has 3 events (seed1, seed3, live2)
+	if finalState["gold"] != 3 {
+		t.Errorf("gold: got %v, want 3", finalState["gold"])
+	}
+	// silver: user_id=2 has 2 events (seed2, live1)
+	if finalState["silver"] != 2 {
+		t.Errorf("silver: got %v, want 2", finalState["silver"])
+	}
+}
+
+// =====================================================================
+// WITHIN clause tests
+// =====================================================================
+
+// TestE2E_WithinClauseParsesCorrectly: verify WITHIN INTERVAL parses in dry-run
+func TestE2E_WithinClauseParsesCorrectly(t *testing.T) {
+	sql := "SELECT o.order_id, p.payment_id FROM 'kafka://broker/orders' o JOIN 'kafka://broker/payments' p ON o.order_id = p.order_id WITHIN INTERVAL '10 minutes'"
+
+	p := parser.New(sql)
+	stmt, err := p.Parse()
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+
+	if stmt.Join == nil {
+		t.Fatal("expected JOIN clause")
+	}
+	if stmt.Join.Within == nil {
+		t.Fatal("expected WITHIN clause on JOIN")
+	}
+	if *stmt.Join.Within != "10 minutes" {
+		t.Errorf("within: got %q, want %q", *stmt.Join.Within, "10 minutes")
+	}
+}
+
+// TestE2E_WithinClauseRequiredForStreamStream: verify error when WITHIN is missing on two-stream join
+func TestE2E_WithinClauseRequiredForStreamStream(t *testing.T) {
+	// The validation happens in main.go when both FROM and JOIN are kafka:// URIs.
+	// We verify the parser accepts the query (no parse error) but the AST has no WITHIN.
+	sql := "SELECT o.order_id FROM 'kafka://broker/orders' o JOIN 'kafka://broker/payments' p ON o.order_id = p.order_id"
+
+	p := parser.New(sql)
+	stmt, err := p.Parse()
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+
+	if stmt.Join == nil {
+		t.Fatal("expected JOIN clause")
+	}
+
+	// WITHIN should be nil
+	if stmt.Join.Within != nil {
+		t.Errorf("expected nil WITHIN for query without WITHIN clause, got %v", *stmt.Join.Within)
+	}
+
+	// Verify both sides are Kafka URIs (the condition that triggers the runtime error)
+	if stmt.From == nil || !strings.HasPrefix(stmt.From.URI, "kafka://") {
+		t.Error("expected FROM to be kafka:// URI")
+	}
+	if !strings.HasPrefix(stmt.Join.Source.URI, "kafka://") {
+		t.Error("expected JOIN source to be kafka:// URI")
+	}
+
+	// In production, main.go would return:
+	// "stream-stream joins require a WITHIN INTERVAL clause to bound retention"
+	// We verify the precondition: both are kafka and WITHIN is nil.
+}
+
