@@ -1,6 +1,8 @@
 package engine
 
 import (
+	"fmt"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -639,4 +641,446 @@ func makeBenchRecords(n int) []Record {
 		}
 	}
 	return records
+}
+
+// --- FilterProjectBatch tests ---
+
+func TestFilterProjectBatch_WithFilter(t *testing.T) {
+	// Only records where x > 5 should pass
+	p := &Pipeline{
+		Columns: []ast.Column{{Expr: &ast.ColumnRef{Name: "x"}, Alias: "x"}},
+		Where: &ast.BinaryExpr{
+			Left:  &ast.ColumnRef{Name: "x"},
+			Op:    ">",
+			Right: &ast.NumberLiteral{Value: "5"},
+		},
+	}
+
+	batch := make(Batch, 10)
+	for i := range batch {
+		batch[i] = NewRecord(map[string]Value{"x": IntValue{V: int64(i)}})
+	}
+
+	result := p.FilterProjectBatch(batch)
+	// x=6,7,8,9 should pass
+	if len(result) != 4 {
+		t.Fatalf("expected 4 records, got %d", len(result))
+	}
+	for _, rec := range result {
+		v := rec.Get("x").(IntValue).V
+		if v <= 5 {
+			t.Fatalf("record with x=%d should have been filtered", v)
+		}
+	}
+}
+
+func TestFilterProjectBatch_NoFilter(t *testing.T) {
+	// No WHERE clause — all records should pass with projection applied
+	p := &Pipeline{
+		Columns: []ast.Column{{Expr: &ast.ColumnRef{Name: "x"}, Alias: "val"}},
+	}
+
+	batch := Batch{
+		NewRecord(map[string]Value{"x": IntValue{V: 1}, "y": IntValue{V: 2}}),
+		NewRecord(map[string]Value{"x": IntValue{V: 3}, "y": IntValue{V: 4}}),
+	}
+
+	result := p.FilterProjectBatch(batch)
+	if len(result) != 2 {
+		t.Fatalf("expected 2 records, got %d", len(result))
+	}
+	// Should have "val" column, not "x" or "y"
+	for _, rec := range result {
+		if _, ok := rec.Columns["val"]; !ok {
+			t.Fatal("expected projected column 'val'")
+		}
+		if _, ok := rec.Columns["y"]; ok {
+			t.Fatal("column 'y' should have been projected away")
+		}
+	}
+}
+
+func TestFilterProjectBatch_MatchesProcessBatches(t *testing.T) {
+	// FilterProjectBatch should produce identical results to ProcessBatches
+	p := &Pipeline{
+		Columns: []ast.Column{{Expr: &ast.ColumnRef{Name: "x"}, Alias: "x"}},
+		Where: &ast.BinaryExpr{
+			Left:  &ast.ColumnRef{Name: "x"},
+			Op:    ">",
+			Right: &ast.NumberLiteral{Value: "3"},
+		},
+	}
+
+	records := make(Batch, 10)
+	for i := range records {
+		records[i] = NewRecord(map[string]Value{"x": IntValue{V: int64(i)}, "y": IntValue{V: 99}})
+	}
+
+	// FilterProjectBatch
+	fpResult := p.FilterProjectBatch(records)
+
+	// ProcessBatches
+	batchIn := make(chan Batch, 1)
+	batchIn <- records
+	close(batchIn)
+	out := make(chan Record, 100)
+	p2 := &Pipeline{
+		Columns: p.Columns,
+		Where:   p.Where,
+	}
+	p2.ProcessBatches(batchIn, out)
+
+	var pbResult []Record
+	for r := range out {
+		pbResult = append(pbResult, r)
+	}
+
+	if len(fpResult) != len(pbResult) {
+		t.Fatalf("FilterProjectBatch produced %d records, ProcessBatches produced %d", len(fpResult), len(pbResult))
+	}
+	for i := range fpResult {
+		v1 := fpResult[i].Get("x").(IntValue).V
+		v2 := pbResult[i].Get("x").(IntValue).V
+		if v1 != v2 {
+			t.Fatalf("record %d: FilterProjectBatch x=%d, ProcessBatches x=%d", i, v1, v2)
+		}
+	}
+}
+
+// --- FusedAggregateProcessor tests ---
+
+func TestFusedAggregateProcessor_IdenticalToNonFused(t *testing.T) {
+	// Build an accumulating query: SELECT COUNT(*) AS total WHERE x > 3
+	cols := []AggColumn{
+		{Alias: "total", IsAggregate: true, AggFunc: "COUNT", IsStar: true, GroupByIdx: -1},
+	}
+	where := &ast.BinaryExpr{
+		Left:  &ast.ColumnRef{Name: "x"},
+		Op:    ">",
+		Right: &ast.NumberLiteral{Value: "3"},
+	}
+
+	records := make([]Record, 20)
+	for i := range records {
+		records[i] = NewRecord(map[string]Value{"x": IntValue{V: int64(i)}})
+	}
+
+	// Non-fused path: filter manually, then aggregate
+	op1 := NewAggregateOp(cols, nil, nil)
+	in1 := make(chan Record, len(records))
+	for _, r := range records {
+		pass, _ := Filter(where, r)
+		if pass {
+			in1 <- r
+		}
+	}
+	close(in1)
+	out1 := make(chan Record, 100)
+	op1.Process(in1, out1)
+
+	var results1 []Record
+	for r := range out1 {
+		results1 = append(results1, r)
+	}
+
+	// Fused path
+	op2 := NewAggregateOp(cols, nil, nil)
+	fused := &FusedAggregateProcessor{
+		Where:       where,
+		AggregateOp: op2,
+	}
+	batchIn := make(chan Batch, 1)
+	batchIn <- Batch(records)
+	close(batchIn)
+	out2 := make(chan Record, 100)
+	fused.ProcessBatches(batchIn, out2)
+
+	var results2 []Record
+	for r := range out2 {
+		results2 = append(results2, r)
+	}
+
+	// Both should produce the same final count
+	if len(results1) == 0 || len(results2) == 0 {
+		t.Fatal("expected results from both paths")
+	}
+
+	// Get last positive-weight record from each
+	var last1, last2 Record
+	for _, r := range results1 {
+		if r.Weight > 0 {
+			last1 = r
+		}
+	}
+	for _, r := range results2 {
+		if r.Weight > 0 {
+			last2 = r
+		}
+	}
+
+	v1 := last1.Get("total").(IntValue).V
+	v2 := last2.Get("total").(IntValue).V
+	if v1 != v2 {
+		t.Fatalf("non-fused count=%d, fused count=%d", v1, v2)
+	}
+	// x > 3 means x=4..19 → 16 records
+	if v1 != 16 {
+		t.Fatalf("expected count=16, got %d", v1)
+	}
+}
+
+func TestFusedAggregateProcessor_FilterRejectsMost(t *testing.T) {
+	// WHERE x = 0 — only 1 out of 100 records matches
+	cols := []AggColumn{
+		{Alias: "total", IsAggregate: true, AggFunc: "COUNT", IsStar: true, GroupByIdx: -1},
+	}
+	where := &ast.BinaryExpr{
+		Left:  &ast.ColumnRef{Name: "x"},
+		Op:    "=",
+		Right: &ast.NumberLiteral{Value: "0"},
+	}
+
+	records := make([]Record, 100)
+	for i := range records {
+		records[i] = NewRecord(map[string]Value{"x": IntValue{V: int64(i)}})
+	}
+
+	op := NewAggregateOp(cols, nil, nil)
+	fused := &FusedAggregateProcessor{
+		Where:       where,
+		AggregateOp: op,
+	}
+	batchIn := make(chan Batch, 1)
+	batchIn <- Batch(records)
+	close(batchIn)
+	out := make(chan Record, 100)
+	fused.ProcessBatches(batchIn, out)
+
+	var last Record
+	for r := range out {
+		if r.Weight > 0 {
+			last = r
+		}
+	}
+	v := last.Get("total").(IntValue).V
+	if v != 1 {
+		t.Fatalf("expected count=1 (only x=0 passes), got %d", v)
+	}
+}
+
+func TestFusedAggregateProcessor_NoFilter(t *testing.T) {
+	// No WHERE clause — all records should be aggregated
+	cols := []AggColumn{
+		{Alias: "region", Expr: &ast.ColumnRef{Name: "region"}, GroupByIdx: 0},
+		{Alias: "total", IsAggregate: true, AggFunc: "COUNT", IsStar: true, GroupByIdx: -1},
+	}
+	groupBy := []ast.Expr{&ast.ColumnRef{Name: "region"}}
+
+	records := []Record{
+		NewRecord(map[string]Value{"region": TextValue{V: "us"}}),
+		NewRecord(map[string]Value{"region": TextValue{V: "eu"}}),
+		NewRecord(map[string]Value{"region": TextValue{V: "us"}}),
+		NewRecord(map[string]Value{"region": TextValue{V: "us"}}),
+	}
+
+	op := NewAggregateOp(cols, groupBy, nil)
+	fused := &FusedAggregateProcessor{
+		Where:       nil,
+		AggregateOp: op,
+	}
+	batchIn := make(chan Batch, 1)
+	batchIn <- Batch(records)
+	close(batchIn)
+	out := make(chan Record, 100)
+	fused.ProcessBatches(batchIn, out)
+
+	// Collect final positive-weight records per group
+	groups := make(map[string]int64)
+	for r := range out {
+		if r.Weight > 0 {
+			region := r.Get("region").(TextValue).V
+			groups[region] = r.Get("total").(IntValue).V
+		}
+	}
+
+	if groups["us"] != 3 {
+		t.Fatalf("expected us=3, got us=%d", groups["us"])
+	}
+	if groups["eu"] != 1 {
+		t.Fatalf("expected eu=1, got eu=%d", groups["eu"])
+	}
+}
+
+func TestFusedAggregateProcessor_InputCount(t *testing.T) {
+	// Verify InputCount tracks all records (not just filtered ones)
+	cols := []AggColumn{
+		{Alias: "total", IsAggregate: true, AggFunc: "COUNT", IsStar: true, GroupByIdx: -1},
+	}
+	where := &ast.BinaryExpr{
+		Left:  &ast.ColumnRef{Name: "x"},
+		Op:    ">",
+		Right: &ast.NumberLiteral{Value: "50"},
+	}
+
+	records := make([]Record, 100)
+	for i := range records {
+		records[i] = NewRecord(map[string]Value{"x": IntValue{V: int64(i)}})
+	}
+
+	var count atomic.Int64
+	op := NewAggregateOp(cols, nil, nil)
+	fused := &FusedAggregateProcessor{
+		Where:       where,
+		AggregateOp: op,
+		InputCount:  &count,
+	}
+	batchIn := make(chan Batch, 1)
+	batchIn <- Batch(records)
+	close(batchIn)
+	out := make(chan Record, 100)
+	fused.ProcessBatches(batchIn, out)
+	for range out {
+	}
+
+	// InputCount should be 100 (all records), not 49 (filtered)
+	if count.Load() != 100 {
+		t.Fatalf("expected InputCount=100, got %d", count.Load())
+	}
+}
+
+// --- Fused vs non-fused benchmarks ---
+
+func BenchmarkAccumulating_NonFused(b *testing.B) {
+	// Simulates the old path: filter → chan Record → BatchChannel → Aggregate
+	records := makeBenchRecords(b.N)
+	cols := []AggColumn{
+		{Alias: "total", IsAggregate: true, AggFunc: "COUNT", IsStar: true, GroupByIdx: -1},
+	}
+
+	// Filtered channel
+	filteredCh := make(chan Record, 256)
+	go func() {
+		defer close(filteredCh)
+		for _, r := range records {
+			filteredCh <- r
+		}
+	}()
+
+	// Batch the filtered records
+	batchedCh := BatchChannel(filteredCh, DefaultBatchSize)
+
+	// Aggregate
+	op := NewAggregateOp(cols, nil, nil)
+	out := make(chan Record, 256)
+	go func() {
+		op.ProcessBatches(batchedCh, out)
+	}()
+
+	for range out {
+	}
+}
+
+func BenchmarkAccumulating_Fused(b *testing.B) {
+	// Simulates the new path: BatchChannel → FusedAggregateProcessor
+	records := makeBenchRecords(b.N)
+	cols := []AggColumn{
+		{Alias: "total", IsAggregate: true, AggFunc: "COUNT", IsStar: true, GroupByIdx: -1},
+	}
+
+	// Raw channel (unfiltered)
+	rawCh := make(chan Record, 256)
+	go func() {
+		defer close(rawCh)
+		for _, r := range records {
+			rawCh <- r
+		}
+	}()
+
+	// Batch raw records
+	batchedCh := BatchChannel(rawCh, DefaultBatchSize)
+
+	// Fused filter + aggregate
+	op := NewAggregateOp(cols, nil, nil)
+	fused := &FusedAggregateProcessor{
+		Where:       nil,
+		AggregateOp: op,
+	}
+	out := make(chan Record, 256)
+	go func() {
+		fused.ProcessBatches(batchedCh, out)
+	}()
+
+	for range out {
+	}
+}
+
+func BenchmarkAccumulating_Fused_WithFilter(b *testing.B) {
+	// Fused path with a WHERE filter that passes ~50% of records
+	records := makeBenchRecords(b.N)
+	cols := []AggColumn{
+		{Alias: "total", IsAggregate: true, AggFunc: "COUNT", IsStar: true, GroupByIdx: -1},
+	}
+	where := &ast.BinaryExpr{
+		Left:  &ast.ColumnRef{Name: "x"},
+		Op:    ">",
+		Right: &ast.NumberLiteral{Value: fmt.Sprintf("%d", b.N/2)},
+	}
+
+	rawCh := make(chan Record, 256)
+	go func() {
+		defer close(rawCh)
+		for _, r := range records {
+			rawCh <- r
+		}
+	}()
+
+	batchedCh := BatchChannel(rawCh, DefaultBatchSize)
+
+	op := NewAggregateOp(cols, nil, nil)
+	fused := &FusedAggregateProcessor{
+		Where:       where,
+		AggregateOp: op,
+	}
+	out := make(chan Record, 256)
+	go func() {
+		fused.ProcessBatches(batchedCh, out)
+	}()
+
+	for range out {
+	}
+}
+
+func BenchmarkAccumulating_NonFused_WithFilter(b *testing.B) {
+	// Non-fused path with the same ~50% filter for comparison
+	records := makeBenchRecords(b.N)
+	cols := []AggColumn{
+		{Alias: "total", IsAggregate: true, AggFunc: "COUNT", IsStar: true, GroupByIdx: -1},
+	}
+	where := &ast.BinaryExpr{
+		Left:  &ast.ColumnRef{Name: "x"},
+		Op:    ">",
+		Right: &ast.NumberLiteral{Value: fmt.Sprintf("%d", b.N/2)},
+	}
+
+	filteredCh := make(chan Record, 256)
+	go func() {
+		defer close(filteredCh)
+		for _, r := range records {
+			pass, _ := Filter(where, r)
+			if pass {
+				filteredCh <- r
+			}
+		}
+	}()
+
+	batchedCh := BatchChannel(filteredCh, DefaultBatchSize)
+
+	op := NewAggregateOp(cols, nil, nil)
+	out := make(chan Record, 256)
+	go func() {
+		op.ProcessBatches(batchedCh, out)
+	}()
+
+	for range out {
+	}
 }
