@@ -744,3 +744,55 @@ func TestDDJoinOp_EvictAndRetract_Concurrent(t *testing.T) {
 	}
 	t.Logf("concurrent evict test produced %d records", count)
 }
+
+func BenchmarkDDJoin_StreamToFile(b *testing.B) {
+	// Simulate stream-to-file join: right side is static, left side streams.
+	op := NewDDJoinOp(
+		&ast.QualifiedRef{Qualifier: "e", Name: "customer_id"},
+		&ast.QualifiedRef{Qualifier: "c", Name: "id"},
+		"e", "c", false,
+	)
+	op.RightIsStatic = true
+
+	// Load 1000 right-side records
+	rightBatch := make(Batch, 1000)
+	for i := 0; i < 1000; i++ {
+		rightBatch[i] = ddRec(map[string]Value{
+			"id":   IntValue{V: int64(i)},
+			"tier": TextValue{V: "gold"},
+			"name": TextValue{V: "Customer"},
+		}, 1)
+	}
+	op.Right.Apply(rightBatch)
+
+	// Pre-build left records
+	leftRecords := make([]Record, b.N)
+	for i := 0; i < b.N; i++ {
+		leftRecords[i] = ddRec(map[string]Value{
+			"customer_id": IntValue{V: int64(i % 1000)},
+			"order_id":    IntValue{V: int64(i)},
+			"amount":      FloatValue{V: 99.99},
+			"product":     TextValue{V: "widget"},
+			"region":      TextValue{V: "us-west"},
+		}, 1)
+	}
+
+	out := make(chan Record, 256)
+	go func() {
+		for range out {
+		}
+	}()
+
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for i := 0; i < b.N; i++ {
+		key, _ := EvalKeyExpr(op.LeftKeyExpr, leftRecords[i])
+		rightMatches := op.Right.LookupStringUnsafe(key.String())
+		for _, rightRec := range rightMatches {
+			merged := op.merge(leftRecords[i], rightRec)
+			merged.Weight = leftRecords[i].Weight * rightRec.Weight
+			out <- merged
+		}
+	}
+}
