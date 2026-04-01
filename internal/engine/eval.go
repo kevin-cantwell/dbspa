@@ -26,6 +26,20 @@ func FastKeyExtract(rec Record, expr ast.Expr) (Value, bool) {
 		if v, ok := rec.Columns[e.Name]; ok {
 			return v, true
 		}
+		// JSON dot notation fallback for key extraction
+		if col, ok := rec.Columns[e.Qualifier]; ok {
+			switch jv := col.(type) {
+			case JsonValue:
+				if m, ok := jv.V.(map[string]any); ok {
+					return jsonAnyToValue(m[e.Name]), true
+				}
+			case *LazyJsonValue:
+				parsed := jv.ToJSON()
+				if m, ok := parsed.(map[string]any); ok {
+					return jsonAnyToValue(m[e.Name]), true
+				}
+			}
+		}
 		return NullValue{}, true
 	}
 	return nil, false
@@ -41,18 +55,65 @@ func EvalKeyExpr(expr ast.Expr, rec Record) (Value, error) {
 }
 
 // Eval evaluates an AST expression against a record and returns the resulting value.
+// jsonAnyToValue converts a raw JSON-decoded Go value to an engine Value.
+// Used for dot-notation JSON field access where the value comes from a
+// map[string]any inside a JsonValue.
+func jsonAnyToValue(v any) Value {
+	if v == nil {
+		return NullValue{}
+	}
+	switch val := v.(type) {
+	case float64:
+		if val == math.Trunc(val) && val >= math.MinInt64 && val <= math.MaxInt64 {
+			return IntValue{V: int64(val)}
+		}
+		return FloatValue{V: val}
+	case string:
+		return TextValue{V: val}
+	case bool:
+		return BoolValue{V: val}
+	case map[string]any:
+		return JsonValue{V: val}
+	case []any:
+		return JsonValue{V: val}
+	case int32:
+		return IntValue{V: int64(val)}
+	case int64:
+		return IntValue{V: val}
+	default:
+		return TextValue{V: fmt.Sprintf("%v", val)}
+	}
+}
+
 func Eval(expr ast.Expr, rec Record) (Value, error) {
 	switch e := expr.(type) {
 	case *ast.ColumnRef:
 		return rec.Get(e.Name), nil
 
 	case *ast.QualifiedRef:
-		// Try qualified name first: "qualifier.name"
+		// Try qualified name first: "qualifier.name" (table alias resolution)
 		if v, ok := rec.Columns[e.QualifiedName()]; ok {
 			return v, nil
 		}
-		// Fall back to unqualified name
-		return rec.Get(e.Name), nil
+		// Try unqualified name (no alias needed)
+		if v, ok := rec.Columns[e.Name]; ok && !v.IsNull() {
+			return v, nil
+		}
+		// Fall back to JSON dot notation: if qualifier is a JSON column, access field
+		if col, ok := rec.Columns[e.Qualifier]; ok {
+			switch jv := col.(type) {
+			case JsonValue:
+				if m, ok := jv.V.(map[string]any); ok {
+					return jsonAnyToValue(m[e.Name]), nil
+				}
+			case *LazyJsonValue:
+				parsed := jv.ToJSON()
+				if m, ok := parsed.(map[string]any); ok {
+					return jsonAnyToValue(m[e.Name]), nil
+				}
+			}
+		}
+		return NullValue{}, nil
 
 	case *ast.NumberLiteral:
 		return parseNumber(e)
