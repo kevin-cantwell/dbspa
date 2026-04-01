@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"time"
 
@@ -26,6 +27,12 @@ type DDJoinOp struct {
 	RightAlias   string       // alias prefix for right columns (e.g., "u")
 	IsLeftJoin   bool         // emit NULL-filled rows for unmatched left records
 	RightIsStatic bool        // when true, skip left arrangement (right side never changes)
+
+	// ProjectedColumns is the set of column names that the downstream query
+	// actually uses. If non-nil, merge only copies these columns instead of
+	// all columns from both sides. Both qualified ("c.tier") and unqualified
+	// ("tier") forms should be included. nil means copy everything (e.g., SELECT *).
+	ProjectedColumns map[string]bool
 
 	// Cached prefix strings to avoid repeated allocation
 	leftPrefixStr  string
@@ -275,7 +282,16 @@ func (j *DDJoinOp) ProcessRightDeltaSlice(delta Batch) []Record {
 // merge combines left and right records into a single joined record.
 // Columns are prefixed with aliases if provided. Right columns overwrite
 // left columns in case of name conflicts (same as HashJoinOp behavior).
+// When ProjectedColumns is set, only the referenced columns are copied.
 func (j *DDJoinOp) merge(leftRec, rightRec Record) Record {
+	if j.ProjectedColumns != nil {
+		return j.mergeProjected(leftRec, rightRec)
+	}
+	return j.mergeFull(leftRec, rightRec)
+}
+
+// mergeFull copies all columns from both sides (original behavior).
+func (j *DDJoinOp) mergeFull(leftRec, rightRec Record) Record {
 	// Calculate capacity: each column appears once unqualified, plus once qualified if alias exists.
 	leftCount := len(leftRec.Columns)
 	rightCount := len(rightRec.Columns)
@@ -336,6 +352,51 @@ func (j *DDJoinOp) rightPrefix() string {
 		j.rightPrefixStr = j.RightAlias + "."
 	}
 	return j.rightPrefixStr
+}
+
+// mergeProjected copies only the columns referenced by the downstream query.
+// For each projected column name, it tries to resolve it from left or right
+// records, handling both qualified (e.g., "c.tier") and unqualified ("tier") forms.
+func (j *DDJoinOp) mergeProjected(leftRec, rightRec Record) Record {
+	merged := Record{
+		Columns:   make(map[string]Value, len(j.ProjectedColumns)),
+		Timestamp: leftRec.Timestamp,
+		Weight:    leftRec.Weight * rightRec.Weight,
+	}
+
+	leftPrefix := j.leftPrefix()
+	rightPrefix := j.rightPrefix()
+
+	for col := range j.ProjectedColumns {
+		// Try left side (unqualified match)
+		if v, ok := leftRec.Columns[col]; ok {
+			merged.Columns[col] = v
+			continue
+		}
+		// Try qualified left: if col is "e.user_id", strip prefix and look up "user_id"
+		if leftPrefix != "" && strings.HasPrefix(col, leftPrefix) {
+			unqual := col[len(leftPrefix):]
+			if v, ok := leftRec.Columns[unqual]; ok {
+				merged.Columns[col] = v
+				continue
+			}
+		}
+		// Try right side (unqualified match)
+		if v, ok := rightRec.Columns[col]; ok {
+			merged.Columns[col] = v
+			continue
+		}
+		// Try qualified right: if col is "c.tier", strip prefix and look up "tier"
+		if rightPrefix != "" && strings.HasPrefix(col, rightPrefix) {
+			unqual := col[len(rightPrefix):]
+			if v, ok := rightRec.Columns[unqual]; ok {
+				merged.Columns[col] = v
+				continue
+			}
+		}
+	}
+
+	return merged
 }
 
 // mergeWithNulls creates a joined record for LEFT JOIN with no right match.
