@@ -62,6 +62,18 @@ func (s *JSONSink) Close() error {
 	return nil
 }
 
+// isSimpleString returns true if s contains only printable ASCII characters
+// that don't need JSON escaping (no quotes, backslashes, or control chars).
+func isSimpleString(s string) bool {
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c < 0x20 || c == '"' || c == '\\' || c > 0x7e {
+			return false
+		}
+	}
+	return true
+}
+
 func writeJSONValue(w *bufio.Writer, v engine.Value) {
 	if v == nil || v.IsNull() {
 		w.WriteString("null")
@@ -79,8 +91,14 @@ func writeJSONValue(w *bufio.Writer, v engine.Value) {
 			w.WriteString("false")
 		}
 	case engine.TextValue:
-		b, _ := json.Marshal(val.V) // handles escaping
-		w.Write(b)
+		if isSimpleString(val.V) {
+			w.WriteByte('"')
+			w.WriteString(val.V)
+			w.WriteByte('"')
+		} else {
+			b, _ := json.Marshal(val.V) // handles escaping
+			w.Write(b)
+		}
 	case *engine.LazyJsonValue:
 		// Write raw JSON bytes directly — already valid JSON
 		w.Write(val.Raw)
