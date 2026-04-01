@@ -20,8 +20,7 @@ func FastKeyExtract(rec Record, expr ast.Expr) (Value, bool) {
 		}
 		return NullValue{}, true
 	case *ast.QualifiedRef:
-		qualName := e.Qualifier + "." + e.Name
-		if v, ok := rec.Columns[qualName]; ok {
+		if v, ok := rec.Columns[e.QualifiedName()]; ok {
 			return v, true
 		}
 		if v, ok := rec.Columns[e.Name]; ok {
@@ -49,8 +48,7 @@ func Eval(expr ast.Expr, rec Record) (Value, error) {
 
 	case *ast.QualifiedRef:
 		// Try qualified name first: "qualifier.name"
-		qualName := e.Qualifier + "." + e.Name
-		if v, ok := rec.Columns[qualName]; ok {
+		if v, ok := rec.Columns[e.QualifiedName()]; ok {
 			return v, nil
 		}
 		// Fall back to unqualified name

@@ -129,12 +129,22 @@ func (*ColumnRef) exprTag() {}
 
 // QualifiedRef represents a qualified column reference like alias.column.
 type QualifiedRef struct {
-	Qualifier string // the table alias (e.g., "e" in "e.user_id")
-	Name      string // the column name (e.g., "user_id")
+	Qualifier     string // the table alias (e.g., "e" in "e.user_id")
+	Name          string // the column name (e.g., "user_id")
+	qualifiedName string // cached "Qualifier.Name" to avoid per-call allocation
 }
 
 func (*QualifiedRef) nodeTag() {}
 func (*QualifiedRef) exprTag() {}
+
+// QualifiedName returns "Qualifier.Name", caching the result to avoid
+// repeated string concatenation in hot paths.
+func (q *QualifiedRef) QualifiedName() string {
+	if q.qualifiedName == "" {
+		q.qualifiedName = q.Qualifier + "." + q.Name
+	}
+	return q.qualifiedName
+}
 
 // NumberLiteral represents an integer or float literal.
 type NumberLiteral struct {
