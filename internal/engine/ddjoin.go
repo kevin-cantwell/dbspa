@@ -24,6 +24,7 @@ type DDJoinOp struct {
 	LeftAlias    string       // alias prefix for left columns (e.g., "e")
 	RightAlias   string       // alias prefix for right columns (e.g., "u")
 	IsLeftJoin   bool         // emit NULL-filled rows for unmatched left records
+	RightIsStatic bool        // when true, skip left arrangement (right side never changes)
 }
 
 // NewDDJoinOp creates a new differential dataflow join operator.
@@ -46,11 +47,17 @@ func (j *DDJoinOp) ProcessLeftDelta(delta Batch, out chan<- Record) {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 
-	// Apply deltas to left arrangement
-	applied := j.Left.Apply(delta)
+	// When right side is static, skip left arrangement entirely — it's only
+	// needed for ProcessRightDelta lookups which won't happen.
+	var applied Batch
+	if j.RightIsStatic {
+		applied = delta
+	} else {
+		applied = j.Left.Apply(delta)
+	}
 
 	for _, leftRec := range applied {
-		key, err := Eval(j.LeftKeyExpr, leftRec)
+		key, err := EvalKeyExpr(j.LeftKeyExpr, leftRec)
 		if err != nil || key.IsNull() {
 			if j.IsLeftJoin {
 				out <- j.mergeWithNulls(leftRec)
@@ -88,7 +95,7 @@ func (j *DDJoinOp) ProcessRightDelta(delta Batch, out chan<- Record) {
 	defer j.mu.Unlock()
 
 	for _, rightRec := range delta {
-		key, err := Eval(j.RightKeyExpr, rightRec)
+		key, err := EvalKeyExpr(j.RightKeyExpr, rightRec)
 		if err != nil || key.IsNull() {
 			continue
 		}
@@ -141,7 +148,7 @@ func (j *DDJoinOp) EvictAndRetract(cutoff time.Time, out chan<- Record) {
 	// Evict from left arrangement and process retractions against right
 	leftEvicted := j.Left.EvictBefore(cutoff)
 	for _, leftRec := range leftEvicted {
-		key, err := Eval(j.LeftKeyExpr, leftRec)
+		key, err := EvalKeyExpr(j.LeftKeyExpr, leftRec)
 		if err != nil || key.IsNull() {
 			continue
 		}
@@ -159,7 +166,7 @@ func (j *DDJoinOp) EvictAndRetract(cutoff time.Time, out chan<- Record) {
 	// Evict from right arrangement and process retractions against left
 	rightEvicted := j.Right.EvictBefore(cutoff)
 	for _, rightRec := range rightEvicted {
-		key, err := Eval(j.RightKeyExpr, rightRec)
+		key, err := EvalKeyExpr(j.RightKeyExpr, rightRec)
 		if err != nil || key.IsNull() {
 			continue
 		}

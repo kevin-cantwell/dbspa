@@ -1821,6 +1821,9 @@ func buildDDJoinOp(stmt *ast.SelectStatement) (*engine.DDJoinOp, error) {
 	}
 
 	op := engine.NewDDJoinOp(streamKey, tableKey, streamAlias, tableAlias, join.Type == "LEFT JOIN")
+	// Stream-to-file joins have a static right side — no CDC updates will arrive.
+	// This lets the join skip maintaining the left arrangement entirely.
+	op.RightIsStatic = true
 
 	// Load table records into right arrangement as initial state
 	tableBatch := make(engine.Batch, len(tableRecords))

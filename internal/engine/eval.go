@@ -8,6 +8,39 @@ import (
 	"github.com/kevin-cantwell/folddb/internal/sql/ast"
 )
 
+// FastKeyExtract extracts a join key value from a record for simple column
+// references (ColumnRef and QualifiedRef) without the overhead of a full Eval.
+// Returns the value and true if the fast path was taken, or nil and false if
+// the expression is too complex and Eval should be used instead.
+func FastKeyExtract(rec Record, expr ast.Expr) (Value, bool) {
+	switch e := expr.(type) {
+	case *ast.ColumnRef:
+		if v, ok := rec.Columns[e.Name]; ok {
+			return v, true
+		}
+		return NullValue{}, true
+	case *ast.QualifiedRef:
+		qualName := e.Qualifier + "." + e.Name
+		if v, ok := rec.Columns[qualName]; ok {
+			return v, true
+		}
+		if v, ok := rec.Columns[e.Name]; ok {
+			return v, true
+		}
+		return NullValue{}, true
+	}
+	return nil, false
+}
+
+// EvalKeyExpr evaluates a key expression against a record, using a fast path
+// for simple column references and falling back to full Eval otherwise.
+func EvalKeyExpr(expr ast.Expr, rec Record) (Value, error) {
+	if v, ok := FastKeyExtract(rec, expr); ok {
+		return v, nil
+	}
+	return Eval(expr, rec)
+}
+
 // Eval evaluates an AST expression against a record and returns the resulting value.
 func Eval(expr ast.Expr, rec Record) (Value, error) {
 	switch e := expr.(type) {

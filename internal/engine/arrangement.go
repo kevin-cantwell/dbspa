@@ -44,7 +44,7 @@ func (a *Arrangement) Apply(delta Batch) Batch {
 
 	applied := make(Batch, 0, len(delta))
 	for _, rec := range delta {
-		key, err := Eval(a.keyExpr, rec)
+		key, err := EvalKeyExpr(a.keyExpr, rec)
 		if err != nil || key.IsNull() {
 			continue // NULLs don't join
 		}
