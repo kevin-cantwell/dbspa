@@ -947,3 +947,118 @@ func TestDDJoinOp_CrossTypeJoin_TextToInt(t *testing.T) {
 		t.Errorf("expected c.tier=gold, got %v", v)
 	}
 }
+
+func TestDDJoinOp_ProjectionPushdown(t *testing.T) {
+	// Test that ProjectedColumns limits which columns appear in merged output.
+	op := NewDDJoinOp(
+		&ast.QualifiedRef{Qualifier: "e", Name: "customer_id"},
+		&ast.QualifiedRef{Qualifier: "c", Name: "id"},
+		"e", "c", false,
+	)
+
+	// Right side: customer table with many columns
+	op.Right.Apply(Batch{
+		ddRec(map[string]Value{
+			"id":     IntValue{V: 1},
+			"name":   TextValue{V: "Alice"},
+			"tier":   TextValue{V: "gold"},
+			"region": TextValue{V: "us-east"},
+			"email":  TextValue{V: "alice@example.com"},
+			"phone":  TextValue{V: "555-0100"},
+		}, 1),
+	})
+
+	// Set projection: only need tier, region, and join key
+	op.ProjectedColumns = map[string]bool{
+		"c.tier":        true,
+		"tier":          true,
+		"c.region":      true,
+		"region":        true,
+		"customer_id":   true,
+		"e.customer_id": true,
+	}
+
+	results := op.ProcessLeftDeltaSlice(Batch{
+		ddRec(map[string]Value{
+			"customer_id": IntValue{V: 1},
+			"total":       FloatValue{V: 99.50},
+			"status":      TextValue{V: "delivered"},
+			"order_date":  TextValue{V: "2025-01-15"},
+		}, 1),
+	})
+
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+	r := results[0]
+
+	// Should have projected columns
+	if v := r.Columns["c.tier"]; v == nil || v.String() != "gold" {
+		t.Errorf("expected c.tier=gold, got %v", v)
+	}
+	if v := r.Columns["c.region"]; v == nil || v.String() != "us-east" {
+		t.Errorf("expected c.region=us-east, got %v", v)
+	}
+	if v := r.Columns["tier"]; v == nil || v.String() != "gold" {
+		t.Errorf("expected tier=gold, got %v", v)
+	}
+	if v := r.Columns["customer_id"]; v == nil || v.String() != "1" {
+		t.Errorf("expected customer_id=1, got %v", v)
+	}
+
+	// Should NOT have columns outside the projection
+	if v := r.Columns["name"]; v != nil {
+		t.Errorf("did not expect 'name' in projected output, got %v", v)
+	}
+	if v := r.Columns["c.name"]; v != nil {
+		t.Errorf("did not expect 'c.name' in projected output, got %v", v)
+	}
+	if v := r.Columns["email"]; v != nil {
+		t.Errorf("did not expect 'email' in projected output, got %v", v)
+	}
+	if v := r.Columns["total"]; v != nil {
+		t.Errorf("did not expect 'total' in projected output, got %v", v)
+	}
+	if v := r.Columns["status"]; v != nil {
+		t.Errorf("did not expect 'status' in projected output, got %v", v)
+	}
+
+	// Verify map size is small
+	if len(r.Columns) > len(op.ProjectedColumns) {
+		t.Errorf("expected at most %d columns, got %d: %v", len(op.ProjectedColumns), len(r.Columns), r.Columns)
+	}
+}
+
+func TestDDJoinOp_ProjectionPushdown_Nil_CopiesAll(t *testing.T) {
+	// When ProjectedColumns is nil (SELECT *), all columns should be copied.
+	op := NewDDJoinOp(
+		&ast.QualifiedRef{Qualifier: "e", Name: "user_id"},
+		&ast.QualifiedRef{Qualifier: "u", Name: "id"},
+		"e", "u", false,
+	)
+
+	op.Right.Apply(Batch{
+		ddRec(map[string]Value{
+			"id":   IntValue{V: 1},
+			"name": TextValue{V: "Alice"},
+		}, 1),
+	})
+
+	// ProjectedColumns is nil (default) — should copy everything
+	results := op.ProcessLeftDeltaSlice(Batch{
+		ddRec(map[string]Value{"user_id": IntValue{V: 1}, "action": TextValue{V: "login"}}, 1),
+	})
+
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+	r := results[0]
+
+	// Should have all columns with prefixes
+	expectedCols := []string{"user_id", "e.user_id", "action", "e.action", "id", "u.id", "name", "u.name"}
+	for _, col := range expectedCols {
+		if r.Columns[col] == nil {
+			t.Errorf("expected column %q in full merge output", col)
+		}
+	}
+}
