@@ -1845,6 +1845,10 @@ func buildDDJoinOp(stmt *ast.SelectStatement) (*engine.DDJoinOp, error) {
 	// This lets the join skip maintaining the left arrangement entirely.
 	op.RightIsStatic = true
 
+	// Projection pushdown: only copy columns the query actually references.
+	// Returns nil for SELECT * (meaning copy everything).
+	op.ProjectedColumns = engine.ExtractReferencedColumns(stmt)
+
 	// Load table records into right arrangement as initial state
 	tableBatch := make(engine.Batch, len(tableRecords))
 	for i, rec := range tableRecords {
