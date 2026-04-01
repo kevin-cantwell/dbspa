@@ -788,7 +788,7 @@ func BenchmarkDDJoin_StreamToFile(b *testing.B) {
 
 	for i := 0; i < b.N; i++ {
 		key, _ := EvalKeyExpr(op.LeftKeyExpr, leftRecords[i])
-		rightMatches := op.Right.LookupStringUnsafe(key.String())
+		rightMatches := op.Right.LookupValueUnsafe(key)
 		for _, rightRec := range rightMatches {
 			merged := op.merge(leftRecords[i], rightRec)
 			merged.Weight = leftRecords[i].Weight * rightRec.Weight

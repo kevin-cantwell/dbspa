@@ -75,8 +75,7 @@ func (j *DDJoinOp) processLeftDeltaLocked(delta Batch, out chan<- Record) {
 			continue
 		}
 
-		// Use LookupString to avoid Value.String() conversion inside Lookup
-		rightMatches := j.Right.LookupString(key.String())
+		rightMatches := j.Right.LookupValue(key)
 		if len(rightMatches) == 0 {
 			if j.IsLeftJoin {
 				out <- j.mergeWithNulls(leftRec)
@@ -109,7 +108,7 @@ func (j *DDJoinOp) ProcessLeftDeltaStream(ctx context.Context, in <-chan Record,
 				continue
 			}
 
-			rightMatches := j.Right.LookupStringUnsafe(key.String())
+			rightMatches := j.Right.LookupValueUnsafe(key)
 			if len(rightMatches) == 0 {
 				if j.IsLeftJoin {
 					out <- j.mergeWithNulls(rec)
