@@ -273,26 +273,46 @@ func (j *DDJoinOp) ProcessRightDeltaSlice(delta Batch) []Record {
 // Columns are prefixed with aliases if provided. Right columns overwrite
 // left columns in case of name conflicts (same as HashJoinOp behavior).
 func (j *DDJoinOp) merge(leftRec, rightRec Record) Record {
+	// Calculate capacity: each column appears once unqualified, plus once qualified if alias exists.
+	leftCount := len(leftRec.Columns)
+	rightCount := len(rightRec.Columns)
+	cap := leftCount + rightCount
+	if j.LeftAlias != "" {
+		cap += leftCount
+	}
+	if j.RightAlias != "" {
+		cap += rightCount
+	}
 	merged := Record{
-		Columns:   make(map[string]Value, len(leftRec.Columns)+len(rightRec.Columns)),
+		Columns:   make(map[string]Value, cap),
 		Timestamp: leftRec.Timestamp,
 		Weight:    leftRec.Weight * rightRec.Weight,
 	}
 
 	// Add left columns (unqualified and qualified)
-	for k, v := range leftRec.Columns {
-		merged.Columns[k] = v
-		if j.LeftAlias != "" {
-			merged.Columns[j.LeftAlias+"."+k] = v
+	if j.LeftAlias != "" {
+		leftPrefix := j.LeftAlias + "."
+		for k, v := range leftRec.Columns {
+			merged.Columns[k] = v
+			merged.Columns[leftPrefix+k] = v
+		}
+	} else {
+		for k, v := range leftRec.Columns {
+			merged.Columns[k] = v
 		}
 	}
 
 	// Add right columns (unqualified and qualified)
 	// Right overwrites left on unqualified name conflict
-	for k, v := range rightRec.Columns {
-		merged.Columns[k] = v
-		if j.RightAlias != "" {
-			merged.Columns[j.RightAlias+"."+k] = v
+	if j.RightAlias != "" {
+		rightPrefix := j.RightAlias + "."
+		for k, v := range rightRec.Columns {
+			merged.Columns[k] = v
+			merged.Columns[rightPrefix+k] = v
+		}
+	} else {
+		for k, v := range rightRec.Columns {
+			merged.Columns[k] = v
 		}
 	}
 
