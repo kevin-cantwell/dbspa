@@ -50,9 +50,7 @@ func (d *DebeziumDecoder) Decode(data []byte) (engine.Record, error) {
 // depending on the operation type.
 func (d *DebeziumDecoder) DecodeMulti(data []byte) ([]engine.Record, error) {
 	var env debeziumEnvelope
-	dec := json.NewDecoder(bytes.NewReader(data))
-	dec.UseNumber()
-	if err := dec.Decode(&env); err != nil {
+	if err := json.Unmarshal(data, &env); err != nil {
 		return nil, fmt.Errorf("debezium decode error: %w", err)
 	}
 
@@ -133,9 +131,7 @@ const numVirtuals = 7 // _op, _before, _after, _table, _db, _ts, _source
 // This avoids creating a separate virtuals map and copying it.
 func (d *DebeziumDecoder) buildRecord(payload json.RawMessage, env *debeziumEnvelope, src *debeziumSource, ts time.Time, diff int) (engine.Record, error) {
 	var raw map[string]any
-	rdec := json.NewDecoder(bytes.NewReader(payload))
-	rdec.UseNumber()
-	if err := rdec.Decode(&raw); err != nil {
+	if err := json.Unmarshal(payload, &raw); err != nil {
 		return engine.Record{}, fmt.Errorf("payload decode: %w", err)
 	}
 
@@ -181,9 +177,18 @@ func (d *DebeziumDecoder) buildRecord(payload json.RawMessage, env *debeziumEnve
 
 // isJSONNull returns true if the raw JSON is null or empty.
 func isJSONNull(raw json.RawMessage) bool {
-	if len(raw) == 0 {
+	n := len(raw)
+	if n == 0 {
 		return true
 	}
-	trimmed := bytes.TrimSpace(raw)
-	return string(trimmed) == "null"
+	// Fast path: check for literal "null" without trimming
+	if n == 4 && raw[0] == 'n' {
+		return raw[1] == 'u' && raw[2] == 'l' && raw[3] == 'l'
+	}
+	// Slow path: handle whitespace-padded null
+	if n > 4 {
+		trimmed := bytes.TrimSpace(raw)
+		return len(trimmed) == 4 && trimmed[0] == 'n' && trimmed[1] == 'u' && trimmed[2] == 'l' && trimmed[3] == 'l'
+	}
+	return false
 }
