@@ -1115,18 +1115,52 @@ func (p *Parser) parseIdentOrFunction() (ast.Expr, error) {
 	tok := p.lex.Next()
 	name := tok.Literal
 
-	// Check for qualified reference: alias.column
+	// Check for qualified reference / dot notation: a.b or a.b.c.d
 	if p.lex.Peek().Type == lexer.TokenDot {
-		p.lex.Next() // consume '.'
+		p.lex.Next() // consume first '.'
 		colTok := p.lex.Next()
 		if colTok.Type != lexer.TokenIdent && colTok.Type != lexer.TokenStar && !lexer.IsKeyword(colTok.Type) {
 			return nil, p.errorf(colTok, "expected column name after %q., got %q", name, colTok.Literal)
 		}
 		if colTok.Type == lexer.TokenStar {
-			// alias.* — return a QualifiedRef with "*" as the name
 			return &ast.QualifiedRef{Qualifier: name, Name: "*"}, nil
 		}
-		return &ast.QualifiedRef{Qualifier: name, Name: colTok.Literal}, nil
+
+		// If no more dots, return simple QualifiedRef (a.b)
+		if p.lex.Peek().Type != lexer.TokenDot {
+			return &ast.QualifiedRef{Qualifier: name, Name: colTok.Literal}, nil
+		}
+
+		// Multi-level dot notation: a.b.c.d...
+		// Desugar to: JsonAccess(QualifiedRef(a, b), "c") -> "d" -> ...
+		// The first two segments are a QualifiedRef (alias.column or column.field),
+		// subsequent segments are chained JsonAccessExpr (text extraction).
+		// Collect all remaining dot segments
+		var segments []string
+		for p.lex.Peek().Type == lexer.TokenDot {
+			p.lex.Next() // consume '.'
+			fieldTok := p.lex.Next()
+			if fieldTok.Type != lexer.TokenIdent && !lexer.IsKeyword(fieldTok.Type) {
+				return nil, p.errorf(fieldTok, "expected field name after dot, got %q", fieldTok.Literal)
+			}
+			segments = append(segments, fieldTok.Literal)
+		}
+
+		// Multi-level dot notation: a.b.c.d
+		// First two segments (a.b) become QualifiedRef — handles both alias.column
+		// and column.field via the evaluator's fallback.
+		// Additional segments (.c.d) become chained JsonAccessExpr.
+		// Intermediate JsonAccess uses -> (preserve JSON), final uses ->> (text).
+		var expr ast.Expr = &ast.QualifiedRef{Qualifier: name, Name: colTok.Literal}
+		for i, seg := range segments {
+			isFinal := i == len(segments)-1
+			expr = &ast.JsonAccessExpr{
+				Left:   expr,
+				Key:    &ast.StringLiteral{Value: seg},
+				AsText: isFinal,
+			}
+		}
+		return expr, nil
 	}
 
 	// Check if it's a function call (followed by '(')

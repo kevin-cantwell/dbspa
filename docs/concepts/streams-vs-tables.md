@@ -1,5 +1,7 @@
 # Streams vs Tables
 
+FoldDB is **schema-on-read**. There is no pre-declared schema — everything is inferred from the data at runtime. The "what type is it?" question is answered when the record arrives, not when the table is created. This applies equally to top-level columns and nested JSON fields.
+
 FoldDB queries operate on two fundamentally different kinds of data: **streams** and **tables**. Understanding the distinction is key to writing correct queries.
 
 ## Streams

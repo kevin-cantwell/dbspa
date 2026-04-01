@@ -265,8 +265,18 @@ See [Joins](../concepts/joins.md).
 | 9 | `AND` | Left |
 | 10 | `OR` | Left |
 
-### JSON access (PostgreSQL syntax)
+### JSON access
 
+FoldDB supports two syntaxes for accessing nested JSON fields:
+
+**Dot notation** (recommended for readability):
+```sql
+data.name               -- one level: extract field as text
+user.address.city       -- multi-level: traverse nested objects
+e.payload.score         -- works with table aliases (e is alias, payload is column)
+```
+
+**PostgreSQL arrow syntax** (full control over JSON vs text return type):
 ```sql
 col->'key'              -- extract JSON field as JSON
 col->>'key'             -- extract JSON field as TEXT
@@ -274,6 +284,10 @@ col->0                  -- extract JSON array element as JSON
 col->>0                 -- extract JSON array element as TEXT
 payload->'user'->>'email'  -- chaining
 ```
+
+Dot notation always returns text for the final field (like `->>`). For intermediate levels in multi-level access, it preserves JSON (like `->`). If you need to keep a nested object as JSON, use the arrow syntax: `col->'key'`.
+
+**Resolution order:** `a.b` first tries alias resolution (table `a`, column `b`). If no alias matches, it tries JSON field access (column `a`, field `b`). This means table aliases always take priority over JSON column names.
 
 !!! warning
     Cast precedence: `col->>'amount'::float` parses as `col->>('amount'::float)`, not `(col->>'amount')::float`. Always use parentheses: `(col->>'amount')::float`.
