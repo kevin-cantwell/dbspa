@@ -45,6 +45,16 @@ func inferValue(v any) engine.Value {
 		return engine.NullValue{}
 	}
 	switch val := v.(type) {
+	case json.Number:
+		// json.Number is produced when UseNumber() is set on the decoder.
+		// Try integer first, then float.
+		if i, err := val.Int64(); err == nil {
+			return engine.IntValue{V: i}
+		}
+		if f, err := val.Float64(); err == nil {
+			return engine.FloatValue{V: f}
+		}
+		return engine.TextValue{V: val.String()}
 	case float64:
 		// Recover integer type: if the value is a whole number within int64 range, use IntValue
 		if val == math.Trunc(val) && val >= math.MinInt64 && val <= math.MaxInt64 {
