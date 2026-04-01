@@ -64,6 +64,13 @@ func (p *Parser) parseSelect() (*ast.SelectStatement, error) {
 		stmt.FromAlias = alias
 	}
 
+	// FORMAT after FROM source+alias but before JOIN (e.g., FROM stdin e FORMAT DEBEZIUM JOIN ...)
+	if stmt.From != nil && stmt.From.Format == "" && p.lex.Peek().Type == lexer.TokenFormat {
+		if err := p.parseFormatInto(stmt.From); err != nil {
+			return nil, err
+		}
+	}
+
 	// JOIN / LEFT JOIN (optional)
 	if p.lex.Peek().Type == lexer.TokenJoin || p.lex.Peek().Type == lexer.TokenLeft {
 		join, err := p.parseJoinClause()
@@ -71,6 +78,13 @@ func (p *Parser) parseSelect() (*ast.SelectStatement, error) {
 			return nil, err
 		}
 		stmt.Join = join
+	}
+
+	// FORMAT after JOIN (e.g., FROM stdin e JOIN ... FORMAT DEBEZIUM WHERE ...)
+	if stmt.From != nil && stmt.From.Format == "" && p.lex.Peek().Type == lexer.TokenFormat {
+		if err := p.parseFormatInto(stmt.From); err != nil {
+			return nil, err
+		}
 	}
 
 	// SEED FROM (optional)
@@ -210,14 +224,21 @@ func (p *Parser) parseSelect() (*ast.SelectStatement, error) {
 		stmt.Limit = &n
 	}
 
-	// Standalone FORMAT (when no FROM clause, e.g., piped stdin)
+	// Standalone FORMAT (trailing, after all other clauses)
 	// This allows: SELECT ... WHERE ... FORMAT CSV
-	if stmt.From == nil && p.lex.Peek().Type == lexer.TokenFormat {
-		src, err := p.parseStandaloneFormat()
-		if err != nil {
-			return nil, err
+	// Also: SELECT ... FROM stdin JOIN ... WHERE ... FORMAT DEBEZIUM
+	if p.lex.Peek().Type == lexer.TokenFormat {
+		if stmt.From == nil {
+			src, err := p.parseStandaloneFormat()
+			if err != nil {
+				return nil, err
+			}
+			stmt.From = src
+		} else if stmt.From.Format == "" {
+			if err := p.parseFormatInto(stmt.From); err != nil {
+				return nil, err
+			}
 		}
-		stmt.From = src
 	}
 
 	return stmt, nil
@@ -267,6 +288,55 @@ func (p *Parser) parseStandaloneFormat() (*ast.TableSource, error) {
 		src.FormatOptions = opts
 	}
 	return src, nil
+}
+
+// parseFormatInto consumes a FORMAT clause and writes the format name and
+// options into the given TableSource. The caller must have already verified
+// that the next token is TokenFormat.
+func (p *Parser) parseFormatInto(src *ast.TableSource) error {
+	p.lex.Next() // consume FORMAT
+	fmtTok := p.lex.Next()
+	src.Format = strings.ToUpper(fmtTok.Literal)
+	// Parse optional format options: FORMAT CSV(key=value, ...)
+	if p.lex.Peek().Type == lexer.TokenLParen {
+		p.lex.Next()
+		opts := make(map[string]string)
+		for p.lex.Peek().Type != lexer.TokenRParen && p.lex.Peek().Type != lexer.TokenEOF {
+			keyTok := p.lex.Next()
+			if keyTok.Type != lexer.TokenIdent && !lexer.IsKeyword(keyTok.Type) {
+				return p.errorf(keyTok, "expected option name, got %q", keyTok.Literal)
+			}
+			key := strings.ToLower(keyTok.Literal)
+			if err := p.expect(lexer.TokenEq); err != nil {
+				return err
+			}
+			valTok := p.lex.Next()
+			var val string
+			switch valTok.Type {
+			case lexer.TokenString:
+				val = valTok.Literal
+			case lexer.TokenTrue:
+				val = "true"
+			case lexer.TokenFalse:
+				val = "false"
+			case lexer.TokenInteger:
+				val = valTok.Literal
+			case lexer.TokenIdent:
+				val = valTok.Literal
+			default:
+				return p.errorf(valTok, "expected option value, got %q", valTok.Literal)
+			}
+			opts[key] = val
+			if p.lex.Peek().Type == lexer.TokenComma {
+				p.lex.Next()
+			}
+		}
+		if err := p.expect(lexer.TokenRParen); err != nil {
+			return err
+		}
+		src.FormatOptions = opts
+	}
+	return nil
 }
 
 func (p *Parser) parseSelectList() ([]ast.Column, error) {
@@ -340,6 +410,12 @@ func (p *Parser) parseTableSourceWithAlias() (*ast.TableSource, string, error) {
 			uri = "stdin://"
 		}
 		src = &ast.TableSource{URI: uri}
+		// Check for inline FORMAT after bare identifier (e.g., FROM stdin FORMAT DEBEZIUM)
+		if p.lex.Peek().Type == lexer.TokenFormat {
+			if err := p.parseFormatInto(src); err != nil {
+				return nil, "", err
+			}
+		}
 	} else {
 		return nil, "", p.errorf(tok, "expected source URI or identifier after FROM, got %q", tok.Literal)
 	}
