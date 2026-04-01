@@ -1844,16 +1844,7 @@ func applyJoin(ctx context.Context, joinOp *engine.DDJoinOp, in <-chan engine.Re
 	out := make(chan engine.Record, 256)
 	go func() {
 		defer close(out)
-		for rec := range in {
-			results := joinOp.ProcessLeftDeltaSlice(engine.Batch{rec})
-			for _, jr := range results {
-				select {
-				case out <- jr:
-				case <-ctx.Done():
-					return
-				}
-			}
-		}
+		joinOp.ProcessLeftDeltaStream(ctx, in, out)
 	}()
 	return out
 }

@@ -96,6 +96,12 @@ func (a *Arrangement) LookupString(key string) []Record {
 	return a.index[key]
 }
 
+// LookupStringUnsafe returns entries matching the key without locking.
+// Only safe when the caller guarantees no concurrent writes.
+func (a *Arrangement) LookupStringUnsafe(key string) []Record {
+	return a.index[key]
+}
+
 // ColumnNames returns all column names seen in this arrangement.
 func (a *Arrangement) ColumnNames() []string {
 	a.mu.RLock()

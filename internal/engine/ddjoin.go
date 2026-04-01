@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"context"
 	"sync"
 	"time"
 
@@ -47,6 +48,11 @@ func (j *DDJoinOp) ProcessLeftDelta(delta Batch, out chan<- Record) {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 
+	j.processLeftDeltaLocked(delta, out)
+}
+
+// processLeftDeltaLocked is the inner implementation that assumes the mutex is held.
+func (j *DDJoinOp) processLeftDeltaLocked(delta Batch, out chan<- Record) {
 	// When right side is static, skip left arrangement entirely — it's only
 	// needed for ProcessRightDelta lookups which won't happen.
 	var applied Batch
@@ -65,7 +71,8 @@ func (j *DDJoinOp) ProcessLeftDelta(delta Batch, out chan<- Record) {
 			continue
 		}
 
-		rightMatches := j.Right.Lookup(key)
+		// Use LookupString to avoid Value.String() conversion inside Lookup
+		rightMatches := j.Right.LookupString(key.String())
 		if len(rightMatches) == 0 {
 			if j.IsLeftJoin {
 				out <- j.mergeWithNulls(leftRec)
@@ -77,6 +84,51 @@ func (j *DDJoinOp) ProcessLeftDelta(delta Batch, out chan<- Record) {
 			merged := j.merge(leftRec, rightRec)
 			merged.Weight = leftRec.Weight * rightRec.Weight
 			out <- merged
+		}
+	}
+}
+
+// ProcessLeftDeltaStream processes a stream of left records through the join,
+// sending results directly to the output channel. This is more efficient than
+// calling ProcessLeftDeltaSlice per-record because it avoids goroutine/channel
+// allocation overhead. When RightIsStatic is true, it also skips the mutex.
+func (j *DDJoinOp) ProcessLeftDeltaStream(ctx context.Context, in <-chan Record, out chan<- Record) {
+	if j.RightIsStatic {
+		// Single-threaded fast path: no mutex needed since right side won't change
+		// and left arrangement is skipped. Uses unsafe lookup to skip RWMutex.
+		for rec := range in {
+			key, err := EvalKeyExpr(j.LeftKeyExpr, rec)
+			if err != nil || key.IsNull() {
+				if j.IsLeftJoin {
+					out <- j.mergeWithNulls(rec)
+				}
+				continue
+			}
+
+			rightMatches := j.Right.LookupStringUnsafe(key.String())
+			if len(rightMatches) == 0 {
+				if j.IsLeftJoin {
+					out <- j.mergeWithNulls(rec)
+				}
+				continue
+			}
+
+			for _, rightRec := range rightMatches {
+				merged := j.merge(rec, rightRec)
+				merged.Weight = rec.Weight * rightRec.Weight
+				select {
+				case out <- merged:
+				case <-ctx.Done():
+					return
+				}
+			}
+		}
+	} else {
+		// Concurrent path: need mutex since right side may change
+		for rec := range in {
+			j.mu.Lock()
+			j.processLeftDeltaLocked(Batch{rec}, out)
+			j.mu.Unlock()
 		}
 	}
 }
