@@ -796,3 +796,154 @@ func BenchmarkDDJoin_StreamToFile(b *testing.B) {
 		}
 	}
 }
+
+func TestArrangement_DualIndex_IntFastPath(t *testing.T) {
+	a := NewArrangement(&ast.ColumnRef{Name: "id"})
+
+	// Insert with integer keys
+	a.Apply(Batch{
+		ddRec(map[string]Value{"id": IntValue{V: 42}, "name": TextValue{V: "Alice"}}, 1),
+		ddRec(map[string]Value{"id": IntValue{V: 99}, "name": TextValue{V: "Bob"}}, 1),
+	})
+
+	// Should use int index
+	if !a.useIntKey {
+		t.Fatal("expected useIntKey=true for integer keys")
+	}
+
+	// Lookup by IntValue
+	entries := a.Lookup(IntValue{V: 42})
+	if len(entries) != 1 || entries[0].Columns["name"].String() != "Alice" {
+		t.Fatalf("expected Alice via IntValue lookup, got %v", entries)
+	}
+
+	// Lookup by TextValue (cross-type coercion: "42" → 42)
+	entries = a.Lookup(TextValue{V: "42"})
+	if len(entries) != 1 || entries[0].Columns["name"].String() != "Alice" {
+		t.Fatalf("expected Alice via TextValue coercion, got %v", entries)
+	}
+
+	// Lookup by FloatValue (cross-type coercion: 42.0 → 42)
+	entries = a.Lookup(FloatValue{V: 42.0})
+	if len(entries) != 1 || entries[0].Columns["name"].String() != "Alice" {
+		t.Fatalf("expected Alice via FloatValue coercion, got %v", entries)
+	}
+
+	// LookupString (used by test helpers, should coerce "42" → 42)
+	entries = a.LookupString("42")
+	if len(entries) != 1 || entries[0].Columns["name"].String() != "Alice" {
+		t.Fatalf("expected Alice via LookupString coercion, got %v", entries)
+	}
+
+	// Non-integer text should not match anything
+	entries = a.Lookup(TextValue{V: "not-a-number"})
+	if len(entries) != 0 {
+		t.Fatalf("expected no match for non-integer text, got %d", len(entries))
+	}
+}
+
+func TestArrangement_DualIndex_StrFallback(t *testing.T) {
+	a := NewArrangement(&ast.ColumnRef{Name: "name"})
+
+	// Insert with string keys
+	a.Apply(Batch{
+		ddRec(map[string]Value{"name": TextValue{V: "alice"}, "score": IntValue{V: 100}}, 1),
+	})
+
+	// Should use string index
+	if a.useIntKey {
+		t.Fatal("expected useIntKey=false for string keys")
+	}
+
+	entries := a.Lookup(TextValue{V: "alice"})
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(entries))
+	}
+}
+
+func TestArrangement_DualIndex_Migration(t *testing.T) {
+	a := NewArrangement(&ast.ColumnRef{Name: "id"})
+
+	// Start with integer keys
+	a.Apply(Batch{
+		ddRec(map[string]Value{"id": IntValue{V: 1}, "name": TextValue{V: "Alice"}}, 1),
+		ddRec(map[string]Value{"id": IntValue{V: 2}, "name": TextValue{V: "Bob"}}, 1),
+	})
+	if !a.useIntKey {
+		t.Fatal("expected useIntKey=true initially")
+	}
+
+	// Now insert a non-integer key → triggers migration
+	a.Apply(Batch{
+		ddRec(map[string]Value{"id": TextValue{V: "xyz"}, "name": TextValue{V: "Charlie"}}, 1),
+	})
+	if a.useIntKey {
+		t.Fatal("expected useIntKey=false after migration")
+	}
+
+	// Old integer entries should still be findable via string index
+	entries := a.LookupString("1")
+	if len(entries) != 1 || entries[0].Columns["name"].String() != "Alice" {
+		t.Fatalf("expected Alice after migration, got %v", entries)
+	}
+
+	// New string entry should be findable
+	entries = a.LookupString("xyz")
+	if len(entries) != 1 || entries[0].Columns["name"].String() != "Charlie" {
+		t.Fatalf("expected Charlie after migration, got %v", entries)
+	}
+}
+
+func TestDDJoinOp_CrossTypeJoin_IntToText(t *testing.T) {
+	// Simulates Debezium JSON (TextValue IDs) joining against Parquet (IntValue IDs).
+	// The right side has IntValue keys, the left side sends TextValue keys.
+	op := NewDDJoinOp(
+		&ast.ColumnRef{Name: "customer_id"},
+		&ast.ColumnRef{Name: "id"},
+		"e", "c", false,
+	)
+
+	// Right side: Parquet file with integer IDs
+	op.Right.Apply(Batch{
+		ddRec(map[string]Value{"id": IntValue{V: 1}, "tier": TextValue{V: "gold"}}, 1),
+		ddRec(map[string]Value{"id": IntValue{V: 2}, "tier": TextValue{V: "silver"}}, 1),
+	})
+
+	// Left side: Debezium JSON with string IDs (common in JSON-based CDC)
+	results := op.ProcessLeftDeltaSlice(Batch{
+		ddRec(map[string]Value{"customer_id": TextValue{V: "1"}, "event": TextValue{V: "purchase"}}, 1),
+	})
+
+	if len(results) != 1 {
+		t.Fatalf("expected 1 cross-type join result, got %d", len(results))
+	}
+	if v := results[0].Columns["c.tier"]; v == nil || v.String() != "gold" {
+		t.Errorf("expected c.tier=gold, got %v", v)
+	}
+}
+
+func TestDDJoinOp_CrossTypeJoin_TextToInt(t *testing.T) {
+	// Reverse: right side has text keys, left sends int keys
+	op := NewDDJoinOp(
+		&ast.ColumnRef{Name: "customer_id"},
+		&ast.ColumnRef{Name: "id"},
+		"e", "c", false,
+	)
+
+	// Right side: text IDs
+	op.Right.Apply(Batch{
+		ddRec(map[string]Value{"id": TextValue{V: "1"}, "tier": TextValue{V: "gold"}}, 1),
+	})
+
+	// Left side: integer IDs
+	results := op.ProcessLeftDeltaSlice(Batch{
+		ddRec(map[string]Value{"customer_id": IntValue{V: 1}, "event": TextValue{V: "purchase"}}, 1),
+	})
+
+	if len(results) != 1 {
+		t.Fatalf("expected 1 cross-type join result, got %d", len(results))
+	}
+	if v := results[0].Columns["c.tier"]; v == nil || v.String() != "gold" {
+		t.Errorf("expected c.tier=gold, got %v", v)
+	}
+}
