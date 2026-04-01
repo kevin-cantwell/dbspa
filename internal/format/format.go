@@ -46,6 +46,8 @@ func NewDecoderWithOptions(formatStr string, opts map[string]string) (Decoder, e
 		return &JSONDecoder{}, nil
 	case "DEBEZIUM":
 		return &DebeziumDecoder{}, nil
+	case "DEBEZIUM_AVRO":
+		return &DebeziumAvroDecoder{}, nil
 	case "CSV":
 		return newCSVDecoder(opts), nil
 	case "AVRO":

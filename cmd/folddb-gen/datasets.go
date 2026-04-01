@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/rand"
+	"os"
 	"time"
 
 	"github.com/linkedin/goavro/v2"
@@ -227,6 +228,109 @@ func genClick(rng *rand.Rand, seq int) map[string]any {
 		"duration_ms": rng.Intn(30000) + 100,
 		"timestamp":   time.Now().UTC().Format(time.RFC3339),
 	}
+}
+
+// --- Debezium Avro encoder (OCF with typed before/after records) ---
+
+const debeziumAvroSchema = `{
+	"type": "record",
+	"name": "Envelope",
+	"namespace": "folddb.test",
+	"fields": [
+		{"name": "op", "type": "string"},
+		{"name": "before", "type": ["null", {
+			"type": "record",
+			"name": "Order",
+			"fields": [
+				{"name": "order_id", "type": "int"},
+				{"name": "customer_id", "type": "int"},
+				{"name": "product", "type": "string"},
+				{"name": "quantity", "type": "int"},
+				{"name": "price", "type": "double"},
+				{"name": "total", "type": "double"},
+				{"name": "status", "type": "string"},
+				{"name": "region", "type": "string"},
+				{"name": "updated_at", "type": "string"}
+			]
+		}], "default": null},
+		{"name": "after", "type": ["null", "Order"], "default": null},
+		{"name": "source_db", "type": "string", "default": ""},
+		{"name": "source_table", "type": "string", "default": ""},
+		{"name": "source_ts_ms", "type": "long", "default": 0}
+	]
+}`
+
+type debeziumAvroEncoder struct {
+	writer *goavro.OCFWriter
+}
+
+func newDebeziumAvroEncoder() (*debeziumAvroEncoder, error) {
+	writer, err := goavro.NewOCFWriter(goavro.OCFConfig{
+		W:      os.Stdout,
+		Schema: debeziumAvroSchema,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("debezium avro writer error: %w", err)
+	}
+	return &debeziumAvroEncoder{writer: writer}, nil
+}
+
+func (e *debeziumAvroEncoder) Encode(rec map[string]any) error {
+	avroRec := toDebeziumAvroMap(rec)
+	return e.writer.Append([]any{avroRec})
+}
+
+func (e *debeziumAvroEncoder) Close() error { return nil }
+
+// toDebeziumAvroMap converts a CDC event map to Avro-compatible types with
+// typed before/after records (not JSON strings).
+func toDebeziumAvroMap(rec map[string]any) map[string]any {
+	result := map[string]any{
+		"op":             rec["op"],
+		"before":         orderToAvroUnion(rec["before"]),
+		"after":          orderToAvroUnion(rec["after"]),
+		"source_db":      "",
+		"source_table":   "",
+		"source_ts_ms":   int64(0),
+	}
+
+	if src, ok := rec["source"].(map[string]any); ok {
+		if db, ok := src["db"].(string); ok {
+			result["source_db"] = db
+		}
+		if table, ok := src["table"].(string); ok {
+			result["source_table"] = table
+		}
+		if tsMs, ok := src["ts_ms"].(int64); ok {
+			result["source_ts_ms"] = tsMs
+		}
+	}
+
+	return result
+}
+
+// orderToAvroUnion converts an order map to the Avro union format.
+// null -> nil, record -> goavro.Union("folddb.test.Order", typedMap)
+func orderToAvroUnion(v any) any {
+	if v == nil {
+		return nil
+	}
+	m, ok := v.(map[string]any)
+	if !ok {
+		return nil
+	}
+	typed := map[string]any{
+		"order_id":    int32(toInt(m["order_id"])),
+		"customer_id": int32(toInt(m["customer_id"])),
+		"product":     m["product"],
+		"quantity":    int32(toInt(m["quantity"])),
+		"price":       toFloat64(m["price"]),
+		"total":       toFloat64(m["total"]),
+		"status":      m["status"],
+		"region":      m["region"],
+		"updated_at":  m["updated_at"],
+	}
+	return goavro.Union("folddb.test.Order", typed)
 }
 
 // toAvroMap converts a generic map to Avro-compatible types.

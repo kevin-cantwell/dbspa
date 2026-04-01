@@ -24,7 +24,7 @@ type GenerateCmd struct {
 	Count   int    `help:"Number of records to generate (0=infinite)." default:"10000"`
 	Rate    int    `help:"Records per second (0=unlimited/burst)." default:"0"`
 	Seed    int64  `help:"Random seed for reproducible output." default:"0"`
-	Format  string `help:"Output format: ndjson, avro, protobuf, proto-typed, parquet." default:"ndjson" enum:"ndjson,avro,protobuf,proto-typed,parquet"`
+	Format  string `help:"Output format: ndjson, avro, protobuf, proto-typed, parquet, debezium-avro." default:"ndjson" enum:"ndjson,avro,protobuf,proto-typed,parquet,debezium-avro"`
 	Output  string `help:"Output file (required for parquet)." short:"o" placeholder:"FILE"`
 }
 
@@ -79,6 +79,15 @@ func (c *GenerateCmd) Run() error {
 		encoder = enc
 	case "parquet":
 		return writeParquet(c.Dataset, c.Count, rng, c.Output)
+	case "debezium-avro":
+		if c.Dataset != "orders-cdc" {
+			return fmt.Errorf("debezium-avro format only supports orders-cdc dataset")
+		}
+		enc, err := newDebeziumAvroEncoder()
+		if err != nil {
+			return err
+		}
+		encoder = enc
 	}
 
 	// Rate limiter
