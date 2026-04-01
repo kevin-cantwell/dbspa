@@ -196,6 +196,17 @@ func BenchmarkCDC_100K(b *testing.B) {
 	b.ReportMetric(float64(100_000)/b.Elapsed().Seconds(), "records/sec")
 }
 
+// --- Debezium Avro CDC benchmark ---
+
+func BenchmarkCDC_Avro_100K(b *testing.B) {
+	data := generateFixtureFormat(b, "orders-cdc", 100_000, "debezium-avro")
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		runFoldDB(b, data, "SELECT status, COUNT(*) GROUP BY status FORMAT DEBEZIUM_AVRO")
+	}
+	b.ReportMetric(float64(100_000)/b.Elapsed().Seconds(), "records/sec")
+}
+
 // --- JSON decode microbenchmark ---
 
 func BenchmarkJSONDecode_100K(b *testing.B) {
