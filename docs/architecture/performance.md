@@ -1,130 +1,132 @@
 # Performance
 
-## Architecture
+All benchmarks run on Apple M4, 100K records, single binary, no external services.
 
-FoldDB's performance characteristics follow from its pipeline architecture:
+## Format Comparison
 
-- **JSON decoding is the bottleneck**, not accumulation. The single-goroutine accumulator uses ~20ms/sec of CPU at 275K records/sec for O(1) aggregates.
-- **Non-accumulating queries** bypass the accumulator entirely, achieving full parallelism across Kafka partitions.
-- **For Kafka sources**, one goroutine per partition provides parallel decode and filter. The fan-in to the accumulator is the serialization point.
+### Passthrough (SELECT *)
 
-## Benchmark suite
+| Format | Time | Records/sec |
+|---|---|---|
+| NDJSON (stdin) | 362ms | 276K |
+| Avro OCF (stdin) | 414ms | 242K |
+| Protobuf (stdin) | 513ms | 195K |
+| **Parquet (DuckDB)** | **136ms** | **735K** |
 
-Benchmarks are in `bench/bench_test.go`. Run with:
+### Filter (WHERE status = 'confirmed')
 
-```bash
-make bench
+| Format | Time | Records/sec |
+|---|---|---|
+| NDJSON | 361ms | 277K |
+| Avro OCF | 413ms | 242K |
+| Protobuf | 513ms | 195K |
+| **Parquet (DuckDB)** | **51ms** | **1,961K** |
+
+Parquet via DuckDB achieves nearly 2M records/sec on filters due to predicate pushdown — DuckDB skips row groups that don't match using column statistics.
+
+### GROUP BY (product, region, COUNT, SUM)
+
+| Format | Time | Records/sec |
+|---|---|---|
+| NDJSON | 871ms | 115K |
+| Avro OCF | 922ms | 108K |
+| Parquet (DuckDB scan, FoldDB agg) | 904ms | 111K |
+
+GROUP BY throughput is dominated by accumulation, not decoding — all formats converge around 110K records/sec.
+
+## CDC (Debezium) Performance
+
+### Decode + GROUP BY
+
+| Format | Time | Records/sec |
+|---|---|---|
+| JSON Debezium | 19ms | 5,263K |
+| Avro Debezium | 20ms | 5,000K |
+
+!!! note
+    These numbers are high because the WHERE filter rejects ~40% of records early, and the GROUP BY has only 5 groups. The decode cost is amortized across few output records.
+
+### Full Complex Query
+
+The most demanding query FoldDB supports — exercises every major feature:
+
+```sql
+SELECT c.tier, c.region,
+       COUNT(*), SUM(total), AVG(total), MIN(total), MAX(total),
+       SUM(CASE WHEN status = 'delivered' THEN 1 ELSE 0 END),
+       SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END)
+FROM stdin e
+JOIN '/path/to/customers.parquet' c ON e.customer_id = c.id
+FORMAT DEBEZIUM
+WHERE _op IN ('c', 'u')
+GROUP BY c.tier, c.region
 ```
 
-This builds `folddb` and `folddb-gen` (data generator), then runs end-to-end benchmarks measuring wall-clock throughput including process startup, data generation, decode, filter/aggregate, and output.
+Features used: Debezium CDC retractions, DD join against DuckDB-loaded Parquet (5K rows), type casts, CASE expressions, 7 aggregates, Z-set weight propagation.
 
-### Benchmark categories
-
-**Passthrough** (`SELECT *`) — measures decode + output overhead:
-
-| Benchmark | Records | What it measures |
+| Format | Time | Records/sec |
 |---|---|---|
-| `BenchmarkPassthrough_100K` | 100K | NDJSON decode + output |
-| `BenchmarkPassthrough_1M` | 1M | NDJSON decode + output at scale |
+| JSON Debezium | 988ms | **101K** |
+| **Avro Debezium** | **875ms** | **114K** |
 
-**Filter** (`SELECT * WHERE status = 'confirmed'`) — measures filter evaluation:
+### Wire Size
 
-| Benchmark | Records |
+| Format | 100K CDC events |
 |---|---|
-| `BenchmarkFilter_100K` | 100K |
-| `BenchmarkFilter_1M` | 1M |
+| JSON Debezium | 33 MB |
+| **Avro Debezium** | **14 MB** (2.4x smaller) |
 
-**GROUP BY** — measures accumulator throughput:
+For Kafka deployments, Avro reduces broker storage and network bandwidth by 2.4x.
 
-| Benchmark | Records | Query |
+## FoldDB vs DuckDB
+
+DuckDB is a vectorized columnar engine optimized for batch analytics. FoldDB is a streaming engine with incremental aggregation. They serve different use cases.
+
+### Parquet GROUP BY (100K records)
+
+| Engine | Time | Records/sec |
 |---|---|---|
-| `BenchmarkGroupBy_100K` | 100K | Single key, COUNT |
-| `BenchmarkGroupBy_1M` | 1M | Single key, COUNT |
-| `BenchmarkGroupByMultiKey_100K` | 100K | Two keys, COUNT + SUM |
-| `BenchmarkGroupByMultiKey_1M` | 1M | Two keys, COUNT + SUM |
-| `BenchmarkGroupByWithFilter_1M` | 1M | Two keys + WHERE filter |
+| **DuckDB (native)** | **17ms** | **5,882K** |
+| FoldDB (via DuckDB scan) | 936ms | 107K |
 
-**CDC** — measures Debezium envelope decoding with retractions:
+DuckDB is ~55x faster on pure batch queries due to SIMD vectorized execution across all cores. FoldDB processes records through a goroutine pipeline optimized for streaming.
 
-| Benchmark | Records |
-|---|---|
-| `BenchmarkCDC_100K` | 100K |
+!!! tip "When to use which"
+    **DuckDB:** One-shot queries on files. Batch analytics. Data exploration.
 
-### Format comparison
+    **FoldDB:** Streaming queries on Kafka/CDC. Incremental aggregation. Live-updating results. Joins between streams and tables.
 
-All formats are benchmarked at 100K records across passthrough, filter, and GROUP BY:
+    FoldDB uses DuckDB internally for file scanning — you get DuckDB's read performance with FoldDB's streaming semantics.
 
-| Format | Passthrough | Filter | GROUP BY |
-|---|---|---|---|
-| NDJSON | `BenchmarkFormat_NDJSON_*` | | |
-| Avro OCF | `BenchmarkFormat_Avro_*` | | |
-| Protobuf (self-describing) | `BenchmarkFormat_Protobuf_*` | | |
-| Protobuf (typed) | `BenchmarkFormat_ProtoTyped_*` | | |
-| Parquet | `BenchmarkFormat_Parquet_*` | | |
+## Optimization History
 
-## Reported performance
+The full complex query (CDC + JOIN + 7 aggregates) went through five rounds of optimization:
 
-From the landing page, approximate throughput on representative hardware:
-
-- **NDJSON passthrough**: ~275K records/sec
-- **Parquet filter**: ~850K records/sec
-
-Parquet is significantly faster because it uses columnar storage with predicate pushdown, avoiding full-record deserialization.
-
-## Memory usage
-
-| Aggregate type | State per group key | Example: 10M groups |
+| Optimization | Throughput | Cumulative |
 |---|---|---|
-| `COUNT(*)`, `SUM`, `AVG` | O(1) — a few numbers | ~80MB |
-| `MIN`, `MAX` | O(n) — all values in a heap | Depends on values per key |
-| `MEDIAN`, `PERCENTILE` | O(n) — all values sorted | ~8GB at 100 values/key |
-| `COUNT(DISTINCT)` | O(n) — set of distinct values | Depends on cardinality |
+| Initial implementation | 6,700/sec | 1x |
+| Fast key extraction + skip left arrangement | 46,500/sec | 6.9x |
+| Decode: LazyJsonValue, eliminate double parse | 50,000/sec | 7.5x |
+| Typed int64 index + cross-type coercion | 50,000/sec | (fixed Avro joins) |
+| Projection pushdown into join merge | **114,000/sec** | **17x** |
 
-The `--memory-limit` flag (default 1GB) triggers a warning when the accumulator map exceeds the threshold. FoldDB does not spill to disk in v0.
+### Key optimizations explained
 
-## Batch pipeline performance
+**Fast key extraction.** Join key lookup bypasses the full expression evaluator for simple column references — direct map lookup instead of AST walk.
 
-The Z-set batch pipeline (`BatchChannel`) collects individual records into slices of up to 1024 before sending them downstream. This reduces per-record channel overhead and improves cache locality.
+**Skip left arrangement.** For stream-to-file joins where the right side never changes, the left arrangement is skipped, eliminating `json.Marshal` fingerprinting on every record.
 
-### Benchmark results
+**LazyJsonValue.** Debezium virtual columns (`_before`, `_after`, `_source`) are stored as raw JSON bytes and only parsed if the query accesses them.
 
-Compared to the previous per-record channel pipeline:
+**Typed int64 index.** The arrangement uses `map[int64][]Record` for integer join keys, eliminating `strconv.FormatInt` per lookup. Cross-type coercion means `TextValue{"42"}` matches `IntValue{42}`.
 
-| Query type | Improvement | Why |
-|---|---|---|
-| Filter/project (non-accumulating) | ~40% faster | Channel sends reduced by ~1000x; filter loop over contiguous slice is cache-friendly |
-| GROUP BY aggregation (O(1) aggregates) | ~11% faster | Batch amortizes channel overhead, but accumulator hash map updates remain per-record |
+**Projection pushdown.** The join merge only copies columns referenced by the query. For 6 used columns from a 30-column merge, this reduces per-record allocation by 5x.
 
-The filter/project improvement is larger because those queries are dominated by channel overhead (the actual per-record work is minimal). Aggregation queries spend more time in accumulator updates, so the channel overhead reduction is a smaller fraction of total cost.
+## Profiling
 
-### Remaining bottlenecks
-
-- **JSON parsing** remains the single largest cost (~60% of CPU for NDJSON). Batching does not help here -- each record must still be parsed individually.
-- **Accumulator hash map lookups** are per-record even within a batch. Future batch compaction (summing weights for identical group keys before accumulation) will reduce this for high-cardinality workloads.
-- **Output serialization** is unchanged -- the sink processes records individually after unbatching.
-
-## Bottleneck analysis
-
-For a typical GROUP BY query over NDJSON:
-
-1. **JSON parsing**: ~60% of CPU. This is the single largest cost.
-2. **Expression evaluation** (WHERE, SELECT): ~15%.
-3. **Accumulator updates**: ~5% for O(1) aggregates.
-4. **Output serialization**: ~10%.
-5. **Channel overhead**: ~5% (reduced from ~10% by batching).
-
-For binary formats (Avro, Protobuf, Parquet), step 1 is dramatically cheaper, shifting the bottleneck to I/O or expression evaluation.
-
-## Running benchmarks
+FoldDB includes built-in CPU profiling:
 
 ```bash
-# Full benchmark suite
-make bench
-
-# Specific benchmark
-go test -tags bench -bench BenchmarkGroupBy_1M -benchtime 1x -timeout 10m ./bench/
-
-# Results are saved to bench/results.txt
+folddb query --cpuprofile prof.out "SELECT ..."
+go tool pprof prof.out
 ```
-
-The benchmarks use `folddb-gen` to produce deterministic test data with `--seed 42` for reproducibility.
