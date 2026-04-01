@@ -592,16 +592,27 @@ func (op *AggregateOp) CurrentState() []Record {
 
 // compositeKey produces a deterministic string key from a slice of Values.
 func compositeKey(vals []Value) string {
-	parts := make([]any, len(vals))
+	if len(vals) == 1 {
+		// Fast path: single key, no allocation needed for the builder
+		v := vals[0]
+		if v == nil || v.IsNull() {
+			return "null"
+		}
+		return v.String()
+	}
+	var b strings.Builder
+	b.Grow(len(vals) * 12) // rough estimate
 	for i, v := range vals {
-		if v.IsNull() {
-			parts[i] = nil
+		if i > 0 {
+			b.WriteByte('|')
+		}
+		if v == nil || v.IsNull() {
+			b.WriteString("null")
 		} else {
-			parts[i] = v.ToJSON()
+			b.WriteString(v.String())
 		}
 	}
-	data, _ := json.Marshal(parts)
-	return string(data)
+	return b.String()
 }
 
 // noopAccumulator is a placeholder for non-aggregate columns in the accumulator slice.

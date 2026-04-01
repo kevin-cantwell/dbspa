@@ -1,8 +1,8 @@
 package engine
 
 import (
-	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -442,17 +442,20 @@ func (op *WindowedAggregateOp) newAccumulators() []Accumulator {
 
 // WindowKeyForComposite creates the composite key used in the changelog output.
 func WindowKeyForComposite(wk WindowKey, groupKeyVals []Value) string {
-	parts := make([]any, 0, 2+len(groupKeyVals))
-	parts = append(parts, wk.Start.Format(time.RFC3339), wk.End.Format(time.RFC3339))
+	var b strings.Builder
+	b.Grow(64)
+	b.WriteString(wk.Start.Format(time.RFC3339))
+	b.WriteByte('|')
+	b.WriteString(wk.End.Format(time.RFC3339))
 	for _, v := range groupKeyVals {
-		if v.IsNull() {
-			parts = append(parts, nil)
+		b.WriteByte('|')
+		if v == nil || v.IsNull() {
+			b.WriteString("null")
 		} else {
-			parts = append(parts, v.ToJSON())
+			b.WriteString(v.String())
 		}
 	}
-	data, _ := json.Marshal(parts)
-	return string(data)
+	return b.String()
 }
 
 // inferColumnName is already in project.go

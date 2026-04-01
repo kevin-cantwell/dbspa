@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"runtime/pprof"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -60,6 +61,9 @@ type QueryCmd struct {
 	DeadLetter string `help:"Route errors to NDJSON file." placeholder:"FILE" name:"dead-letter"`
 	DryRun     bool   `help:"Print query plan without executing." name:"dry-run"`
 	Explain    bool   `help:"Print query plan then execute."`
+
+	// Profiling
+	CPUProfile string `help:"Write CPU profile to file." placeholder:"FILE" name:"cpuprofile"`
 }
 
 // ServeCmd runs a query and serves results via HTTP.
@@ -181,6 +185,22 @@ func run() error {
 
 	// Default command: execute SQL query
 	q := &cli.Query
+
+	// CPU profiling support
+	if q.CPUProfile != "" {
+		f, err := os.Create(q.CPUProfile)
+		if err != nil {
+			return fmt.Errorf("cannot create CPU profile: %w", err)
+		}
+		if err := pprof.StartCPUProfile(f); err != nil {
+			f.Close()
+			return fmt.Errorf("cannot start CPU profile: %w", err)
+		}
+		defer func() {
+			pprof.StopCPUProfile()
+			f.Close()
+		}()
+	}
 
 	sql, err := getSQL(q)
 	if err != nil {

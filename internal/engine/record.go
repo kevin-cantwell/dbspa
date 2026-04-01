@@ -1,8 +1,8 @@
 package engine
 
 import (
-	"encoding/json"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -48,16 +48,20 @@ func RecordFingerprint(r Record) string {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
-	parts := make([]any, 0, len(keys)*2)
-	for _, k := range keys {
-		parts = append(parts, k)
+	var b strings.Builder
+	b.Grow(len(keys) * 16) // rough estimate
+	for i, k := range keys {
+		if i > 0 {
+			b.WriteByte('|')
+		}
+		b.WriteString(k)
+		b.WriteByte('=')
 		v := r.Columns[k]
 		if v == nil || v.IsNull() {
-			parts = append(parts, nil)
+			b.WriteString("null")
 		} else {
-			parts = append(parts, v.ToJSON())
+			b.WriteString(v.String())
 		}
 	}
-	data, _ := json.Marshal(parts)
-	return string(data)
+	return b.String()
 }
