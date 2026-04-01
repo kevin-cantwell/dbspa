@@ -26,6 +26,10 @@ type DDJoinOp struct {
 	RightAlias   string       // alias prefix for right columns (e.g., "u")
 	IsLeftJoin   bool         // emit NULL-filled rows for unmatched left records
 	RightIsStatic bool        // when true, skip left arrangement (right side never changes)
+
+	// Cached prefix strings to avoid repeated allocation
+	leftPrefixStr  string
+	rightPrefixStr string
 }
 
 // NewDDJoinOp creates a new differential dataflow join operator.
@@ -291,7 +295,7 @@ func (j *DDJoinOp) merge(leftRec, rightRec Record) Record {
 
 	// Add left columns (unqualified and qualified)
 	if j.LeftAlias != "" {
-		leftPrefix := j.LeftAlias + "."
+		leftPrefix := j.leftPrefix()
 		for k, v := range leftRec.Columns {
 			merged.Columns[k] = v
 			merged.Columns[leftPrefix+k] = v
@@ -305,7 +309,7 @@ func (j *DDJoinOp) merge(leftRec, rightRec Record) Record {
 	// Add right columns (unqualified and qualified)
 	// Right overwrites left on unqualified name conflict
 	if j.RightAlias != "" {
-		rightPrefix := j.RightAlias + "."
+		rightPrefix := j.rightPrefix()
 		for k, v := range rightRec.Columns {
 			merged.Columns[k] = v
 			merged.Columns[rightPrefix+k] = v
@@ -317,6 +321,22 @@ func (j *DDJoinOp) merge(leftRec, rightRec Record) Record {
 	}
 
 	return merged
+}
+
+// leftPrefix returns the cached left alias prefix (e.g., "e.").
+func (j *DDJoinOp) leftPrefix() string {
+	if j.leftPrefixStr == "" && j.LeftAlias != "" {
+		j.leftPrefixStr = j.LeftAlias + "."
+	}
+	return j.leftPrefixStr
+}
+
+// rightPrefix returns the cached right alias prefix (e.g., "c.").
+func (j *DDJoinOp) rightPrefix() string {
+	if j.rightPrefixStr == "" && j.RightAlias != "" {
+		j.rightPrefixStr = j.RightAlias + "."
+	}
+	return j.rightPrefixStr
 }
 
 // mergeWithNulls creates a joined record for LEFT JOIN with no right match.
