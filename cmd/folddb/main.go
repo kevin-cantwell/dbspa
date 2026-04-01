@@ -306,14 +306,49 @@ func run() error {
 		return runKafka(runCtx, stmt, dec, isAccumulating, isWindowed, flags, dlWriter, joinOp)
 	}
 
-	// Reject non-kafka URI schemes that we don't support
-	if fromURI != "" && !strings.HasPrefix(fromURI, "stdin://") {
-		// Extract the scheme for a helpful error message
+	// DuckDB file/database source: route file paths and database URIs to DuckDB.
+	if fromURI != "" && isFileSource(fromURI) {
+		defer closeDuckDB()
+
+		// For non-accumulating queries without a JOIN, DuckDB can handle the
+		// entire query (predicate pushdown, column pruning, ORDER BY, LIMIT).
+		if !isAccumulating && !isWindowed && joinOp == nil {
+			return runDuckDBNonAccumulating(runCtx, stmt)
+		}
+
+		// For accumulating/windowed queries or queries with joins, DuckDB
+		// provides the source data and FoldDB handles the rest.
+		recordCh := make(chan engine.Record, 256)
+		go func() {
+			defer close(recordCh)
+			if err := duckDBScanToChannel(runCtx, fromURI, recordCh); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: DuckDB scan error: %v\n", err)
+			}
+		}()
+
+		// Apply JOIN if present
+		var finalCh <-chan engine.Record = recordCh
+		if joinOp != nil {
+			finalCh = applyJoin(runCtx, joinOp, recordCh)
+		}
+
+		if isWindowed {
+			return runWindowedFromRecords(runCtx, stmt, finalCh, flags)
+		}
+		if isAccumulating {
+			return runAccumulatingFromRecords(runCtx, stmt, finalCh, flags)
+		}
+		return runNonAccumulatingFromRecords(runCtx, stmt, finalCh)
+	}
+
+	// Reject unknown URI schemes
+	if fromURI != "" && !strings.HasPrefix(fromURI, "stdin://") &&
+		strings.Contains(fromURI, "://") {
 		scheme := fromURI
 		if idx := strings.Index(fromURI, "://"); idx >= 0 {
 			scheme = fromURI[:idx]
 		}
-		return fmt.Errorf("source type %q is not supported in v0. Supported: kafka://, stdin://", scheme)
+		return fmt.Errorf("source type %q is not supported. Supported: kafka://, file paths (.parquet, .csv, .json), pg://, mysql://", scheme)
 	}
 
 	// Default: stdin source (or --input file)
@@ -1424,6 +1459,26 @@ func runServe(c *ServeCmd) error {
 
 	if fromURI != "" && strings.HasPrefix(fromURI, "kafka://") {
 		return runServeKafka(runCtx, stmt, dec, isAccumulating, httpSink, c, joinOp)
+	}
+
+	// DuckDB file/database source in serve mode
+	if fromURI != "" && isFileSource(fromURI) {
+		defer closeDuckDB()
+		recordCh := make(chan engine.Record, 256)
+		go func() {
+			defer close(recordCh)
+			if err := duckDBScanToChannel(runCtx, fromURI, recordCh); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: DuckDB scan error: %v\n", err)
+			}
+		}()
+		var finalCh <-chan engine.Record = recordCh
+		if joinOp != nil {
+			finalCh = applyJoin(runCtx, joinOp, recordCh)
+		}
+		if isAccumulating {
+			return runServeAccumulatingFromRecords(runCtx, stmt, finalCh, httpSink)
+		}
+		return runServeNonAccumulatingFromRecords(runCtx, stmt, finalCh, httpSink)
 	}
 
 	// Default: stdin source (or --input file)
