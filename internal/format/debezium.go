@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"maps"
 	"sync"
 	"time"
 
@@ -63,45 +62,12 @@ func (d *DebeziumDecoder) DecodeMulti(data []byte) ([]engine.Record, error) {
 		_ = json.Unmarshal(env.Source, &src)
 	}
 
-	// Build shared virtual columns
-	virtuals := map[string]engine.Value{
-		"_op": engine.TextValue{V: env.Op},
-	}
-
-	// _before virtual column (lazy — parsed only if accessed)
-	if isJSONNull(env.Before) {
-		virtuals["_before"] = engine.NullValue{}
-	} else {
-		virtuals["_before"] = &engine.LazyJsonValue{Raw: env.Before}
-	}
-
-	// _after virtual column (lazy — parsed only if accessed)
-	if isJSONNull(env.After) {
-		virtuals["_after"] = engine.NullValue{}
-	} else {
-		virtuals["_after"] = &engine.LazyJsonValue{Raw: env.After}
-	}
-
-	// Source-derived virtual columns
-	virtuals["_table"] = engine.TextValue{V: src.Table}
-	virtuals["_db"] = engine.TextValue{V: src.DB}
-	if src.TsMs > 0 {
-		virtuals["_ts"] = engine.TimestampValue{V: time.UnixMilli(src.TsMs).UTC()}
-	} else {
-		virtuals["_ts"] = engine.NullValue{}
-	}
-	if env.Source != nil {
-		virtuals["_source"] = &engine.LazyJsonValue{Raw: env.Source}
-	} else {
-		virtuals["_source"] = engine.NullValue{}
-	}
-
 	now := time.Now()
 
 	switch env.Op {
 	case "c", "r":
 		// Create or snapshot read: emit (_after columns, diff=+1)
-		rec, err := d.buildRecord(env.After, virtuals, now, 1)
+		rec, err := d.buildRecord(env.After, &env, &src, now, 1)
 		if err != nil {
 			return nil, fmt.Errorf("debezium %s: %w", env.Op, err)
 		}
@@ -116,7 +82,7 @@ func (d *DebeziumDecoder) DecodeMulti(data []byte) ([]engine.Record, error) {
 		}
 
 		if !isJSONNull(env.Before) {
-			beforeRec, err := d.buildRecord(env.Before, virtuals, now, -1)
+			beforeRec, err := d.buildRecord(env.Before, &env, &src, now, -1)
 			if err != nil {
 				return nil, fmt.Errorf("debezium update _before: %w", err)
 			}
@@ -128,7 +94,7 @@ func (d *DebeziumDecoder) DecodeMulti(data []byte) ([]engine.Record, error) {
 			})
 		}
 
-		afterRec, err := d.buildRecord(env.After, virtuals, now, 1)
+		afterRec, err := d.buildRecord(env.After, &env, &src, now, 1)
 		if err != nil {
 			return nil, fmt.Errorf("debezium update _after: %w", err)
 		}
@@ -144,7 +110,7 @@ func (d *DebeziumDecoder) DecodeMulti(data []byte) ([]engine.Record, error) {
 			})
 			return nil, fmt.Errorf("debezium delete: _before is null (un-retractable, should route to dead-letter)")
 		}
-		rec, err := d.buildRecord(env.Before, virtuals, now, -1)
+		rec, err := d.buildRecord(env.Before, &env, &src, now, -1)
 		if err != nil {
 			return nil, fmt.Errorf("debezium delete: %w", err)
 		}
@@ -160,26 +126,56 @@ func (d *DebeziumDecoder) DecodeMulti(data []byte) ([]engine.Record, error) {
 	}
 }
 
-// buildRecord parses a JSON payload and merges in virtual columns.
-func (d *DebeziumDecoder) buildRecord(payload json.RawMessage, virtuals map[string]engine.Value, ts time.Time, diff int) (engine.Record, error) {
+// numVirtuals is the number of virtual columns added to each record.
+const numVirtuals = 7 // _op, _before, _after, _table, _db, _ts, _source
+
+// buildRecord parses a JSON payload and adds virtual columns directly.
+// This avoids creating a separate virtuals map and copying it.
+func (d *DebeziumDecoder) buildRecord(payload json.RawMessage, env *debeziumEnvelope, src *debeziumSource, ts time.Time, diff int) (engine.Record, error) {
 	var raw map[string]any
-	dec := json.NewDecoder(bytes.NewReader(payload))
-	dec.UseNumber()
-	if err := dec.Decode(&raw); err != nil {
+	rdec := json.NewDecoder(bytes.NewReader(payload))
+	rdec.UseNumber()
+	if err := rdec.Decode(&raw); err != nil {
 		return engine.Record{}, fmt.Errorf("payload decode: %w", err)
 	}
 
-	cols := make(map[string]engine.Value, len(raw)+len(virtuals))
+	cols := make(map[string]engine.Value, len(raw)+numVirtuals)
 	for k, v := range raw {
 		cols[k] = inferValue(v)
 	}
-	// Merge virtual columns (overwrite payload columns if name collision)
-	maps.Copy(cols, virtuals)
+
+	// Add virtual columns directly (overwrite payload columns if name collision)
+	cols["_op"] = engine.TextValue{V: env.Op}
+
+	if isJSONNull(env.Before) {
+		cols["_before"] = engine.NullValue{}
+	} else {
+		cols["_before"] = &engine.LazyJsonValue{Raw: env.Before}
+	}
+
+	if isJSONNull(env.After) {
+		cols["_after"] = engine.NullValue{}
+	} else {
+		cols["_after"] = &engine.LazyJsonValue{Raw: env.After}
+	}
+
+	cols["_table"] = engine.TextValue{V: src.Table}
+	cols["_db"] = engine.TextValue{V: src.DB}
+	if src.TsMs > 0 {
+		cols["_ts"] = engine.TimestampValue{V: time.UnixMilli(src.TsMs).UTC()}
+	} else {
+		cols["_ts"] = engine.NullValue{}
+	}
+	if env.Source != nil {
+		cols["_source"] = &engine.LazyJsonValue{Raw: env.Source}
+	} else {
+		cols["_source"] = engine.NullValue{}
+	}
 
 	return engine.Record{
 		Columns:   cols,
 		Timestamp: ts,
-		Weight:      diff,
+		Weight:    diff,
 	}, nil
 }
 
