@@ -68,22 +68,18 @@ func (d *DebeziumDecoder) DecodeMulti(data []byte) ([]engine.Record, error) {
 		"_op": engine.TextValue{V: env.Op},
 	}
 
-	// _before virtual column
+	// _before virtual column (lazy — parsed only if accessed)
 	if isJSONNull(env.Before) {
 		virtuals["_before"] = engine.NullValue{}
 	} else {
-		var beforeAny any
-		_ = json.Unmarshal(env.Before, &beforeAny)
-		virtuals["_before"] = engine.JsonValue{V: beforeAny}
+		virtuals["_before"] = &engine.LazyJsonValue{Raw: env.Before}
 	}
 
-	// _after virtual column
+	// _after virtual column (lazy — parsed only if accessed)
 	if isJSONNull(env.After) {
 		virtuals["_after"] = engine.NullValue{}
 	} else {
-		var afterAny any
-		_ = json.Unmarshal(env.After, &afterAny)
-		virtuals["_after"] = engine.JsonValue{V: afterAny}
+		virtuals["_after"] = &engine.LazyJsonValue{Raw: env.After}
 	}
 
 	// Source-derived virtual columns
@@ -95,9 +91,7 @@ func (d *DebeziumDecoder) DecodeMulti(data []byte) ([]engine.Record, error) {
 		virtuals["_ts"] = engine.NullValue{}
 	}
 	if env.Source != nil {
-		var sourceAny any
-		_ = json.Unmarshal(env.Source, &sourceAny)
-		virtuals["_source"] = engine.JsonValue{V: sourceAny}
+		virtuals["_source"] = &engine.LazyJsonValue{Raw: env.Source}
 	} else {
 		virtuals["_source"] = engine.NullValue{}
 	}

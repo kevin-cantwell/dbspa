@@ -81,6 +81,9 @@ func writeJSONValue(w *bufio.Writer, v engine.Value) {
 	case engine.TextValue:
 		b, _ := json.Marshal(val.V) // handles escaping
 		w.Write(b)
+	case *engine.LazyJsonValue:
+		// Write raw JSON bytes directly — already valid JSON
+		w.Write(val.Raw)
 	default:
 		b, _ := json.Marshal(v.ToJSON())
 		w.Write(b)

@@ -103,6 +103,32 @@ func (v JsonValue) String() string {
 }
 func (v JsonValue) ToJSON() any { return v.V }
 
+// LazyJsonValue wraps raw JSON bytes and defers parsing until the value is
+// actually accessed. This avoids expensive double-parsing in the Debezium
+// decoder for virtual columns (_before, _after, _source) that are rarely
+// referenced in queries.
+type LazyJsonValue struct {
+	Raw  json.RawMessage
+	parsed any
+	done   bool
+}
+
+func (v *LazyJsonValue) Type() string { return "JSON" }
+func (v *LazyJsonValue) IsNull() bool { return false }
+func (v *LazyJsonValue) resolve() any {
+	if !v.done {
+		_ = json.Unmarshal(v.Raw, &v.parsed)
+		v.done = true
+	}
+	return v.parsed
+}
+func (v *LazyJsonValue) String() string {
+	return string(v.Raw)
+}
+func (v *LazyJsonValue) ToJSON() any {
+	return v.resolve()
+}
+
 // CastValue attempts to cast a value to the named type.
 func CastValue(v Value, typeName string) (Value, error) {
 	if v.IsNull() {
@@ -229,6 +255,8 @@ func castToJSON(v Value) (Value, error) {
 	switch val := v.(type) {
 	case JsonValue:
 		return val, nil
+	case *LazyJsonValue:
+		return JsonValue{V: val.ToJSON()}, nil
 	case TextValue:
 		var j any
 		if err := json.Unmarshal([]byte(val.V), &j); err != nil {

@@ -493,8 +493,14 @@ func evalJsonAccess(e *ast.JsonAccessExpr, rec Record) (Value, error) {
 		return nil, err
 	}
 
-	jv, ok := left.(JsonValue)
-	if !ok {
+	// Support both JsonValue and LazyJsonValue
+	var jsonData any
+	switch v := left.(type) {
+	case JsonValue:
+		jsonData = v.V
+	case *LazyJsonValue:
+		jsonData = v.ToJSON()
+	default:
 		return nil, fmt.Errorf("-> operator requires JSON, got %s", left.Type())
 	}
 
@@ -502,7 +508,7 @@ func evalJsonAccess(e *ast.JsonAccessExpr, rec Record) (Value, error) {
 
 	switch k := key.(type) {
 	case TextValue:
-		obj, ok := jv.V.(map[string]any)
+		obj, ok := jsonData.(map[string]any)
 		if !ok {
 			return NullValue{}, nil
 		}
@@ -511,7 +517,7 @@ func evalJsonAccess(e *ast.JsonAccessExpr, rec Record) (Value, error) {
 			return NullValue{}, nil
 		}
 	case IntValue:
-		arr, ok := jv.V.([]any)
+		arr, ok := jsonData.([]any)
 		if !ok {
 			return NullValue{}, nil
 		}
