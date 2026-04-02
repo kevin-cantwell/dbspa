@@ -17,6 +17,7 @@ type ExecSource struct {
 	Command       string            // the shell command to execute
 	Format        string            // e.g., "CSV", "DEBEZIUM", empty for default (NDJSON)
 	FormatOptions map[string]string // e.g., delimiter=',', header=true
+	Mode          string            // "TABLE" (default) or "STREAM"
 }
 
 func (*ExecSource) nodeTag() {}
