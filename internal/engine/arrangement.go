@@ -302,6 +302,11 @@ func (a *Arrangement) EvictBefore(cutoff time.Time) Batch {
 	return evicted
 }
 
+// Close is a no-op for in-memory arrangements. It satisfies ArrangementStore.
+func (a *Arrangement) Close() error {
+	return nil
+}
+
 // recordColumnsFingerprint returns a fingerprint based only on column values
 // (excluding weight), suitable for identifying "the same record" in Z-set terms.
 func recordColumnsFingerprint(r Record) string {

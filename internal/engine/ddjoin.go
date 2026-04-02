@@ -19,8 +19,8 @@ import (
 // weights, which ensures retractions propagate correctly through the join.
 type DDJoinOp struct {
 	mu           sync.Mutex   // protects concurrent ProcessLeftDelta/ProcessRightDelta calls
-	Left         *Arrangement // left (stream) side arrangement
-	Right        *Arrangement // right (table/CDC) side arrangement
+	Left         ArrangementStore // left (stream) side arrangement
+	Right        ArrangementStore // right (table/CDC) side arrangement
 	LeftKeyExpr  ast.Expr     // expression for left join key
 	RightKeyExpr ast.Expr     // expression for right join key
 	LeftAlias    string       // alias prefix for left columns (e.g., "e")

@@ -692,10 +692,10 @@ func TestDDJoinOp_EvictAndRetract(t *testing.T) {
 	}
 
 	// Verify order_id=2 still in both arrangements
-	if entries := op.Left.LookupString("2"); len(entries) != 1 {
+	if entries := op.Left.LookupValue(IntValue{V: 2}); len(entries) != 1 {
 		t.Errorf("expected order_id=2 in left arrangement, got %d entries", len(entries))
 	}
-	if entries := op.Right.LookupString("2"); len(entries) != 1 {
+	if entries := op.Right.LookupValue(IntValue{V: 2}); len(entries) != 1 {
 		t.Errorf("expected order_id=2 in right arrangement, got %d entries", len(entries))
 	}
 }
