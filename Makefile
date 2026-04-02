@@ -2,7 +2,7 @@ VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -ldflags "-X main.Version=$(VERSION)"
 BINARY := folddb
 
-.PHONY: build test test-unit test-integration test-all verify bench lint release clean docker-up docker-down testdata
+.PHONY: build test test-unit test-integration test-all verify bench lint release clean docker-up docker-down testdata grammar
 
 build:
 	go build $(LDFLAGS) -o $(BINARY) ./cmd/folddb
@@ -59,6 +59,9 @@ release: clean
 
 testdata:
 	go run testdata/gen.go
+
+grammar:
+	pigeon -o internal/sql/grammar/folddb.go internal/sql/grammar/folddb.peg
 
 clean:
 	rm -rf dist/ $(BINARY) folddb-gen
