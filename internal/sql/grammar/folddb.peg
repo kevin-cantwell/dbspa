@@ -1,0 +1,486 @@
+{
+package grammar
+}
+
+// ============================================================================
+// Top-level rule
+// ============================================================================
+
+Statement <- _ SelectStatement _ EOF
+
+// ============================================================================
+// SELECT statement with clause ordering matching the parser exactly
+// ============================================================================
+
+// The statement has two paths: with GROUP BY (allows HAVING, ORDER BY) and without.
+// This enforces the parser's semantic constraint that HAVING and ORDER BY require GROUP BY.
+SelectStatement <- SELECT __ ( DISTINCT __ )? SelectList
+    FromClause?
+    PostFromFormatClause?
+    JoinClause?
+    PostJoinFormatClause?
+    SeedClause?
+    WhereClause?
+    ( GroupByClause
+        HavingClause?
+        WindowClause?
+        EventTimeClause?
+        WatermarkClause?
+        EmitClause?
+        DeduplicateClause?
+        OrderByClause?
+    / WindowClause?
+        EventTimeClause?
+        WatermarkClause?
+        EmitClause?
+        DeduplicateClause?
+    )
+    LimitClause?
+    TrailingFormatClause?
+
+// ============================================================================
+// SELECT list
+// ============================================================================
+
+SelectList <- Star / SelectItemList
+
+SelectItemList <- SelectItem ( _ ',' _ SelectItem )*
+
+// SelectItem: after expression, check for alias.
+// The !(_ AS _ EOF) guard prevents accepting "expr AS" at end of input,
+// which would otherwise backtrack the optional alias and succeed without it.
+SelectItem <- Expression !( __ AS __ EOF ) ( __ AS __ AliasName / __ ImplicitAlias )?
+
+// After AS, we need an actual identifier or keyword token.
+AliasName <- BareName / QuotedIdentifier
+
+// Implicit alias: a plain identifier that is NOT a clause keyword and not AS.
+// The parser only accepts TokenIdent (not keywords) as implicit aliases,
+// and also checks !isClauseKeyword.
+ImplicitAlias <- !ClauseKeyword !AS !ReservedKeyword BareName
+
+// ============================================================================
+// FROM clause
+// ============================================================================
+
+FromClause <- __ FROM __ Source InlineFromFormat? FromAlias?
+
+Source <- StringLiteral / BareSource
+
+BareSource <- Identifier
+
+// Format right after source string (inside parseTableSource)
+InlineFromFormat <- __ FORMAT __ FormatName FormatOptions?
+
+FromAlias <- __ !ClauseKeyword BareName
+
+// ============================================================================
+// Post-FROM FORMAT (after source + alias, before JOIN)
+// ============================================================================
+
+PostFromFormatClause <- __ FORMAT __ FormatName FormatOptions?
+
+// ============================================================================
+// JOIN clause
+// ============================================================================
+
+JoinClause <- __ ( LEFT __ )? JOIN __ StringLiteral JoinSourceFormat? JoinAlias? __ ON __ Expression JoinWithin?
+
+JoinSourceFormat <- __ FORMAT __ FormatName FormatOptions?
+
+JoinAlias <- __ !ClauseKeyword BareName
+
+JoinWithin <- __ WITHIN __ INTERVAL __ StringLiteral
+
+// ============================================================================
+// Post-JOIN FORMAT
+// ============================================================================
+
+PostJoinFormatClause <- __ FORMAT __ FormatName FormatOptions?
+
+// ============================================================================
+// SEED clause
+// ============================================================================
+
+SeedClause <- __ SEED __ FROM __ StringLiteral SeedFormat?
+
+SeedFormat <- __ FORMAT __ FormatName FormatOptions?
+
+// ============================================================================
+// WHERE clause
+// ============================================================================
+
+WhereClause <- __ WHERE __ Expression
+
+// ============================================================================
+// GROUP BY clause
+// ============================================================================
+
+GroupByClause <- __ GROUP __ BY __ ExpressionList
+
+// ============================================================================
+// HAVING clause (must follow GROUP BY)
+// ============================================================================
+
+HavingClause <- __ HAVING __ Expression
+
+// ============================================================================
+// WINDOW clause
+// ============================================================================
+
+WindowClause <- __ WINDOW __ WindowType
+
+WindowType <- TumblingWindow / SlidingWindow / SessionWindow
+
+TumblingWindow <- TUMBLING __ StringLiteral
+
+SlidingWindow <- SLIDING __ StringLiteral __ BY __ StringLiteral
+
+SessionWindow <- SESSION __ StringLiteral
+
+// ============================================================================
+// EVENT TIME BY clause
+// ============================================================================
+
+EventTimeClause <- __ EVENT __ TIME __ BY __ Expression
+
+// ============================================================================
+// WATERMARK clause
+// ============================================================================
+
+WatermarkClause <- __ WATERMARK __ StringLiteral
+
+// ============================================================================
+// EMIT clause
+// ============================================================================
+
+EmitClause <- __ EMIT __ ( EmitFinal / EmitEarly )
+
+EmitFinal <- FINAL
+
+EmitEarly <- EARLY __ StringLiteral
+
+// ============================================================================
+// DEDUPLICATE BY clause
+// ============================================================================
+
+DeduplicateClause <- __ DEDUPLICATE __ BY __ Expression DeduplicateWithin? DeduplicateCapacity?
+
+DeduplicateWithin <- __ WITHIN __ StringLiteral
+
+DeduplicateCapacity <- __ CAPACITY __ IntegerLiteral
+
+// ============================================================================
+// ORDER BY clause
+// ============================================================================
+
+OrderByClause <- __ ORDER __ BY __ OrderByList
+
+OrderByList <- OrderByItem ( _ ',' _ OrderByItem )*
+
+OrderByItem <- Expression ( __ ( ASC / DESC ) )?
+
+// ============================================================================
+// LIMIT clause
+// ============================================================================
+
+LimitClause <- __ LIMIT __ IntegerLiteral
+
+// ============================================================================
+// Trailing FORMAT (standalone, after all other clauses)
+// ============================================================================
+
+TrailingFormatClause <- __ FORMAT __ FormatName FormatOptions?
+
+// ============================================================================
+// FORMAT helpers
+// ============================================================================
+
+FormatName <- Identifier / KeywordAsIdent
+
+FormatOptions <- _ '(' _ FormatOptionList? _ ')'
+
+FormatOptionList <- FormatOption ( _ ',' _ FormatOption )*
+
+FormatOption <- FormatOptionKey _ '=' _ FormatOptionValue
+
+FormatOptionKey <- Identifier / KeywordAsIdent
+
+FormatOptionValue <- StringLiteral / TRUE / FALSE / IntegerLiteral / Identifier
+
+// ============================================================================
+// Expressions (precedence climbing)
+// ============================================================================
+
+Expression <- OrExpression
+
+OrExpression <- AndExpression ( __ OR __ AndExpression )*
+
+AndExpression <- NotExpression ( __ AND __ NotExpression )*
+
+NotExpression <- NOT __ NotExpression / ComparisonExpression
+
+ComparisonExpression <- ConcatExpression (
+    __ NOT __ BETWEEN __ ConcatExpression __ AND __ ConcatExpression
+    / __ NOT __ IN _ '(' _ ExpressionList _ ')'
+    / __ NOT __ LIKE __ ConcatExpression
+    / __ NOT __ ILIKE __ ConcatExpression
+    / _ ComparisonOp _ ConcatExpression
+    / __ IS __ NOT __ DISTINCT __ FROM __ ConcatExpression
+    / __ IS __ NOT __ NULL
+    / __ IS __ NOT __ TRUE
+    / __ IS __ NOT __ FALSE
+    / __ IS __ DISTINCT __ FROM __ ConcatExpression
+    / __ IS __ NULL
+    / __ IS __ TRUE
+    / __ IS __ FALSE
+    / __ IN _ '(' _ ExpressionList _ ')'
+    / __ BETWEEN __ ConcatExpression __ AND __ ConcatExpression
+    / __ LIKE __ ConcatExpression
+    / __ ILIKE __ ConcatExpression
+)?
+
+ComparisonOp <- "<>" / "<=" / ">=" / "!=" / '<' / '>' / '='
+
+ConcatExpression <- AddSubExpression ( _ "||" _ AddSubExpression )*
+
+AddSubExpression <- MulDivExpression ( _ ( '+' / '-' ) _ MulDivExpression )*
+
+MulDivExpression <- UnaryExpression ( _ ( '*' / '/' / '%' ) _ UnaryExpression )*
+
+UnaryExpression <- ( '-' / '+' ) _ UnaryExpression / PostfixExpression
+
+PostfixExpression <- PrimaryExpression ( _ ( ArrowTextOp / ArrowOp / CastOp ) )*
+
+ArrowTextOp <- "->>" _ PrimaryExpression
+
+ArrowOp <- "->" _ PrimaryExpression
+
+CastOp <- "::" _ TypeName
+
+// ============================================================================
+// Primary expressions
+// ============================================================================
+
+PrimaryExpression <- IntervalLiteral
+    / CastFunction
+    / CaseExpression
+    / CountStar
+    / ExtractFunction
+    / FunctionCall
+    / QualifiedRefOrIdent
+    / FloatLiteral
+    / IntegerLiteral
+    / StringLiteral
+    / TRUE
+    / FALSE
+    / NULL
+    / ParenExpression
+
+IntervalLiteral <- INTERVAL __ StringLiteral
+
+CastFunction <- CAST _ '(' _ Expression __ AS __ TypeName _ ')'
+
+CaseExpression <- CASE __ WhenClause ( __ WhenClause )* ( __ ELSE __ Expression )? __ END
+
+WhenClause <- WHEN __ Expression __ THEN __ Expression
+
+CountStar <- COUNT _ '(' _ Star _ ')'
+
+ExtractFunction <- EXTRACT _ '(' _ ExtractArgs _ ')'
+
+ExtractArgs <- ExtractFromArgs / ExpressionList?
+
+// EXTRACT(field FROM expr) -- standard SQL
+ExtractFromArgs <- ( Identifier / KeywordAsIdent ) __ FROM __ Expression
+
+FunctionCall <- FunctionName _ '(' _ ( DISTINCT __ )? ExpressionList? _ ')'
+
+FunctionName <- CallableKeyword / BareName
+
+QualifiedRefOrIdent <- ( Identifier / CallableKeywordAsIdent ) QualifiedSuffix?
+
+QualifiedSuffix <- '.' ( Identifier / KeywordAsIdent / Star ) ( '.' ( Identifier / KeywordAsIdent ) )*
+
+ParenExpression <- '(' _ Expression _ ')'
+
+// ============================================================================
+// Expression list
+// ============================================================================
+
+ExpressionList <- Expression ( _ ',' _ Expression )*
+
+// ============================================================================
+// Types
+// ============================================================================
+
+TypeName <- ( INT / BIGINT / FLOAT / DOUBLE / TEXT / BOOLEAN / TIMESTAMP ) !IdentChar
+
+// ============================================================================
+// Literals
+// ============================================================================
+
+IntegerLiteral <- [0-9]+ !( '.' / IdentChar )
+
+FloatLiteral <- [0-9]+ '.' [0-9]*
+
+StringLiteral <- '\'' ( !'\'' . / '\'' '\'' )* '\''
+
+Star <- '*'
+
+// ============================================================================
+// Identifiers
+// ============================================================================
+
+Identifier <- QuotedIdentifier / UnquotedIdentifier
+
+QuotedIdentifier <- '"' ( !'"' . / '"' '"' )* '"'
+
+// UnquotedIdentifier matches a bare name that is NOT a reserved keyword
+UnquotedIdentifier <- !ReservedKeyword BareName
+
+// BareName is the raw pattern: letter or underscore followed by letters, digits, underscores
+BareName <- [a-zA-Z_] IdentChar*
+
+IdentChar <- [a-zA-Z0-9_]
+
+// CallableKeywordAsIdent: callable keywords used as identifiers (not followed by '(')
+CallableKeywordAsIdent <- CallableKeyword !(  _ '(' )
+
+// KeywordAsIdent: any keyword token used as an identifier
+KeywordAsIdent <- ReservedKeyword !IdentChar
+
+// ============================================================================
+// Keywords (case-insensitive, with word boundaries)
+// ============================================================================
+
+SELECT     <- [Ss][Ee][Ll][Ee][Cc][Tt] !IdentChar
+DISTINCT   <- [Dd][Ii][Ss][Tt][Ii][Nn][Cc][Tt] !IdentChar
+FROM       <- [Ff][Rr][Oo][Mm] !IdentChar
+WHERE      <- [Ww][Hh][Ee][Rr][Ee] !IdentChar
+GROUP      <- [Gg][Rr][Oo][Uu][Pp] !IdentChar
+BY         <- [Bb][Yy] !IdentChar
+HAVING     <- [Hh][Aa][Vv][Ii][Nn][Gg] !IdentChar
+ORDER      <- [Oo][Rr][Dd][Ee][Rr] !IdentChar
+ASC        <- [Aa][Ss][Cc] !IdentChar
+DESC       <- [Dd][Ee][Ss][Cc] !IdentChar
+LIMIT      <- [Ll][Ii][Mm][Ii][Tt] !IdentChar
+WINDOW     <- [Ww][Ii][Nn][Dd][Oo][Ww] !IdentChar
+TUMBLING   <- [Tt][Uu][Mm][Bb][Ll][Ii][Nn][Gg] !IdentChar
+SLIDING    <- [Ss][Ll][Ii][Dd][Ii][Nn][Gg] !IdentChar
+SESSION    <- [Ss][Ee][Ss][Ss][Ii][Oo][Nn] !IdentChar
+EMIT       <- [Ee][Mm][Ii][Tt] !IdentChar
+FINAL      <- [Ff][Ii][Nn][Aa][Ll] !IdentChar
+EARLY      <- [Ee][Aa][Rr][Ll][Yy] !IdentChar
+EVENT      <- [Ee][Vv][Ee][Nn][Tt] !IdentChar
+TIME       <- [Tt][Ii][Mm][Ee] !IdentChar
+WATERMARK  <- [Ww][Aa][Tt][Ee][Rr][Mm][Aa][Rr][Kk] !IdentChar
+DEDUPLICATE <- [Dd][Ee][Dd][Uu][Pp][Ll][Ii][Cc][Aa][Tt][Ee] !IdentChar
+WITHIN     <- [Ww][Ii][Tt][Hh][Ii][Nn] !IdentChar
+CAPACITY   <- [Cc][Aa][Pp][Aa][Cc][Ii][Tt][Yy] !IdentChar
+FORMAT     <- [Ff][Oo][Rr][Mm][Aa][Tt] !IdentChar
+AS         <- [Aa][Ss] !IdentChar
+AND        <- [Aa][Nn][Dd] !IdentChar
+OR         <- [Oo][Rr] !IdentChar
+NOT        <- [Nn][Oo][Tt] !IdentChar
+IN         <- [Ii][Nn] !IdentChar
+BETWEEN    <- [Bb][Ee][Tt][Ww][Ee][Ee][Nn] !IdentChar
+IS         <- [Ii][Ss] !IdentChar
+NULL       <- [Nn][Uu][Ll][Ll] !IdentChar
+TRUE       <- [Tt][Rr][Uu][Ee] !IdentChar
+FALSE      <- [Ff][Aa][Ll][Ss][Ee] !IdentChar
+LIKE       <- [Ll][Ii][Kk][Ee] !IdentChar
+ILIKE      <- [Ii][Ll][Ii][Kk][Ee] !IdentChar
+CASE       <- [Cc][Aa][Ss][Ee] !IdentChar
+WHEN       <- [Ww][Hh][Ee][Nn] !IdentChar
+THEN       <- [Tt][Hh][Ee][Nn] !IdentChar
+ELSE       <- [Ee][Ll][Ss][Ee] !IdentChar
+END        <- [Ee][Nn][Dd] !IdentChar
+INTERVAL   <- [Ii][Nn][Tt][Ee][Rr][Vv][Aa][Ll] !IdentChar
+CAST       <- [Cc][Aa][Ss][Tt] !IdentChar
+SEED       <- [Ss][Ee][Ee][Dd] !IdentChar
+JOIN       <- [Jj][Oo][Ii][Nn] !IdentChar
+LEFT       <- [Ll][Ee][Ff][Tt] !IdentChar
+ON         <- [Oo][Nn] !IdentChar
+
+// Aggregate functions
+COUNT                <- [Cc][Oo][Uu][Nn][Tt] !IdentChar
+SUM                  <- [Ss][Uu][Mm] !IdentChar
+AVG                  <- [Aa][Vv][Gg] !IdentChar
+MIN                  <- [Mm][Ii][Nn] !IdentChar
+MAX                  <- [Mm][Aa][Xx] !IdentChar
+MEDIAN               <- [Mm][Ee][Dd][Ii][Aa][Nn] !IdentChar
+FIRST                <- [Ff][Ii][Rr][Ss][Tt] !IdentChar
+LAST                 <- [Ll][Aa][Ss][Tt] !IdentChar
+ARRAY_AGG            <- [Aa][Rr][Rr][Aa][Yy] '_' [Aa][Gg][Gg] !IdentChar
+APPROX_COUNT_DISTINCT <- [Aa][Pp][Pp][Rr][Oo][Xx] '_' [Cc][Oo][Uu][Nn][Tt] '_' [Dd][Ii][Ss][Tt][Ii][Nn][Cc][Tt] !IdentChar
+
+// Scalar functions
+COALESCE         <- [Cc][Oo][Aa][Ll][Ee][Ss][Cc][Ee] !IdentChar
+NULLIF           <- [Nn][Uu][Ll][Ll][Ii][Ff] !IdentChar
+LENGTH           <- [Ll][Ee][Nn][Gg][Tt][Hh] !IdentChar
+UPPER            <- [Uu][Pp][Pp][Ee][Rr] !IdentChar
+LOWER            <- [Ll][Oo][Ww][Ee][Rr] !IdentChar
+TRIM             <- [Tt][Rr][Ii][Mm] !IdentChar
+LTRIM            <- [Ll][Tt][Rr][Ii][Mm] !IdentChar
+RTRIM            <- [Rr][Tt][Rr][Ii][Mm] !IdentChar
+SUBSTR           <- [Ss][Uu][Bb][Ss][Tt][Rr] !IdentChar
+REPLACE          <- [Rr][Ee][Pp][Ll][Aa][Cc][Ee] !IdentChar
+SPLIT_PART       <- [Ss][Pp][Ll][Ii][Tt] '_' [Pp][Aa][Rr][Tt] !IdentChar
+PARSE_TIMESTAMP  <- [Pp][Aa][Rr][Ss][Ee] '_' [Tt][Ii][Mm][Ee][Ss][Tt][Aa][Mm][Pp] !IdentChar
+FORMAT_TIMESTAMP <- [Ff][Oo][Rr][Mm][Aa][Tt] '_' [Tt][Ii][Mm][Ee][Ss][Tt][Aa][Mm][Pp] !IdentChar
+NOW              <- [Nn][Oo][Ww] !IdentChar
+EXTRACT          <- [Ee][Xx][Tt][Rr][Aa][Cc][Tt] !IdentChar
+JSON_KEYS        <- [Jj][Ss][Oo][Nn] '_' [Kk][Ee][Yy][Ss] !IdentChar
+
+// Type keywords
+INT       <- [Ii][Nn][Tt] !IdentChar
+BIGINT    <- [Bb][Ii][Gg][Ii][Nn][Tt] !IdentChar
+FLOAT     <- [Ff][Ll][Oo][Aa][Tt] !IdentChar
+DOUBLE    <- [Dd][Oo][Uu][Bb][Ll][Ee] !IdentChar
+TEXT      <- [Tt][Ee][Xx][Tt] !IdentChar
+BOOLEAN   <- [Bb][Oo][Oo][Ll][Ee][Aa][Nn] !IdentChar
+TIMESTAMP <- [Tt][Ii][Mm][Ee][Ss][Tt][Aa][Mm][Pp] !IdentChar
+
+// ============================================================================
+// Keyword groups
+// ============================================================================
+
+// CallableKeyword: function keywords that become function calls when followed by '('
+CallableKeyword <- ( COUNT / SUM / AVG / MIN / MAX / MEDIAN / FIRST / LAST
+    / ARRAY_AGG / APPROX_COUNT_DISTINCT
+    / COALESCE / NULLIF / LENGTH / UPPER / LOWER / TRIM / LTRIM / RTRIM
+    / SUBSTR / REPLACE / SPLIT_PART / PARSE_TIMESTAMP / FORMAT_TIMESTAMP
+    / NOW / EXTRACT / JSON_KEYS ) !IdentChar
+
+// ClauseKeyword: keywords that introduce clauses and cannot be used as implicit aliases
+ClauseKeyword <- ( FROM / WHERE / GROUP / HAVING / ORDER / LIMIT / WINDOW
+    / EMIT / EVENT / WATERMARK / DEDUPLICATE / FORMAT / JOIN / LEFT / ON
+    / WITHIN / SEED ) !IdentChar
+
+// ReservedKeyword: all keywords that cannot be used as unquoted identifiers
+ReservedKeyword <- ( SELECT / DISTINCT / FROM / WHERE / GROUP / BY / HAVING
+    / ORDER / ASC / DESC / LIMIT / WINDOW / TUMBLING / SLIDING / SESSION
+    / EMIT / FINAL / EARLY / EVENT / TIME / WATERMARK / DEDUPLICATE / WITHIN
+    / CAPACITY / FORMAT / AS / AND / OR / NOT / IN / BETWEEN / IS / NULL
+    / TRUE / FALSE / LIKE / ILIKE / CASE / WHEN / THEN / ELSE / END / INTERVAL
+    / CAST / SEED / JOIN / LEFT / ON
+    / COUNT / SUM / AVG / MIN / MAX / MEDIAN / FIRST / LAST
+    / ARRAY_AGG / APPROX_COUNT_DISTINCT
+    / COALESCE / NULLIF / LENGTH / UPPER / LOWER / TRIM / LTRIM / RTRIM
+    / SUBSTR / REPLACE / SPLIT_PART / PARSE_TIMESTAMP / FORMAT_TIMESTAMP
+    / NOW / EXTRACT / JSON_KEYS
+    / INT / BIGINT / FLOAT / DOUBLE / TEXT / BOOLEAN / TIMESTAMP
+    ) !IdentChar
+
+// ============================================================================
+// Whitespace and comments
+// ============================================================================
+
+_ "optional whitespace" <- ( [ \t\r\n] / LineComment )*
+
+__ "mandatory whitespace" <- ( [ \t\r\n] / LineComment )+
+
+LineComment <- "--" ( ![\n] . )* ( '\n' / EOF )
+
+EOF <- !.
