@@ -58,6 +58,7 @@ nav:
     - Performance: architecture/performance.md
   - Reference:
     - SQL Dialect: reference/sql.md
+    - SQL Grammar (EBNF): reference/grammar.md
     - CLI: reference/cli.md
     - Formats: reference/formats.md
     - Configuration: reference/configuration.md
