@@ -54,7 +54,27 @@ FROM 'kafka://my-cluster/events'    -- resolved from ~/.folddb/credentials
 
 -- stdin (implicit or explicit)
 FROM 'stdin://'
+
+-- Subquery (derived table)
+FROM (SELECT status, SUM(amount) AS total FROM '/data/orders.parquet' GROUP BY status) t
 ```
+
+### Subquery in FROM
+
+A parenthesized `SELECT` statement can be used as the FROM source, producing a **derived table**. The inner query is executed to completion before the outer query begins. An alias is mandatory.
+
+```sql
+-- Pre-aggregate a file then filter in the outer query
+SELECT *
+FROM (SELECT region, COUNT(*) AS cnt FROM '/data/events.parquet' GROUP BY region) stats
+WHERE cnt > 100
+
+-- Nested subqueries
+SELECT *
+FROM (SELECT * FROM (SELECT id, name FROM '/data/users.ndjson') inner_t) outer_t
+```
+
+The inner query supports the full SQL dialect: WHERE, GROUP BY, HAVING, JOIN, LIMIT, etc. Kafka sources are not supported inside subqueries.
 
 ### Kafka URI parameters
 
@@ -240,18 +260,38 @@ Terminates after N output records. For non-accumulating queries, this is straigh
 
 ## JOIN
 
-Equi-join between a stream and a table, a stream and a CDC source, or two streams.
+Equi-join between a stream and a table, a stream and a CDC source, two streams, or a stream and a subquery.
 
 ```sql
 -- Stream-to-file
 JOIN '/data/users.parquet' u ON e.user_id = u.id
 LEFT JOIN '/data/users.csv' u FORMAT CSV(header=true) ON e.user_id = u.id
 
+-- Stream-to-subquery (pre-aggregate a file, then join)
+JOIN (SELECT customer_id, COUNT(*) AS cnt FROM '/data/orders.parquet' GROUP BY customer_id) r
+  ON e.customer_id = r.customer_id
+
 -- Stream-to-stream (WITHIN is mandatory)
 FROM 'kafka://broker/orders' o
 JOIN 'kafka://broker/payments' p ON o.order_id = p.order_id
 WITHIN INTERVAL '10 minutes'
 ```
+
+### Subquery as JOIN source
+
+A parenthesized `SELECT` can replace a file path as the JOIN source. The subquery is materialized into an in-memory table before the stream begins. This is useful for joining a live stream against pre-aggregated or filtered reference data.
+
+```sql
+-- Enrich events with per-customer order counts
+SELECT e.customer_id, e.action, r.order_count
+FROM stdin e
+JOIN (SELECT customer_id, COUNT(*) AS order_count
+      FROM '/data/orders.parquet'
+      GROUP BY customer_id) r
+  ON e.customer_id = r.customer_id
+```
+
+An alias is mandatory for the subquery. The alias is used to qualify column references in the ON condition and SELECT list.
 
 ### WITHIN INTERVAL
 

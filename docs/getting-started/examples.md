@@ -116,6 +116,34 @@ cat events.ndjson | folddb "SELECT e.user_id,
                              LEFT JOIN '/data/users.parquet' u ON e.user_id = u.id"
 ```
 
+## Subqueries
+
+Use subqueries as derived tables or as JOIN sources:
+
+```bash
+# Derived table: pre-aggregate then filter
+folddb -i orders.ndjson \
+  "SELECT * FROM (SELECT status, COUNT(*) AS cnt GROUP BY status) t
+   WHERE cnt > 10"
+
+# Join stream against pre-aggregated file
+cat events.ndjson | folddb \
+  "SELECT e.customer_id, e.action, r.order_count
+   FROM stdin e
+   JOIN (SELECT customer_id, COUNT(*) AS order_count
+         FROM '/data/orders.parquet'
+         GROUP BY customer_id) r
+     ON e.customer_id = r.customer_id"
+
+# Nested subquery: filter then project
+folddb -i data.ndjson \
+  "SELECT name, total
+   FROM (SELECT name, SUM(amount) AS total
+         FROM (SELECT * FROM '/data/transactions.ndjson' WHERE status = 'complete') t1
+         GROUP BY name) t2
+   WHERE total > 1000"
+```
+
 ## Deduplication
 
 ```bash

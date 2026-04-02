@@ -141,6 +141,35 @@ The join merge only copies columns that are referenced by the query. For a 30-co
 
 For large joins or long windows, arrangements can spill to disk. See [Disk-Backed Arrangements](../architecture/performance.md#disk-backed-arrangements) for details on the `--arrangement-mem-limit` flag.
 
+## Subquery as JOIN source
+
+Instead of a file path, the JOIN source can be a parenthesized subquery. The subquery is executed to completion (materialized) before stream processing begins. This is especially powerful when you need to pre-aggregate or filter reference data before joining.
+
+### CDC aggregation example
+
+A common pattern in change data capture pipelines: join a live event stream against pre-aggregated order counts from a Parquet snapshot.
+
+```sql
+-- Enrich each customer event with their historical order count
+SELECT e.customer_id, e.action, r.order_count
+FROM 'kafka://broker/customer_events' e
+JOIN (SELECT customer_id, COUNT(*) AS order_count
+      FROM '/data/orders.parquet'
+      GROUP BY customer_id) r
+  ON e.customer_id = r.customer_id
+```
+
+Without subqueries, you would need to pre-compute the aggregation in a separate pipeline and write it to a file. With subqueries, the entire workflow is a single query.
+
+### How it works
+
+1. FoldDB parses the inner `SELECT` and executes it as a standalone query.
+2. For file sources, DuckDB handles the scan; for GROUP BY, FoldDB's aggregation engine computes the final state.
+3. The materialized results are loaded into the right-side join arrangement.
+4. Stream processing begins, joining each incoming record against the pre-computed table.
+
+The subquery supports the full FoldDB SQL dialect (WHERE, GROUP BY, HAVING, LIMIT, nested JOINs). Kafka sources inside subqueries are not supported.
+
 ## Limitations
 
 - **Only simple equi-joins.** Composite keys (multiple conditions with AND) are not supported in v0.

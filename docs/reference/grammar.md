@@ -59,17 +59,20 @@ select_item
     ::= expression [ AS identifier ]
 
 from_clause
-    ::= FROM source [ format_clause ] [ identifier ]
+    ::= FROM ( source [ format_clause ] [ identifier ] | subquery_source )
 
 source
     ::= string_literal                (* URI: 'kafka://...', '/path/to/file' *)
       | identifier                    (* bare identifier: stdin *)
 
+subquery_source
+    ::= '(' select_statement ')' identifier    (* alias is mandatory *)
+
 seed_clause
     ::= SEED FROM string_literal [ format_clause ]
 
 join_clause
-    ::= [ LEFT ] JOIN source [ format_clause ] identifier ON expression
+    ::= [ LEFT ] JOIN ( source [ format_clause ] | subquery_source ) identifier ON expression
         [ WITHIN INTERVAL string_literal ]
 
 format_clause
