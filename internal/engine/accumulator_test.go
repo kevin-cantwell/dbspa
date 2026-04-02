@@ -985,3 +985,113 @@ func assertFloatResult(t *testing.T, a Accumulator, want float64) {
 		t.Errorf("expected %f, got %f", want, fv.V)
 	}
 }
+
+// --- Accumulator type coercion tests ---
+
+func TestSumAccumulator_NumericText(t *testing.T) {
+	resetAggregateWarnings()
+	a := &SumAccumulator{}
+	a.Add(IntValue{V: 50})
+	a.Add(TextValue{V: "100.50"})
+	// TextValue("100.50") parses as float, so SUM should be 150.5
+	r := a.Result()
+	fv, ok := r.(FloatValue)
+	if !ok {
+		t.Fatalf("expected FloatValue, got %T: %v", r, r)
+	}
+	if fv.V != 150.5 {
+		t.Errorf("expected 150.5, got %f", fv.V)
+	}
+}
+
+func TestSumAccumulator_NonNumericText(t *testing.T) {
+	resetAggregateWarnings()
+	a := &SumAccumulator{}
+	a.Add(IntValue{V: 50})
+	// "hello" can't parse as number — should be skipped with warning
+	a.Add(TextValue{V: "hello"})
+	r := a.Result()
+	iv, ok := r.(IntValue)
+	if !ok {
+		t.Fatalf("expected IntValue, got %T: %v", r, r)
+	}
+	if iv.V != 50 {
+		t.Errorf("expected 50, got %d", iv.V)
+	}
+}
+
+func TestSumAccumulator_BoolValue(t *testing.T) {
+	resetAggregateWarnings()
+	a := &SumAccumulator{}
+	a.Add(IntValue{V: 10})
+	// Bool should be skipped with warning
+	a.Add(BoolValue{V: true})
+	r := a.Result()
+	iv, ok := r.(IntValue)
+	if !ok {
+		t.Fatalf("expected IntValue, got %T: %v", r, r)
+	}
+	if iv.V != 10 {
+		t.Errorf("expected 10, got %d", iv.V)
+	}
+}
+
+func TestSumAccumulator_JsonValue(t *testing.T) {
+	resetAggregateWarnings()
+	a := &SumAccumulator{}
+	a.Add(IntValue{V: 10})
+	// JSON should be skipped with warning
+	a.Add(JsonValue{V: map[string]any{"key": "val"}})
+	r := a.Result()
+	iv, ok := r.(IntValue)
+	if !ok {
+		t.Fatalf("expected IntValue, got %T: %v", r, r)
+	}
+	if iv.V != 10 {
+		t.Errorf("expected 10, got %d", iv.V)
+	}
+}
+
+func TestAvgAccumulator_BoolSkipped(t *testing.T) {
+	resetAggregateWarnings()
+	a := &AvgAccumulator{}
+	a.Add(IntValue{V: 10})
+	a.Add(IntValue{V: 20})
+	a.Add(BoolValue{V: false}) // should be skipped
+	r := a.Result().(FloatValue).V
+	if r != 15.0 {
+		t.Errorf("expected 15.0 (bool skipped), got %f", r)
+	}
+}
+
+func TestMinAccumulator_BoolSkipped(t *testing.T) {
+	resetAggregateWarnings()
+	a := &MinAccumulator{}
+	a.Add(IntValue{V: 5})
+	a.Add(BoolValue{V: true}) // should be skipped
+	a.Add(IntValue{V: 10})
+	r := a.Result()
+	iv, ok := r.(IntValue)
+	if !ok {
+		t.Fatalf("expected IntValue, got %T: %v", r, r)
+	}
+	if iv.V != 5 {
+		t.Errorf("expected 5, got %d", iv.V)
+	}
+}
+
+func TestMaxAccumulator_BoolSkipped(t *testing.T) {
+	resetAggregateWarnings()
+	a := &MaxAccumulator{}
+	a.Add(IntValue{V: 5})
+	a.Add(BoolValue{V: true}) // should be skipped
+	a.Add(IntValue{V: 10})
+	r := a.Result()
+	iv, ok := r.(IntValue)
+	if !ok {
+		t.Fatalf("expected IntValue, got %T: %v", r, r)
+	}
+	if iv.V != 10 {
+		t.Errorf("expected 10, got %d", iv.V)
+	}
+}

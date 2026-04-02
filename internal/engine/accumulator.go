@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"sort"
+	"sync"
 )
 
 // Accumulator is the interface for retraction-aware aggregate state.
@@ -149,8 +150,8 @@ func (a *SumAccumulator) Add(value Value) {
 	}
 	f, ok := valueToFloat(value)
 	if !ok {
-		// Non-numeric value: mark as having received input but don't add to sum.
-		// This ensures the accumulator emits (as NULL) rather than producing no output.
+		// Non-numeric value: warn and skip.
+		warnIncompatibleAggregate("SUM", value)
 		a.hasValue = true
 		a.changed = true
 		return
@@ -239,6 +240,7 @@ func (a *AvgAccumulator) Add(value Value) {
 	}
 	f, ok := valueToFloat(value)
 	if !ok {
+		warnIncompatibleAggregate("AVG", value)
 		return
 	}
 	a.prevRes = a.Result()
@@ -310,6 +312,7 @@ func (a *MinAccumulator) Add(value Value) {
 	}
 	f, ok := valueToFloat(value)
 	if !ok {
+		warnIncompatibleAggregate("MIN", value)
 		return
 	}
 	a.prevRes = a.Result()
@@ -381,6 +384,7 @@ func (a *MaxAccumulator) Add(value Value) {
 	}
 	f, ok := valueToFloat(value)
 	if !ok {
+		warnIncompatibleAggregate("MAX", value)
 		return
 	}
 	a.prevRes = a.Result()
@@ -552,6 +556,33 @@ func (a *LastAccumulator) Unmarshal(data []byte) error {
 }
 
 // --- Helpers ---
+
+// aggregateWarnings tracks which aggregate+type combinations have already been
+// warned about, to avoid spamming stderr with repetitive messages.
+var (
+	aggregateWarnings   = make(map[string]bool)
+	aggregateWarningsMu sync.Mutex
+)
+
+// warnIncompatibleAggregate logs a warning to stderr when a numeric aggregate
+// receives a non-numeric value. Rate-limited: one warning per aggregate+type pair.
+func warnIncompatibleAggregate(aggName string, val Value) {
+	key := aggName + ":" + val.Type()
+	aggregateWarningsMu.Lock()
+	defer aggregateWarningsMu.Unlock()
+	if aggregateWarnings[key] {
+		return
+	}
+	aggregateWarnings[key] = true
+	log.Printf("Warning: %s received %s value, expected numeric. Skipping.", aggName, val.Type())
+}
+
+// resetAggregateWarnings clears the warning dedup state. Used in tests.
+func resetAggregateWarnings() {
+	aggregateWarningsMu.Lock()
+	defer aggregateWarningsMu.Unlock()
+	aggregateWarnings = make(map[string]bool)
+}
 
 // valueToFloat extracts a float64 from a numeric Value.
 func valueToFloat(v Value) (float64, bool) {
