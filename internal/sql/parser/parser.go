@@ -56,12 +56,22 @@ func (p *Parser) parseSelect() (*ast.SelectStatement, error) {
 	// FROM (optional)
 	if p.lex.Peek().Type == lexer.TokenFrom {
 		p.lex.Next()
-		src, alias, err := p.parseTableSourceWithAlias()
-		if err != nil {
-			return nil, err
+		// Check for subquery: FROM (SELECT ...)
+		if p.lex.Peek().Type == lexer.TokenLParen {
+			subq, err := p.parseSubquerySource()
+			if err != nil {
+				return nil, err
+			}
+			stmt.FromSubquery = subq
+			stmt.FromAlias = subq.Alias
+		} else {
+			src, alias, err := p.parseTableSourceWithAlias()
+			if err != nil {
+				return nil, err
+			}
+			stmt.From = src
+			stmt.FromAlias = alias
 		}
-		stmt.From = src
-		stmt.FromAlias = alias
 	}
 
 	// FORMAT after FROM source+alias but before JOIN (e.g., FROM stdin e FORMAT DEBEZIUM JOIN ...)
@@ -490,6 +500,41 @@ func (p *Parser) parseTableSource() (*ast.TableSource, error) {
 	return src, nil
 }
 
+// parseSubquerySource parses (SELECT ...) alias — a subquery used as a FROM or
+// JOIN source. The opening ( must be the next token. Alias is mandatory.
+func (p *Parser) parseSubquerySource() (*ast.SubquerySource, error) {
+	lparen := p.lex.Next() // consume (
+
+	// Verify it's actually a SELECT inside the parens
+	if p.lex.Peek().Type != lexer.TokenSelect {
+		return nil, p.errorf(lparen, "expected SELECT after '(' in subquery, got %q", p.lex.Peek().Literal)
+	}
+
+	// Recursively parse the inner SELECT statement
+	innerStmt, err := p.parseSelect()
+	if err != nil {
+		return nil, fmt.Errorf("in subquery: %w", err)
+	}
+
+	// Expect closing )
+	if err := p.expect(lexer.TokenRParen); err != nil {
+		return nil, err
+	}
+
+	// Alias is mandatory for subqueries
+	aliasTok := p.lex.Peek()
+	if aliasTok.Type != lexer.TokenIdent && !lexer.IsKeyword(aliasTok.Type) || isClauseKeyword(aliasTok.Type) {
+		return nil, p.errorf(aliasTok, "subquery requires an alias, got %q", aliasTok.Literal)
+	}
+	p.lex.Next()
+	alias := aliasTok.Literal
+
+	return &ast.SubquerySource{
+		Query: innerStmt,
+		Alias: alias,
+	}, nil
+}
+
 // parseJoinClause parses [LEFT] JOIN <source> [alias] ON <condition>
 func (p *Parser) parseJoinClause() (*ast.JoinClause, error) {
 	joinType := "JOIN"
@@ -501,22 +546,35 @@ func (p *Parser) parseJoinClause() (*ast.JoinClause, error) {
 		return nil, err
 	}
 
-	// Parse join source: string literal (file path)
-	tok := p.lex.Peek()
-	if tok.Type != lexer.TokenString {
-		return nil, p.errorf(tok, "expected file path string after JOIN, got %q", tok.Literal)
-	}
-	src, err := p.parseTableSource()
-	if err != nil {
-		return nil, err
-	}
-
-	// Parse optional alias
+	// Parse join source: subquery or string literal (file path)
+	var src *ast.TableSource
+	var subq *ast.SubquerySource
 	var alias string
-	next := p.lex.Peek()
-	if next.Type == lexer.TokenIdent && !isClauseKeyword(next.Type) {
-		p.lex.Next()
-		alias = next.Literal
+
+	if p.lex.Peek().Type == lexer.TokenLParen {
+		// Subquery as JOIN source: JOIN (SELECT ...) alias
+		var err error
+		subq, err = p.parseSubquerySource()
+		if err != nil {
+			return nil, err
+		}
+		alias = subq.Alias
+	} else {
+		tok := p.lex.Peek()
+		if tok.Type != lexer.TokenString {
+			return nil, p.errorf(tok, "expected file path string or subquery after JOIN, got %q", tok.Literal)
+		}
+		var err error
+		src, err = p.parseTableSource()
+		if err != nil {
+			return nil, err
+		}
+		// Parse optional alias
+		next := p.lex.Peek()
+		if next.Type == lexer.TokenIdent && !isClauseKeyword(next.Type) {
+			p.lex.Next()
+			alias = next.Literal
+		}
 	}
 
 	// Parse ON condition
@@ -546,6 +604,7 @@ func (p *Parser) parseJoinClause() (*ast.JoinClause, error) {
 	return &ast.JoinClause{
 		Type:      joinType,
 		Source:    src,
+		Subquery:  subq,
 		Alias:     alias,
 		Condition: cond,
 		Within:    within,

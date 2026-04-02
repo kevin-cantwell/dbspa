@@ -343,7 +343,7 @@ func TestNegativeSQL(t *testing.T) {
 		{
 			name:        "JOIN without source",
 			sql:         "SELECT * FROM stdin JOIN ON x = y",
-			errContains: "expected file path string after JOIN",
+			errContains: "expected file path string or subquery after JOIN",
 		},
 		{
 			name:        "LEFT without JOIN",
