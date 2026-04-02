@@ -564,17 +564,30 @@ var (
 	aggregateWarningsMu sync.Mutex
 )
 
-// warnIncompatibleAggregate logs a warning to stderr when a numeric aggregate
-// receives a non-numeric value. Rate-limited: one warning per aggregate+type pair.
+// AggregateErrorHandler is called when a numeric aggregate receives an
+// incompatible value. If nil, errors are logged to stderr only.
+// Set this from the CLI layer to route to the dead letter file.
+var AggregateErrorHandler func(aggName string, val Value)
+
+// warnIncompatibleAggregate logs a warning and optionally routes to the
+// error handler when a numeric aggregate receives a non-numeric value.
+// Rate-limited: one warning per aggregate+type pair.
 func warnIncompatibleAggregate(aggName string, val Value) {
 	key := aggName + ":" + val.Type()
 	aggregateWarningsMu.Lock()
 	defer aggregateWarningsMu.Unlock()
 	if aggregateWarnings[key] {
+		// Still call the error handler (for DLQ) even if we've already warned
+		if AggregateErrorHandler != nil {
+			AggregateErrorHandler(aggName, val)
+		}
 		return
 	}
 	aggregateWarnings[key] = true
-	log.Printf("Warning: %s received %s value, expected numeric. Skipping.", aggName, val.Type())
+	log.Printf("Warning: %s received %s value, expected numeric. Value skipped.", aggName, val.Type())
+	if AggregateErrorHandler != nil {
+		AggregateErrorHandler(aggName, val)
+	}
 }
 
 // resetAggregateWarnings clears the warning dedup state. Used in tests.

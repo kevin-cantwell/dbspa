@@ -269,6 +269,16 @@ func run() error {
 			return fmt.Errorf("cannot open dead letter file: %w", err)
 		}
 		activeDLWriter = dlWriter // make available to withSchemaTracking
+
+		// Route accumulator type errors to dead letter
+		engine.AggregateErrorHandler = func(aggName string, val engine.Value) {
+			raw := fmt.Sprintf(`{"aggregate":"%s","value_type":"%s","value":"%v"}`, aggName, val.Type(), val.String())
+			dlWriter.Write(
+				fmt.Sprintf("%s received incompatible %s value", aggName, val.Type()),
+				[]byte(raw), 0, 0,
+			)
+		}
+
 		defer dlWriter.Close()
 	}
 
