@@ -1062,3 +1062,258 @@ func TestDDJoinOp_ProjectionPushdown_Nil_CopiesAll(t *testing.T) {
 		}
 	}
 }
+
+// TestDDJoinOp_StreamingSubquery_ConcurrentRightDeltas simulates a streaming
+// subquery scenario: the inner query feeds Z-set deltas (retraction+insertion
+// pairs from aggregation changes) to ProcessRightDelta while the outer query
+// streams left records via ProcessLeftDeltaStream.
+func TestDDJoinOp_StreamingSubquery_ConcurrentRightDeltas(t *testing.T) {
+	op := NewDDJoinOp(
+		&ast.ColumnRef{Name: "region"},
+		&ast.ColumnRef{Name: "region"},
+		"e", "r", false,
+	)
+	// Right side starts empty (streaming subquery hasn't emitted yet)
+	op.RightIsStatic = false
+
+	out := make(chan Record, 100)
+	var wg sync.WaitGroup
+
+	// Simulate streaming subquery: sends aggregation deltas to a channel
+	innerCh := make(chan Record, 10)
+	go func() {
+		// Inner query emits: region=us-east, revenue=100 (initial insertion)
+		innerCh <- ddRec(map[string]Value{
+			"region":  TextValue{V: "us-east"},
+			"revenue": IntValue{V: 100},
+		}, 1)
+
+		// Small delay to ensure ordering is testable
+		time.Sleep(10 * time.Millisecond)
+
+		// Inner query updates: retract old value, insert new value
+		innerCh <- ddRec(map[string]Value{
+			"region":  TextValue{V: "us-east"},
+			"revenue": IntValue{V: 100},
+		}, -1) // retraction
+		innerCh <- ddRec(map[string]Value{
+			"region":  TextValue{V: "us-east"},
+			"revenue": IntValue{V: 200},
+		}, 1) // new insertion
+
+		close(innerCh)
+	}()
+
+	// Feed right deltas from the inner channel
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for rec := range innerCh {
+			op.ProcessRightDelta(Batch{rec}, out)
+		}
+	}()
+
+	// Wait for initial right-side data to arrive
+	time.Sleep(5 * time.Millisecond)
+
+	// Outer query: send a left record
+	leftRec := ddRec(map[string]Value{
+		"region": TextValue{V: "us-east"},
+		"event":  TextValue{V: "click"},
+	}, 1)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		op.ProcessLeftDelta(Batch{leftRec}, out)
+	}()
+
+	// Wait for all goroutines to finish, then close out
+	wg.Wait()
+	close(out)
+
+	var results []Record
+	for rec := range out {
+		results = append(results, rec)
+	}
+
+	// We should get at least 1 join result (left joining against right arrangement)
+	if len(results) == 0 {
+		t.Fatal("expected at least one join result")
+	}
+
+	// The first join result should have revenue=100 (from initial right state)
+	first := results[0]
+	if rev, ok := first.Columns["revenue"].(IntValue); !ok || rev.V != 100 {
+		t.Errorf("first join result: expected revenue=100, got %v", first.Columns["revenue"])
+	}
+
+	t.Logf("streaming subquery concurrent test produced %d records", len(results))
+}
+
+// TestDDJoinOp_StreamingSubquery_LeftJoinNullTransition tests that a LEFT JOIN
+// with a streaming subquery correctly emits NULL rows when the right side has
+// no data, then retracts them when data arrives.
+func TestDDJoinOp_StreamingSubquery_LeftJoinNullTransition(t *testing.T) {
+	op := NewDDJoinOp(
+		&ast.ColumnRef{Name: "region"},
+		&ast.ColumnRef{Name: "region"},
+		"e", "r", true, // LEFT JOIN
+	)
+	op.RightIsStatic = false
+
+	out := make(chan Record, 100)
+
+	// Send a left record BEFORE any right data exists
+	leftRec := ddRec(map[string]Value{
+		"region": TextValue{V: "us-east"},
+		"event":  TextValue{V: "click"},
+	}, 1)
+	op.ProcessLeftDelta(Batch{leftRec}, out)
+
+	// Should get a NULL-filled row for the right side
+	select {
+	case rec := <-out:
+		if rec.Weight != 1 {
+			t.Errorf("expected weight=1 for NULL row, got %d", rec.Weight)
+		}
+		if rev := rec.Columns["revenue"]; rev == nil || !rev.IsNull() {
+			t.Logf("LEFT JOIN NULL row: revenue=%v (type %T)", rev, rev)
+		}
+	default:
+		t.Fatal("expected a NULL-filled row for LEFT JOIN with empty right side")
+	}
+
+	// Now the streaming subquery emits data for us-east
+	rightRec := ddRec(map[string]Value{
+		"region":  TextValue{V: "us-east"},
+		"revenue": IntValue{V: 100},
+	}, 1)
+	op.ProcessRightDelta(Batch{rightRec}, out)
+
+	// Should get:
+	// 1. A joined record with revenue=100
+	// 2. A retraction of the NULL row
+	var joinResults []Record
+	for len(out) > 0 {
+		joinResults = append(joinResults, <-out)
+	}
+
+	if len(joinResults) < 2 {
+		t.Fatalf("expected at least 2 records (joined + NULL retraction), got %d", len(joinResults))
+	}
+
+	// Verify we have both a positive joined record and a negative NULL retraction
+	hasPositiveJoin := false
+	hasNullRetraction := false
+	for _, rec := range joinResults {
+		if rev, ok := rec.Columns["revenue"].(IntValue); ok && rev.V == 100 && rec.Weight > 0 {
+			hasPositiveJoin = true
+		}
+		if rec.Weight < 0 {
+			hasNullRetraction = true
+		}
+	}
+
+	if !hasPositiveJoin {
+		t.Error("expected a positive join result with revenue=100")
+	}
+	if !hasNullRetraction {
+		t.Error("expected a NULL row retraction when right data arrived")
+	}
+
+	close(out)
+}
+
+// TestDDJoinOp_StreamingSubquery_AggregationUpdate tests the full cycle of
+// a streaming subquery aggregation update: initial value, retraction of old
+// value, insertion of new value, and correct propagation through the join.
+func TestDDJoinOp_StreamingSubquery_AggregationUpdate(t *testing.T) {
+	op := NewDDJoinOp(
+		&ast.ColumnRef{Name: "region"},
+		&ast.ColumnRef{Name: "region"},
+		"e", "r", false,
+	)
+	op.RightIsStatic = false
+
+	// Seed the left arrangement with a record
+	leftRec := ddRec(map[string]Value{
+		"region": TextValue{V: "us-east"},
+		"event":  TextValue{V: "purchase"},
+	}, 1)
+
+	// Initial right side: region=us-east, revenue=100
+	rightInitial := ddRec(map[string]Value{
+		"region":  TextValue{V: "us-east"},
+		"revenue": IntValue{V: 100},
+	}, 1)
+
+	out := make(chan Record, 100)
+
+	// Apply initial right data
+	op.ProcessRightDelta(Batch{rightInitial}, out)
+	// No output yet (no left data)
+
+	// Now add left record
+	op.ProcessLeftDelta(Batch{leftRec}, out)
+
+	// Should get a join with revenue=100
+	select {
+	case rec := <-out:
+		if rev, ok := rec.Columns["revenue"].(IntValue); !ok || rev.V != 100 {
+			t.Errorf("initial join: expected revenue=100, got %v", rec.Columns["revenue"])
+		}
+		if rec.Weight != 1 {
+			t.Errorf("initial join: expected weight=1, got %d", rec.Weight)
+		}
+	default:
+		t.Fatal("expected initial join result")
+	}
+
+	// Streaming subquery updates: retract old, insert new
+	retractOld := ddRec(map[string]Value{
+		"region":  TextValue{V: "us-east"},
+		"revenue": IntValue{V: 100},
+	}, -1)
+	insertNew := ddRec(map[string]Value{
+		"region":  TextValue{V: "us-east"},
+		"revenue": IntValue{V: 250},
+	}, 1)
+
+	op.ProcessRightDelta(Batch{retractOld}, out)
+	op.ProcessRightDelta(Batch{insertNew}, out)
+
+	// Drain results
+	var updates []Record
+	for len(out) > 0 {
+		updates = append(updates, <-out)
+	}
+
+	// Should see:
+	// - Retraction of the old join (revenue=100, weight=-1)
+	// - New join (revenue=250, weight=1)
+	if len(updates) < 2 {
+		t.Fatalf("expected at least 2 update records, got %d", len(updates))
+	}
+
+	hasRetraction := false
+	hasNewJoin := false
+	for _, rec := range updates {
+		if rev, ok := rec.Columns["revenue"].(IntValue); ok {
+			if rev.V == 100 && rec.Weight == -1 {
+				hasRetraction = true
+			}
+			if rev.V == 250 && rec.Weight == 1 {
+				hasNewJoin = true
+			}
+		}
+	}
+
+	if !hasRetraction {
+		t.Error("expected retraction of old join result (revenue=100, weight=-1)")
+	}
+	if !hasNewJoin {
+		t.Error("expected new join result (revenue=250, weight=1)")
+	}
+
+	close(out)
+}

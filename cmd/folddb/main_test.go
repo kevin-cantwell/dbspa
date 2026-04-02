@@ -12,6 +12,7 @@ import (
 	"github.com/kevin-cantwell/folddb/internal/engine"
 	"github.com/kevin-cantwell/folddb/internal/format"
 	"github.com/kevin-cantwell/folddb/internal/sink"
+	"github.com/kevin-cantwell/folddb/internal/sql/ast"
 	"github.com/kevin-cantwell/folddb/internal/sql/parser"
 )
 
@@ -2487,6 +2488,126 @@ func TestE2E_FromSubqueryWithDuckDB(t *testing.T) {
 }
 
 // TestE2E_SubqueryAliasMandatory: verify parse error without alias
+func TestIsStreamingSubquery(t *testing.T) {
+	tests := []struct {
+		name     string
+		sq       *ast.SubquerySource
+		expected bool
+	}{
+		{
+			name:     "nil subquery",
+			sq:       nil,
+			expected: false,
+		},
+		{
+			name: "file source",
+			sq: &ast.SubquerySource{
+				Query: &ast.SelectStatement{
+					From: &ast.TableSource{URI: "/data/orders.parquet"},
+				},
+				Alias: "r",
+			},
+			expected: false,
+		},
+		{
+			name: "kafka source",
+			sq: &ast.SubquerySource{
+				Query: &ast.SelectStatement{
+					From: &ast.TableSource{URI: "kafka://broker/orders.cdc", Format: "DEBEZIUM"},
+				},
+				Alias: "r",
+			},
+			expected: true,
+		},
+		{
+			name: "no FROM",
+			sq: &ast.SubquerySource{
+				Query: &ast.SelectStatement{},
+				Alias: "r",
+			},
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isStreamingSubquery(tt.sq)
+			if got != tt.expected {
+				t.Errorf("isStreamingSubquery() = %v, want %v", got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestApplyStreamingSubqueryJoin(t *testing.T) {
+	// Test that applyStreamingSubqueryJoin correctly wires left and right channels
+	// into a DD join and produces expected output.
+	op := engine.NewDDJoinOp(
+		&ast.ColumnRef{Name: "region"},
+		&ast.ColumnRef{Name: "region"},
+		"e", "r", false,
+	)
+	op.RightIsStatic = false
+
+	leftCh := make(chan engine.Record, 10)
+	rightCh := make(chan engine.Record, 10)
+
+	ctx := context.Background()
+
+	// Seed right side first (inner subquery starts before outer)
+	rightCh <- engine.Record{
+		Columns: map[string]engine.Value{
+			"region":  engine.TextValue{V: "us-east"},
+			"revenue": engine.IntValue{V: 500},
+		},
+		Weight: 1,
+	}
+
+	outCh := applyStreamingSubqueryJoin(ctx, op, leftCh, rightCh)
+
+	// Small delay for right delta to be processed
+	// (goroutine scheduling)
+	func() {
+		for i := 0; i < 100; i++ {
+			// Spin briefly to let the right goroutine process
+			if len(rightCh) == 0 {
+				break
+			}
+		}
+	}()
+
+	// Now send a left record
+	leftCh <- engine.Record{
+		Columns: map[string]engine.Value{
+			"region": engine.TextValue{V: "us-east"},
+			"event":  engine.TextValue{V: "click"},
+		},
+		Weight: 1,
+	}
+	close(leftCh)
+	close(rightCh)
+
+	var results []engine.Record
+	for rec := range outCh {
+		results = append(results, rec)
+	}
+
+	if len(results) == 0 {
+		t.Fatal("expected at least one join result from streaming subquery join")
+	}
+
+	// Verify the join produced a record with revenue from the right side
+	found := false
+	for _, rec := range results {
+		if rev, ok := rec.Columns["revenue"].(engine.IntValue); ok && rev.V == 500 {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected join result with revenue=500 from right side")
+	}
+}
+
 func TestE2E_SubqueryAliasMandatory(t *testing.T) {
 	// FROM subquery without alias should fail
 	sql := "SELECT * FROM (SELECT status, COUNT(*) AS cnt GROUP BY status)"
