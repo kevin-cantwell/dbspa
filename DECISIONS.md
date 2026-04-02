@@ -330,6 +330,43 @@ The inner accumulator emits retraction+insertion pairs (Z-set deltas) to a chann
 
 ---
 
+### 14. EXEC() Universal Source Adapter
+
+**Status:** In progress
+
+**Problem:** FoldDB can only read from Kafka, files, and stdin. But data lives everywhere — BigQuery, Postgres, S3, kubectl logs, curl, custom scripts. Users have to pipe through stdin for each, losing the ability to compose multiple sources in one query.
+
+**Design:**
+
+`EXEC('command')` runs a shell command and uses its stdout as a record source. It can appear anywhere a source can: FROM, JOIN, SEED FROM.
+
+```sql
+-- FROM: stream kubectl logs through SQL
+SELECT level, message FROM EXEC('kubectl logs -f my-pod --output=json') WHERE level = 'ERROR'
+
+-- JOIN: enrich stream with Postgres reference data
+SELECT e.*, u.name FROM 'kafka://broker/events' e
+JOIN EXEC('psql -c "COPY users TO STDOUT WITH (FORMAT csv, HEADER)"') u FORMAT CSV
+ON e.user_id = u.id
+
+-- SEED FROM: bootstrap from BigQuery
+SELECT region, SUM(amount) FROM 'kafka://broker/orders.cdc' FORMAT DEBEZIUM
+SEED FROM EXEC('bq query --format=json "SELECT * FROM orders_snapshot"')
+GROUP BY region
+```
+
+**Implementation:**
+- Run via `/bin/sh -c "command"` (supports pipes, redirects, env vars)
+- `exec.CommandContext` for lifecycle management (killed on Ctrl+C)
+- stdout → record source (line-based for JSON/CSV, raw reader for binary)
+- stderr → captured separately, prefixed with `[exec]` on FoldDB's stderr
+- FORMAT clause specifies output format (default NDJSON)
+- **Disabled in `folddb serve`** — HTTP clients must not trigger shell commands
+
+**Security:** EXEC runs with the user's shell permissions. This is acceptable for a CLI tool (the user is already running arbitrary SQL). Blocked in serve mode to prevent remote code execution.
+
+---
+
 ### 11. Confluent Schema Registry Integration
 
 **Status:** In progress
