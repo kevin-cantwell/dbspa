@@ -122,6 +122,7 @@ const (
 	TokenLeft
 	TokenOn
 	TokenSeed
+	TokenExec
 )
 
 var keywords = map[string]TokenType{
@@ -201,6 +202,7 @@ var keywords = map[string]TokenType{
 	"LEFT":                 TokenLeft,
 	"ON":                   TokenOn,
 	"SEED":                 TokenSeed,
+	"EXEC":                 TokenExec,
 }
 
 // Token represents a single lexical token with position information.
@@ -554,5 +556,5 @@ func (l *Lexer) Input() string {
 // IsKeyword returns true if the token type is a keyword that can also be used
 // as an identifier in certain contexts (e.g., column names like "name", "time").
 func IsKeyword(tt TokenType) bool {
-	return tt >= TokenSelect && tt <= TokenSeed
+	return tt >= TokenSelect && tt <= TokenExec
 }

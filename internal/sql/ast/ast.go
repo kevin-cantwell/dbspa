@@ -12,6 +12,13 @@ type Expr interface {
 	exprTag()
 }
 
+// ExecSource represents a shell command whose stdout is used as a record source.
+type ExecSource struct {
+	Command string // the shell command to execute
+}
+
+func (*ExecSource) nodeTag() {}
+
 // SubquerySource represents a subquery used as a source in FROM or JOIN.
 // The inner query is executed to completion (materialized) before the outer
 // query begins processing. Alias is mandatory — parse error if omitted.
@@ -26,8 +33,9 @@ func (*SubquerySource) nodeTag() {}
 type SelectStatement struct {
 	Distinct     bool
 	Columns      []Column
-	From         *TableSource    // nil means stdin (mutually exclusive with FromSubquery)
+	From         *TableSource    // nil means stdin (mutually exclusive with FromSubquery/FromExec)
 	FromSubquery *SubquerySource // non-nil when FROM is a subquery
+	FromExec     *ExecSource     // non-nil when FROM is EXEC(...)
 	FromAlias    string          // optional alias for the FROM source
 	Join         *JoinClause     // nil means no JOIN
 	Seed         *SeedClause     // nil means no SEED FROM
@@ -46,8 +54,9 @@ type SelectStatement struct {
 // JoinClause represents a JOIN clause in a SELECT statement.
 type JoinClause struct {
 	Type      string           // "JOIN" or "LEFT JOIN"
-	Source    *TableSource     // the file/URI to join against (mutually exclusive with Subquery)
+	Source    *TableSource     // the file/URI to join against (mutually exclusive with Subquery/Exec)
 	Subquery  *SubquerySource  // non-nil when JOIN source is a subquery
+	Exec      *ExecSource      // non-nil when JOIN source is EXEC(...)
 	Alias     string           // optional alias
 	Condition Expr             // the ON expression
 	Within    *string          // optional: interval bound duration string for stream-stream joins
@@ -58,6 +67,7 @@ func (*JoinClause) nodeTag() {}
 // SeedClause represents a SEED FROM clause that bootstraps accumulators from a file.
 type SeedClause struct {
 	Source *TableSource // file path + optional format
+	Exec   *ExecSource  // non-nil when SEED FROM is EXEC(...)
 }
 
 func (*SeedClause) nodeTag() {}
