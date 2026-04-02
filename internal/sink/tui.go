@@ -3,6 +3,7 @@ package sink
 import (
 	"fmt"
 	"io"
+	"os"
 	"slices"
 	"strings"
 	"sync"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/kevin-cantwell/folddb/internal/engine"
+	"golang.org/x/term"
 )
 
 // TUISink displays accumulating query results as a table that redraws in place.
@@ -193,8 +195,25 @@ func (s *TUISink) buildFrame() string {
 	buf.WriteByte('\n')
 	lines++
 
-	// Rows
+	// Determine how many rows we can show (terminal height - header - separator - footer)
+	maxRows := len(rowOrder) // default: show all
+	termHeight := getTerminalHeight()
+	if termHeight > 0 {
+		available := termHeight - 3 // header + separator + footer
+		if available < 1 {
+			available = 1
+		}
+		if len(rowOrder) > available {
+			maxRows = available
+		}
+	}
+
+	// Rows (paginated to fit terminal)
+	displayed := 0
 	for _, key := range rowOrder {
+		if displayed >= maxRows {
+			break
+		}
 		row, ok := rows[key]
 		if !ok {
 			continue
@@ -211,13 +230,23 @@ func (s *TUISink) buildFrame() string {
 		}
 		buf.WriteByte('\n')
 		lines++
+		displayed++
 	}
 
 	// Footer
+	truncated := len(rowOrder) - displayed
 	if inputCount > 0 {
-		fmt.Fprintf(&buf, "(%d groups | %d matched | %d input)\n", nGroups, recCount, inputCount)
+		if truncated > 0 {
+			fmt.Fprintf(&buf, "(%d of %d groups | %d matched | %d input)\n", displayed, nGroups, recCount, inputCount)
+		} else {
+			fmt.Fprintf(&buf, "(%d groups | %d matched | %d input)\n", nGroups, recCount, inputCount)
+		}
 	} else {
-		fmt.Fprintf(&buf, "(%d groups | %d accumulated)\n", nGroups, recCount)
+		if truncated > 0 {
+			fmt.Fprintf(&buf, "(%d of %d groups | %d accumulated)\n", displayed, nGroups, recCount)
+		} else {
+			fmt.Fprintf(&buf, "(%d groups | %d accumulated)\n", nGroups, recCount)
+		}
 	}
 	lines++
 
@@ -282,6 +311,16 @@ func (s *TUISink) rowKey(rec engine.Record) string {
 		}
 	}
 	return strings.Join(parts, "\x00")
+}
+
+// getTerminalHeight returns the terminal height in rows, or 0 if unknown.
+func getTerminalHeight() int {
+	fd := int(os.Stdout.Fd())
+	_, height, err := term.GetSize(fd)
+	if err != nil {
+		return 0
+	}
+	return height
 }
 
 func padRight(s string, width int) string {

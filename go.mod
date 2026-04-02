@@ -10,6 +10,7 @@ require (
 	github.com/parquet-go/parquet-go v0.29.0
 	github.com/twmb/franz-go v1.20.7
 	github.com/twmb/franz-go/pkg/kadm v1.17.2
+	golang.org/x/term v0.41.0
 	google.golang.org/protobuf v1.36.11
 	modernc.org/sqlite v1.48.0
 )
