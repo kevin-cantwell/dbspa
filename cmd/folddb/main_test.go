@@ -2608,6 +2608,60 @@ func TestApplyStreamingSubqueryJoin(t *testing.T) {
 	}
 }
 
+func TestExecuteStreamingSubquery_RequiresGroupBy(t *testing.T) {
+	// A streaming subquery without GROUP BY (and no aggregates) should return an error.
+	// This mirrors the validation in executeStreamingSubquery.
+	stmt := &ast.SelectStatement{
+		Columns: []ast.Column{{Expr: &ast.ColumnRef{Name: "order_id"}, Alias: ""}},
+		From:    &ast.TableSource{URI: "kafka://broker/orders.cdc", Format: "DEBEZIUM"},
+		// No GroupBy, no aggregates
+	}
+
+	_, err := executeStreamingSubquery(context.Background(), stmt)
+	if err == nil {
+		t.Fatal("expected error for streaming subquery without GROUP BY")
+	}
+	if !strings.Contains(err.Error(), "must have GROUP BY") {
+		t.Errorf("expected 'must have GROUP BY' in error, got: %v", err)
+	}
+}
+
+func TestIsStreamingSubquery_KafkaVariants(t *testing.T) {
+	// Verify detection for various kafka:// URI forms and non-kafka sources.
+	tests := []struct {
+		name     string
+		uri      string
+		expected bool
+	}{
+		{"kafka with port", "kafka://broker:9092/topic", true},
+		{"kafka with params", "kafka://broker/topic?offset=earliest&group=g1", true},
+		{"kafka registry", "kafka://broker/topic?registry=http://reg:8081", true},
+		{"file parquet", "/data/users.parquet", false},
+		{"file ndjson", "/data/orders.ndjson", false},
+		{"stdin", "stdin://", false},
+		{"empty uri", "", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sq := &ast.SubquerySource{
+				Query: &ast.SelectStatement{
+					From: &ast.TableSource{URI: tt.uri},
+				},
+				Alias: "r",
+			}
+			// Special case: empty URI means no FROM
+			if tt.uri == "" {
+				sq.Query.From = nil
+			}
+			got := isStreamingSubquery(sq)
+			if got != tt.expected {
+				t.Errorf("isStreamingSubquery(%q) = %v, want %v", tt.uri, got, tt.expected)
+			}
+		})
+	}
+}
+
 func TestE2E_SubqueryAliasMandatory(t *testing.T) {
 	// FROM subquery without alias should fail
 	sql := "SELECT * FROM (SELECT status, COUNT(*) AS cnt GROUP BY status)"
