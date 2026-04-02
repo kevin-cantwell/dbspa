@@ -42,8 +42,9 @@ nav:
     - Quickstart: getting-started/quickstart.md
     - Examples: getting-started/examples.md
   - Concepts:
+    - When to Use FoldDB: concepts/when-to-use.md
     - Streams vs Tables: concepts/streams-vs-tables.md
-    - The Diff Model: concepts/diff-model.md
+    - The Z-Set Model: concepts/diff-model.md
     - Changelog Output: concepts/changelog-output.md
     - Windowing: concepts/windowing.md
     - Joins: concepts/joins.md
