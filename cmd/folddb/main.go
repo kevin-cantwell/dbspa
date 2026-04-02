@@ -774,7 +774,20 @@ func runAccumulatingFromBatches(ctx context.Context, stmt *ast.SelectStatement, 
 	orderBy := resolveOrderBy(stmt.OrderBy)
 
 	var snk sink.Sink
-	if isTTY() {
+	if flags.stateDB != "" {
+		// SQLite state output
+		var pkCols []string
+		for _, col := range aggCols {
+			if !col.IsAggregate {
+				pkCols = append(pkCols, col.Alias)
+			}
+		}
+		sqliteSink, err := sink.NewSQLiteSink(flags.stateDB, columnOrder, pkCols, true)
+		if err != nil {
+			return fmt.Errorf("SQLite state output error: %w", err)
+		}
+		snk = sqliteSink
+	} else if isTTY() {
 		tui := &sink.TUISink{
 			Writer:      os.Stdout,
 			ColumnOrder: columnOrder,

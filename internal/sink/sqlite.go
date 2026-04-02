@@ -11,6 +11,8 @@ import (
 )
 
 // SQLiteSink writes records to a SQLite database table.
+// Writes are batched into transactions for performance (~100x faster than
+// individual autocommit statements).
 type SQLiteSink struct {
 	db          *sql.DB
 	tableName   string
@@ -18,6 +20,11 @@ type SQLiteSink struct {
 	primaryKeys []string // GROUP BY column names (for UPSERT)
 	isAccum     bool     // true for accumulating queries (UPSERT), false for append
 	initialized bool
+
+	// Batch transaction state
+	tx        *sql.Tx
+	batchSize int // flush after this many writes (default 1000)
+	pending   int // writes since last flush
 }
 
 // NewSQLiteSink creates a new SQLite sink.
@@ -39,10 +46,13 @@ func NewSQLiteSink(dbPath string, columnOrder []string, primaryKeys []string, is
 		columnOrder: columnOrder,
 		primaryKeys: primaryKeys,
 		isAccum:     isAccum,
+		batchSize:   1000,
 	}, nil
 }
 
-// Write writes a record to the SQLite table.
+// Write writes a record to the SQLite table. Writes are batched into
+// transactions — the transaction is committed every batchSize writes
+// or when Close() is called.
 func (s *SQLiteSink) Write(rec engine.Record) error {
 	if !s.initialized {
 		if err := s.createTable(rec); err != nil {
@@ -52,16 +62,45 @@ func (s *SQLiteSink) Write(rec engine.Record) error {
 	}
 
 	// For accumulating queries with retractions, only process insertions (op=+)
-	// The UPSERT handles updates; we don't need to explicitly delete on retraction
-	// because the next insertion for that key will overwrite.
 	if s.isAccum && rec.Weight < 0 {
-		return nil // Skip retractions for UPSERT mode
+		return nil
 	}
 
-	if s.isAccum {
-		return s.upsert(rec)
+	// Begin transaction if needed
+	if s.tx == nil {
+		tx, err := s.db.Begin()
+		if err != nil {
+			return fmt.Errorf("begin transaction: %w", err)
+		}
+		s.tx = tx
 	}
-	return s.insert(rec)
+
+	var err error
+	if s.isAccum {
+		err = s.upsertTx(rec)
+	} else {
+		err = s.insertTx(rec)
+	}
+	if err != nil {
+		return err
+	}
+
+	s.pending++
+	if s.pending >= s.batchSize {
+		return s.flushTx()
+	}
+	return nil
+}
+
+// flushTx commits the current transaction and resets state.
+func (s *SQLiteSink) flushTx() error {
+	if s.tx == nil {
+		return nil
+	}
+	err := s.tx.Commit()
+	s.tx = nil
+	s.pending = 0
+	return err
 }
 
 func (s *SQLiteSink) createTable(rec engine.Record) error {
@@ -106,7 +145,7 @@ func (s *SQLiteSink) createTable(rec engine.Record) error {
 	return err
 }
 
-func (s *SQLiteSink) upsert(rec engine.Record) error {
+func (s *SQLiteSink) upsertTx(rec engine.Record) error {
 	columns := s.columnOrder
 	if len(columns) == 0 {
 		return fmt.Errorf("column order required for upsert")
@@ -143,11 +182,11 @@ func (s *SQLiteSink) upsert(rec engine.Record) error {
 		strings.Join(updateParts, ", "),
 	)
 
-	_, err := s.db.Exec(query, values...)
+	_, err := s.tx.Exec(query, values...)
 	return err
 }
 
-func (s *SQLiteSink) insert(rec engine.Record) error {
+func (s *SQLiteSink) insertTx(rec engine.Record) error {
 	columns := s.columnOrder
 	if len(columns) == 0 {
 		for k := range rec.Columns {
@@ -176,12 +215,18 @@ func (s *SQLiteSink) insert(rec engine.Record) error {
 		strings.Join(placeholders, ", "),
 	)
 
-	_, err := s.db.Exec(query, values...)
+	_, err := s.tx.Exec(query, values...)
 	return err
 }
 
-// Close closes the database connection.
+// Close flushes the pending transaction and closes the database connection.
 func (s *SQLiteSink) Close() error {
+	if err := s.flushTx(); err != nil {
+		if s.db != nil {
+			s.db.Close()
+		}
+		return err
+	}
 	if s.db != nil {
 		return s.db.Close()
 	}
