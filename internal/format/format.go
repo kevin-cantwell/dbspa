@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/kevin-cantwell/folddb/internal/engine"
+	"github.com/kevin-cantwell/folddb/internal/registry"
 )
 
 // Decoder converts raw bytes into an engine Record.
@@ -91,6 +92,29 @@ func newCSVDecoder(opts map[string]string) *CSVDecoder {
 		d.Quote = rune(v[0])
 	}
 	return d
+}
+
+// NewDecoderForKafka returns the appropriate decoder for Kafka consumption,
+// taking the Schema Registry URL into account. When a registry URL is present
+// and the format is AVRO or DEBEZIUM_AVRO, it returns a Confluent wire format
+// decoder backed by the registry. Otherwise it falls back to NewDecoderWithOptions.
+func NewDecoderForKafka(formatStr string, opts map[string]string, registryURL string) (Decoder, error) {
+	if registryURL == "" {
+		return NewDecoderWithOptions(formatStr, opts)
+	}
+
+	reg := registry.NewClient(registryURL)
+	upper := strings.ToUpper(strings.TrimSpace(formatStr))
+
+	switch upper {
+	case "AVRO":
+		return NewConfluentAvroDecoder(reg), nil
+	case "DEBEZIUM_AVRO":
+		return NewConfluentDebeziumAvroDecoder(reg), nil
+	default:
+		// For non-Avro formats, the registry URL is ignored
+		return NewDecoderWithOptions(formatStr, opts)
+	}
 }
 
 // DecodeAll decodes data using the given decoder. If the decoder is a
