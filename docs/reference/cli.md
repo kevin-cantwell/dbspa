@@ -36,7 +36,7 @@ cat data.json | folddb "SELECT * WHERE status = 'active'"
 | `--stateful` | | false | Enable persistent checkpoints for fast restart |
 | `--state-dir <path>` | | `~/.folddb/state` | Directory for checkpoint files |
 | `--checkpoint-interval <dur>` | | `5s` | How often to flush checkpoints |
-| `--dead-letter <file>` | | | Route deserialization errors to NDJSON file |
+| `--dead-letter <file>` | | | Route error records to NDJSON file. See [Error Handling](../concepts/error-handling.md). |
 | `--arrangement-mem-limit <n>` | | 0 (unlimited) | Max in-memory records per arrangement before spilling to disk |
 | `--cpuprofile <file>` | | | Write CPU profile to file (for `go tool pprof`) |
 | `--dry-run` | | false | Parse and print query plan without executing |

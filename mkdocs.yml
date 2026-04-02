@@ -48,6 +48,7 @@ nav:
     - Changelog Output: concepts/changelog-output.md
     - Windowing: concepts/windowing.md
     - Joins: concepts/joins.md
+    - Error Handling: concepts/error-handling.md
   - Architecture:
     - Overview: architecture/overview.md
     - SQL Parser: architecture/parser.md
