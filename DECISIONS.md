@@ -298,7 +298,35 @@ type SubquerySource struct {
 
 **Execution:** The inner query runs first (blocking), materializes all results into `[]Record`. For FROM subquery, these records feed the outer pipeline. For JOIN subquery, they load into a DD join arrangement.
 
-**Limitation (v1):** Subqueries are materialized — the inner query runs to completion before the outer query starts. For streaming subqueries (Kafka in the inner query), this means the outer query doesn't start until the inner stream ends (or times out). True streaming subqueries (concurrent inner+outer) are a future feature.
+**Limitation (v1):** Subqueries are materialized — the inner query runs to completion before the outer query starts. ~~For streaming subqueries (Kafka in the inner query), this means the outer query doesn't start until the inner stream ends (or times out). True streaming subqueries (concurrent inner+outer) are a future feature.~~ See Decision 13.
+
+---
+
+### 13. Streaming Subqueries
+
+**Status:** In progress
+
+**Problem:** Materialized subqueries block — the inner query runs to completion before the outer starts. For streaming inner queries (Kafka/CDC), this means the outer query never starts (Kafka never reaches EOF). We need concurrent execution where the inner query's Z-set deltas flow into the outer query's DD join in real time.
+
+**Design:**
+
+When a JOIN subquery's source is a stream (Kafka), run it concurrently:
+
+```
+Inner query goroutine:
+  Kafka CDC → Debezium decode → Accumulate → Z-set deltas → channel
+
+Outer query goroutine:                                        ↓
+  Kafka events → Decode → ProcessLeftDelta ←→ DD Join ← ProcessRightDelta (from channel)
+                                                ↓
+                                            Output
+```
+
+The inner accumulator emits retraction+insertion pairs (Z-set deltas) to a channel. The outer query reads from that channel via `ProcessRightDelta`. When the inner aggregation changes (revenue for us-east goes from 100 to 105), the DD join retracts old join results and emits corrected ones.
+
+**Detection:** If the subquery's FROM source starts with `kafka://`, it's a streaming subquery. Route to concurrent execution instead of materialization.
+
+**Implementation:** The inner query runs in a goroutine using the same pipeline as a normal accumulating query, but instead of sending output to a sink, it sends to a `chan engine.Record` that feeds `ProcessRightDelta`.
 
 ---
 
