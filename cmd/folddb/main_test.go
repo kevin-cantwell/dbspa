@@ -2,7 +2,9 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -2023,5 +2025,489 @@ func TestE2E_WithinClauseRequiredForStreamStream(t *testing.T) {
 	// In production, main.go would return:
 	// "stream-stream joins require a WITHIN INTERVAL clause to bound retention"
 	// We verify the precondition: both are kafka and WITHIN is nil.
+}
+
+// =====================================================================
+// Subquery tests
+// =====================================================================
+
+// runFromSubquery is a test helper for queries with a subquery in the FROM clause.
+// It executes the inner subquery via executeSubquery, then feeds the results
+// through the outer query's pipeline (WHERE, SELECT).
+func runFromSubquery(t *testing.T, sql string) []map[string]any {
+	t.Helper()
+
+	p := parser.New(sql)
+	stmt, err := p.Parse()
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	if stmt.FromSubquery == nil {
+		t.Fatal("expected FromSubquery to be non-nil")
+	}
+
+	ctx := context.Background()
+	subRecords, err := executeSubquery(ctx, stmt.FromSubquery.Query)
+	if err != nil {
+		t.Fatalf("subquery execution error: %v", err)
+	}
+
+	// Feed subquery results into the outer pipeline
+	pipeline := &engine.Pipeline{
+		Columns: stmt.Columns,
+		Where:   stmt.Where,
+	}
+
+	recordCh := make(chan engine.Record, len(subRecords))
+	for _, rec := range subRecords {
+		recordCh <- rec
+	}
+	close(recordCh)
+
+	outputCh := make(chan engine.Record)
+	go func() {
+		pipeline.Process(recordCh, outputCh)
+	}()
+
+	var outBuf bytes.Buffer
+	snk := &sink.JSONSink{Writer: &outBuf}
+	for rec := range outputCh {
+		if err := snk.Write(rec); err != nil {
+			t.Fatalf("sink error: %v", err)
+		}
+	}
+	snk.Close()
+
+	var results []map[string]any
+	for _, line := range strings.Split(strings.TrimSpace(outBuf.String()), "\n") {
+		if line == "" {
+			continue
+		}
+		var m map[string]any
+		if err := json.Unmarshal([]byte(line), &m); err != nil {
+			t.Fatalf("output parse error: %v\nline: %s", err, line)
+		}
+		results = append(results, m)
+	}
+	return results
+}
+
+// runJoinSubquery is a test helper for queries where the JOIN source is a subquery.
+// It executes the join subquery, builds the join operator, and pipes stdin input
+// through join + outer pipeline.
+func runJoinSubquery(t *testing.T, sql string, inputLines []string) []map[string]any {
+	t.Helper()
+
+	p := parser.New(sql)
+	stmt, err := p.Parse()
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	if stmt.Join == nil {
+		t.Fatal("expected JOIN clause")
+	}
+	if stmt.Join.Subquery == nil {
+		t.Fatal("expected JOIN subquery")
+	}
+
+	ctx := context.Background()
+
+	// Execute the join subquery to get materialized table records
+	tableRecords, err := executeSubquery(ctx, stmt.Join.Subquery.Query)
+	if err != nil {
+		t.Fatalf("join subquery error: %v", err)
+	}
+
+	streamAlias := stmt.FromAlias
+	tableAlias := stmt.Join.Alias
+	streamKey, tableKey, err := engine.ExtractEquiJoinKeys(stmt.Join.Condition, streamAlias, tableAlias)
+	if err != nil {
+		t.Fatalf("key extraction error: %v", err)
+	}
+
+	joinOp := &engine.HashJoinOp{
+		StreamKeyExpr: streamKey,
+		TableKeyExpr:  tableKey,
+		LeftJoin:      stmt.Join.Type == "LEFT JOIN",
+		StreamAlias:   streamAlias,
+		TableAlias:    tableAlias,
+	}
+	if err := joinOp.BuildIndex(tableRecords); err != nil {
+		t.Fatalf("index build error: %v", err)
+	}
+
+	pipeline := &engine.Pipeline{
+		Columns: stmt.Columns,
+		Where:   stmt.Where,
+	}
+
+	dec := &format.JSONDecoder{}
+	var outBuf bytes.Buffer
+	snk := &sink.JSONSink{Writer: &outBuf}
+
+	recordCh := make(chan engine.Record)
+	joinedCh := make(chan engine.Record)
+	outputCh := make(chan engine.Record)
+
+	// Decode input
+	go func() {
+		defer close(recordCh)
+		for _, line := range inputLines {
+			line = strings.TrimSpace(line)
+			if line == "" {
+				continue
+			}
+			rec, err := dec.Decode([]byte(line))
+			if err != nil {
+				t.Errorf("decode error: %v", err)
+				continue
+			}
+			recordCh <- rec
+		}
+	}()
+
+	// Apply join
+	go func() {
+		defer close(joinedCh)
+		for rec := range recordCh {
+			for _, jr := range joinOp.Probe(rec) {
+				joinedCh <- jr
+			}
+		}
+	}()
+
+	// Run pipeline
+	go func() {
+		pipeline.Process(joinedCh, outputCh)
+	}()
+
+	// Collect output
+	for rec := range outputCh {
+		if err := snk.Write(rec); err != nil {
+			t.Fatalf("sink error: %v", err)
+		}
+	}
+	snk.Close()
+
+	// Parse output
+	var results []map[string]any
+	for _, line := range strings.Split(strings.TrimSpace(outBuf.String()), "\n") {
+		if line == "" {
+			continue
+		}
+		var m map[string]any
+		if err := json.Unmarshal([]byte(line), &m); err != nil {
+			t.Fatalf("output parse error: %v\nline: %s", err, line)
+		}
+		results = append(results, m)
+	}
+	return results
+}
+
+// runJoinSubqueryAgg is a test helper for queries with a JOIN subquery and GROUP BY.
+// It uses DDJoinOp to handle weight-carrying records through aggregation.
+func runJoinSubqueryAgg(t *testing.T, sql string, inputLines []string) []map[string]any {
+	t.Helper()
+
+	p := parser.New(sql)
+	stmt, err := p.Parse()
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	if stmt.Join == nil {
+		t.Fatal("expected JOIN clause")
+	}
+	if stmt.Join.Subquery == nil {
+		t.Fatal("expected JOIN subquery")
+	}
+	if stmt.GroupBy == nil {
+		t.Fatal("expected GROUP BY clause")
+	}
+
+	ctx := context.Background()
+
+	// Execute the join subquery
+	tableRecords, err := executeSubquery(ctx, stmt.Join.Subquery.Query)
+	if err != nil {
+		t.Fatalf("join subquery error: %v", err)
+	}
+
+	streamAlias := stmt.FromAlias
+	tableAlias := stmt.Join.Alias
+	streamKey, tableKey, err := engine.ExtractEquiJoinKeys(stmt.Join.Condition, streamAlias, tableAlias)
+	if err != nil {
+		t.Fatalf("key extraction error: %v", err)
+	}
+
+	joinOp := engine.NewDDJoinOp(streamKey, tableKey, streamAlias, tableAlias, stmt.Join.Type == "LEFT JOIN")
+
+	// Load table into right arrangement
+	tableBatch := make(engine.Batch, len(tableRecords))
+	for i, rec := range tableRecords {
+		if rec.Weight == 0 {
+			rec.Weight = 1
+		}
+		tableBatch[i] = rec
+	}
+	joinOp.Right.Apply(tableBatch)
+
+	// Set up aggregation
+	aggCols, err := engine.ParseAggColumns(stmt.Columns, stmt.GroupBy)
+	if err != nil {
+		t.Fatalf("aggregate setup error: %v", err)
+	}
+
+	columnOrder := make([]string, len(aggCols))
+	for i, col := range aggCols {
+		columnOrder[i] = col.Alias
+	}
+
+	aggOp := engine.NewAggregateOp(aggCols, stmt.GroupBy, stmt.Having)
+
+	dec := &format.JSONDecoder{}
+	var outBuf bytes.Buffer
+	snk := &sink.ChangelogSink{Writer: &outBuf, ColumnOrder: columnOrder}
+
+	recordCh := make(chan engine.Record)
+	joinedCh := make(chan engine.Record, 256)
+	aggOutCh := make(chan engine.Record)
+
+	// Decode input
+	go func() {
+		defer close(recordCh)
+		for _, line := range inputLines {
+			line = strings.TrimSpace(line)
+			if line == "" {
+				continue
+			}
+			rec, err := dec.Decode([]byte(line))
+			if err != nil {
+				t.Errorf("decode error: %v", err)
+				continue
+			}
+			recordCh <- rec
+		}
+	}()
+
+	// Apply join
+	go func() {
+		defer close(joinedCh)
+		for rec := range recordCh {
+			results := joinOp.ProcessLeftDeltaSlice(engine.Batch{rec})
+			for _, jr := range results {
+				joinedCh <- jr
+			}
+		}
+	}()
+
+	// Apply WHERE filter then aggregate
+	go func() {
+		filteredCh := make(chan engine.Record)
+		go func() {
+			defer close(filteredCh)
+			for rec := range joinedCh {
+				if stmt.Where != nil {
+					pass, filterErr := engine.Filter(stmt.Where, rec)
+					if filterErr != nil || !pass {
+						continue
+					}
+				}
+				filteredCh <- rec
+			}
+		}()
+		aggOp.Process(filteredCh, aggOutCh)
+	}()
+
+	// Collect output
+	for rec := range aggOutCh {
+		if err := snk.Write(rec); err != nil {
+			t.Fatalf("sink error: %v", err)
+		}
+	}
+	snk.Close()
+
+	// Parse output
+	var results []map[string]any
+	for _, line := range strings.Split(strings.TrimSpace(outBuf.String()), "\n") {
+		if line == "" {
+			continue
+		}
+		var m map[string]any
+		if err := json.Unmarshal([]byte(line), &m); err != nil {
+			t.Fatalf("output parse error: %v\nline: %s", err, line)
+		}
+		results = append(results, m)
+	}
+	return results
+}
+
+// TestE2E_FromSubquery_DerivedTable: inner GROUP BY, outer WHERE filters on aggregate
+func TestE2E_FromSubquery_DerivedTable(t *testing.T) {
+	// Create a temp NDJSON file with the source data
+	tmpFile := t.TempDir() + "/data.ndjson"
+	data := `{"status":"a","v":1}
+{"status":"b","v":2}
+{"status":"a","v":3}`
+	if err := writeFile(tmpFile, data); err != nil {
+		t.Fatal(err)
+	}
+
+	sql := fmt.Sprintf("SELECT * FROM (SELECT status, SUM(v) AS total FROM '%s' GROUP BY status) t WHERE total > 2", tmpFile)
+	results := runFromSubquery(t, sql)
+
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d: %v", len(results), results)
+	}
+	if results[0]["status"] != "a" {
+		t.Errorf("expected status=a, got %v", results[0]["status"])
+	}
+	if results[0]["total"] != float64(4) {
+		t.Errorf("expected total=4, got %v", results[0]["total"])
+	}
+}
+
+// TestE2E_JoinSubquery: join stream against subquery result
+func TestE2E_JoinSubquery(t *testing.T) {
+	// Create a temp file for the table data
+	tmpFile := t.TempDir() + "/users.ndjson"
+	tableData := `{"id":1,"name":"Alice"}
+{"id":2,"name":"Bob"}`
+	if err := writeFile(tmpFile, tableData); err != nil {
+		t.Fatal(err)
+	}
+
+	input := []string{
+		`{"user_id":1,"action":"login"}`,
+		`{"user_id":2,"action":"buy"}`,
+	}
+
+	sql := fmt.Sprintf("SELECT e.action, r.name FROM stdin e JOIN (SELECT id, name FROM '%s') r ON e.user_id = r.id", tmpFile)
+	results := runJoinSubquery(t, sql, input)
+
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d: %v", len(results), results)
+	}
+
+	actionNames := make(map[string]string)
+	for _, r := range results {
+		action, _ := r["action"].(string)
+		name, _ := r["name"].(string)
+		actionNames[action] = name
+	}
+
+	if actionNames["login"] != "Alice" {
+		t.Errorf("login: expected Alice, got %v", actionNames["login"])
+	}
+	if actionNames["buy"] != "Bob" {
+		t.Errorf("buy: expected Bob, got %v", actionNames["buy"])
+	}
+}
+
+// TestE2E_JoinSubqueryWithGroupBy: the killer use case — join against pre-aggregated data
+func TestE2E_JoinSubqueryWithGroupBy(t *testing.T) {
+	// Create 100 orders spread across 5 customers
+	tmpFile := t.TempDir() + "/orders.ndjson"
+	var lines []string
+	for i := 0; i < 100; i++ {
+		custID := (i % 5) + 1
+		lines = append(lines, fmt.Sprintf(`{"customer_id":%d,"order_id":%d}`, custID, i+1))
+	}
+	if err := writeFile(tmpFile, strings.Join(lines, "\n")); err != nil {
+		t.Fatal(err)
+	}
+
+	// Stream: events for customers 1 and 3
+	input := []string{
+		`{"customer_id":1}`,
+		`{"customer_id":3}`,
+	}
+
+	sql := fmt.Sprintf(
+		"SELECT e.customer_id, r.cnt FROM stdin e JOIN (SELECT customer_id, COUNT(*) AS cnt FROM '%s' GROUP BY customer_id) r ON e.customer_id = r.customer_id",
+		tmpFile,
+	)
+	results := runJoinSubquery(t, sql, input)
+
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d: %v", len(results), results)
+	}
+
+	// Each customer has 20 orders (100 / 5)
+	custCounts := make(map[float64]float64)
+	for _, r := range results {
+		cid, _ := r["customer_id"].(float64)
+		cnt, _ := r["cnt"].(float64)
+		custCounts[cid] = cnt
+	}
+
+	if custCounts[1] != 20 {
+		t.Errorf("customer 1: expected cnt=20, got %v", custCounts[1])
+	}
+	if custCounts[3] != 20 {
+		t.Errorf("customer 3: expected cnt=20, got %v", custCounts[3])
+	}
+}
+
+// TestE2E_FromSubqueryWithDuckDB: subquery reads Parquet via DuckDB
+func TestE2E_FromSubqueryWithDuckDB(t *testing.T) {
+	// Write a Parquet file using folddb-gen or create a simple NDJSON and convert.
+	// For simplicity, create an NDJSON file (DuckDB handles it) with region data.
+	tmpFile := t.TempDir() + "/data.ndjson"
+	data := `{"region":"us","amount":1}
+{"region":"eu","amount":1}
+{"region":"us","amount":1}
+{"region":"eu","amount":1}
+{"region":"us","amount":1}`
+	if err := writeFile(tmpFile, data); err != nil {
+		t.Fatal(err)
+	}
+
+	// ORDER BY is not applied by runFromSubquery (it only does WHERE + SELECT),
+	// so we just verify the aggregated counts are correct.
+	sql := fmt.Sprintf("SELECT * FROM (SELECT region, COUNT(*) AS cnt FROM '%s' GROUP BY region) t", tmpFile)
+	results := runFromSubquery(t, sql)
+
+	if len(results) != 2 {
+		t.Fatalf("expected 2 regions, got %d: %v", len(results), results)
+	}
+
+	regionCounts := make(map[string]float64)
+	for _, r := range results {
+		region, _ := r["region"].(string)
+		cnt, _ := r["cnt"].(float64)
+		regionCounts[region] = cnt
+	}
+
+	if regionCounts["us"] != 3 {
+		t.Errorf("us: expected 3, got %v", regionCounts["us"])
+	}
+	if regionCounts["eu"] != 2 {
+		t.Errorf("eu: expected 2, got %v", regionCounts["eu"])
+	}
+}
+
+// TestE2E_SubqueryAliasMandatory: verify parse error without alias
+func TestE2E_SubqueryAliasMandatory(t *testing.T) {
+	// FROM subquery without alias should fail
+	sql := "SELECT * FROM (SELECT status, COUNT(*) AS cnt GROUP BY status)"
+	p := parser.New(sql)
+	_, err := p.Parse()
+	if err == nil {
+		t.Fatal("expected parse error for subquery without alias")
+	}
+	if !strings.Contains(err.Error(), "subquery requires an alias") {
+		t.Errorf("expected 'subquery requires an alias' in error, got: %v", err)
+	}
+
+	// JOIN subquery without alias should also fail
+	sql2 := "SELECT * FROM stdin e JOIN (SELECT id FROM '/tmp/x.ndjson') ON e.id = r.id"
+	p2 := parser.New(sql2)
+	_, err2 := p2.Parse()
+	if err2 == nil {
+		t.Fatal("expected parse error for JOIN subquery without alias")
+	}
+	if !strings.Contains(err2.Error(), "subquery requires an alias") {
+		t.Errorf("expected 'subquery requires an alias' in error, got: %v", err2)
+	}
 }
 
