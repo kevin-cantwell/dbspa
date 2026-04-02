@@ -272,6 +272,32 @@ Both goroutines call ProcessLeftDelta/ProcessRightDelta respectively. DDJoinOp h
 
 ---
 
+### 11. Confluent Schema Registry Integration
+
+**Status:** In progress
+
+**Problem:** Production Kafka deployments use the Confluent Schema Registry for Avro and Protobuf schemas. Messages have a 5-byte header (magic byte `0x00` + 4-byte schema ID). FoldDB's current Avro support only handles OCF files (schema embedded in file header) — it can't decode registry-encoded Kafka messages.
+
+**Design:**
+
+When consuming from Kafka with `FORMAT AVRO` or `FORMAT PROTOBUF`:
+1. Detect the Confluent wire format (first byte = `0x00`)
+2. Extract the 4-byte schema ID
+3. Fetch the schema from the registry (HTTP GET `/schemas/ids/{id}`)
+4. Cache the schema locally (schema IDs are immutable)
+5. Decode the payload using the fetched schema
+
+**Registry URL configuration:**
+- URI param: `kafka://broker/topic?registry=http://schema-registry:8081`
+- Credentials file: `registry = "http://schema-registry:8081"` under `[kafka.cluster-name]`
+
+**Implementation:**
+- `internal/registry/confluent.go` — HTTP client for Confluent Schema Registry
+- `internal/format/avro_registry.go` — Avro decoder that uses registry for schema resolution
+- Wire into Kafka source path when FORMAT AVRO + registry URL is present
+
+---
+
 ### 10. DuckDB Integration
 
 **Status:** In progress
