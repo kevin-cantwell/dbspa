@@ -419,9 +419,17 @@ func buildStreamingSubqueryJoinOp(ctx context.Context, stmt *ast.SelectStatement
 // applyStreamingSubqueryJoin wraps a left record channel with a DD join that also
 // receives right-side deltas from a streaming subquery. Returns the joined output channel.
 // The right delta goroutine runs concurrently with the left delta processing.
+//
+// When the left side (bounded source like a file) finishes, the right side's context
+// is cancelled so that the streaming subquery goroutine terminates cleanly.
 // The output channel is closed only when both goroutines have finished.
 func applyStreamingSubqueryJoin(ctx context.Context, joinOp *engine.DDJoinOp, leftIn <-chan engine.Record, rightIn <-chan engine.Record) <-chan engine.Record {
 	out := make(chan engine.Record, 256)
+
+	// Derive a child context that we cancel when the left side finishes.
+	// This ensures the right-side streaming subquery (Kafka) terminates
+	// instead of blocking forever when the left source is bounded (e.g., file).
+	innerCtx, innerCancel := context.WithCancel(ctx)
 
 	var wg sync.WaitGroup
 	wg.Add(2)
@@ -429,20 +437,31 @@ func applyStreamingSubqueryJoin(ctx context.Context, joinOp *engine.DDJoinOp, le
 	// Feed right-side deltas from the streaming subquery
 	go func() {
 		defer wg.Done()
-		for rec := range rightIn {
-			joinOp.ProcessRightDelta(engine.Batch{rec}, out)
+		for {
+			select {
+			case rec, ok := <-rightIn:
+				if !ok {
+					return
+				}
+				joinOp.ProcessRightDelta(engine.Batch{rec}, out)
+			case <-innerCtx.Done():
+				return
+			}
 		}
 	}()
 
-	// Feed left-side deltas from the outer query's source
+	// Feed left-side deltas from the outer query's source.
+	// When the left side is exhausted, cancel the inner context to stop the right side.
 	go func() {
 		defer wg.Done()
+		defer innerCancel()
 		joinOp.ProcessLeftDeltaStream(ctx, leftIn, out)
 	}()
 
 	// Close output when both sides are done
 	go func() {
 		wg.Wait()
+		innerCancel() // ensure cleanup even if right finishes first
 		close(out)
 	}()
 

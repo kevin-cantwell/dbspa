@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kevin-cantwell/folddb/internal/engine"
 	"github.com/kevin-cantwell/folddb/internal/format"
@@ -2659,6 +2660,74 @@ func TestIsStreamingSubquery_KafkaVariants(t *testing.T) {
 				t.Errorf("isStreamingSubquery(%q) = %v, want %v", tt.uri, got, tt.expected)
 			}
 		})
+	}
+}
+
+func TestApplyStreamingSubqueryJoin_BoundedLeftTerminates(t *testing.T) {
+	// When the left side (bounded source like a file) finishes, the streaming
+	// subquery join should terminate cleanly — the right-side goroutine should
+	// be cancelled via context, and the output channel should close.
+	op := engine.NewDDJoinOp(
+		&ast.ColumnRef{Name: "id"},
+		&ast.ColumnRef{Name: "id"},
+		"e", "r", false,
+	)
+	op.RightIsStatic = false
+
+	leftCh := make(chan engine.Record, 10)
+	rightCh := make(chan engine.Record, 10)
+
+	ctx := context.Background()
+
+	// Seed right side with a record
+	rightCh <- engine.Record{
+		Columns: map[string]engine.Value{
+			"id":    engine.IntValue{V: 1},
+			"total": engine.IntValue{V: 100},
+		},
+		Weight: 1,
+	}
+
+	outCh := applyStreamingSubqueryJoin(ctx, op, leftCh, rightCh)
+
+	// Let right delta process
+	for i := 0; i < 1000; i++ {
+		if len(rightCh) == 0 {
+			break
+		}
+	}
+
+	// Send a matching left record, then close left (simulates bounded file EOF)
+	leftCh <- engine.Record{
+		Columns: map[string]engine.Value{
+			"id":   engine.IntValue{V: 1},
+			"name": engine.TextValue{V: "alice"},
+		},
+		Weight: 1,
+	}
+	close(leftCh)
+	// NOTE: rightCh is NOT closed — simulates an unbounded Kafka stream
+
+	// The output channel should close within a reasonable time
+	// because the left side finishing cancels the right-side context.
+	done := make(chan struct{})
+	var results []engine.Record
+	go func() {
+		for rec := range outCh {
+			results = append(results, rec)
+		}
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Success: output channel closed
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for output channel to close — right-side goroutine may be hanging")
+	}
+
+	if len(results) == 0 {
+		t.Fatal("expected at least one join result")
 	}
 }
 
