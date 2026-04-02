@@ -56,6 +56,7 @@ type QueryCmd struct {
 	Stateful           bool          `help:"Enable persistent checkpoints."`
 	StateDir           string        `help:"Checkpoint directory." default:"~/.folddb/state"`
 	CheckpointInterval time.Duration `help:"Checkpoint flush interval." default:"5s"`
+	ArrangementMemLimit int          `help:"Max records in join arrangement memory before spilling to disk (0=unlimited)." default:"0" name:"arrangement-mem-limit"`
 
 	// Debug
 	DeadLetter string `help:"Route errors to NDJSON file." placeholder:"FILE" name:"dead-letter"`
@@ -296,7 +297,7 @@ func run() error {
 	var joinOp *engine.DDJoinOp
 	if stmt.Join != nil && !isStreamStreamJoin {
 		var err error
-		joinOp, err = buildDDJoinOp(stmt)
+		joinOp, err = buildDDJoinOp(stmt, q.ArrangementMemLimit)
 		if err != nil {
 			return err
 		}
@@ -1437,7 +1438,7 @@ func runServe(c *ServeCmd) error {
 	// Build DD join operator if JOIN is present
 	var joinOp *engine.DDJoinOp
 	if stmt.Join != nil {
-		joinOp, err = buildDDJoinOp(stmt)
+		joinOp, err = buildDDJoinOp(stmt, 0) // serve mode: in-memory only
 		if err != nil {
 			return err
 		}
@@ -1824,7 +1825,7 @@ func loadSeedRecords(stmt *ast.SelectStatement) ([]engine.Record, error) {
 // buildDDJoinOp constructs a DDJoinOp from the parsed JOIN clause.
 // The right (table) side is loaded into the right arrangement as initial state.
 // The left (stream) side arrangement starts empty and receives deltas during streaming.
-func buildDDJoinOp(stmt *ast.SelectStatement) (*engine.DDJoinOp, error) {
+func buildDDJoinOp(stmt *ast.SelectStatement, arrangementMemLimit int) (*engine.DDJoinOp, error) {
 	join := stmt.Join
 
 	// Load table file
@@ -1847,6 +1848,13 @@ func buildDDJoinOp(stmt *ast.SelectStatement) (*engine.DDJoinOp, error) {
 	}
 
 	op := engine.NewDDJoinOp(streamKey, tableKey, streamAlias, tableAlias, join.Type == "LEFT JOIN")
+
+	// If arrangement memory limit is set, use disk-backed arrangements
+	if arrangementMemLimit > 0 {
+		op.Left = engine.NewDiskArrangement(streamKey, arrangementMemLimit, "")
+		op.Right = engine.NewDiskArrangement(tableKey, arrangementMemLimit, "")
+	}
+
 	// Stream-to-file joins have a static right side — no CDC updates will arrive.
 	// This lets the join skip maintaining the left arrangement entirely.
 	op.RightIsStatic = true
