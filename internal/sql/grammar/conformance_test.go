@@ -169,6 +169,12 @@ var positiveQueries = []string{
 	"SELECT FORMAT_TIMESTAMP(ts, 'RFC3339')",
 	"SELECT COALESCE((payload->>'amount')::FLOAT, 0)",
 	"SELECT SUM(CASE WHEN status = 'ok' THEN 1 ELSE 0 END) AS ok_count",
+	// Subqueries
+	"SELECT * FROM (SELECT * FROM '/data/file.csv') t",
+	"SELECT * FROM (SELECT status, COUNT(*) AS cnt GROUP BY status) t WHERE cnt > 100",
+	"SELECT e.id, r.x FROM stdin e JOIN (SELECT x GROUP BY x) r ON e.id = r.x",
+	"SELECT * FROM (SELECT * FROM (SELECT 1) t1) t2",
+	"SELECT e.id FROM stdin e LEFT JOIN (SELECT id FROM '/tmp/ref.ndjson') r ON e.id = r.id",
 }
 
 // negativeQueries are all SQL strings from parser_negative_test.go that MUST fail.
@@ -248,6 +254,9 @@ var negativeQueries = []string{
 	"SELECT * FROM 'kafka://b/t' SEED '/tmp/file'",
 	"SELECT * FROM 'kafka://b/t' SEED FROM",
 	"SELECT * FROM 'kafka://b/t' SEED FROM snapshot",
+	"SELECT * FROM (SELECT 1) WHERE x > 1",
+	"SELECT * FROM stdin e JOIN (SELECT x) ON e.id = x",
+	"SELECT * FROM (SELECT 1) WHERE",
 	"SELECT * FROM (SELECT * FROM 'kafka://b/t')",
 	"SELECT * FROM 'kafka://b/t1' UNION SELECT * FROM 'kafka://b/t2'",
 	"INSERT INTO orders VALUES (1, 'a')",

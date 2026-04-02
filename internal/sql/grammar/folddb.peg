@@ -63,11 +63,15 @@ ImplicitAlias <- !ClauseKeyword !AS !ReservedKeyword BareName
 // FROM clause
 // ============================================================================
 
-FromClause <- __ FROM __ Source InlineFromFormat? FromAlias?
+FromClause <- __ FROM __ ( SubquerySource / Source ) InlineFromFormat? FromAlias?
 
 Source <- StringLiteral / BareSource
 
 BareSource <- Identifier
+
+SubquerySource <- '(' _ SelectStatement _ ')' __ SubqueryAlias
+
+SubqueryAlias <- !ClauseKeyword BareName
 
 // Format right after source string (inside parseTableSource)
 InlineFromFormat <- __ FORMAT __ FormatName FormatOptions?
@@ -84,7 +88,7 @@ PostFromFormatClause <- __ FORMAT __ FormatName FormatOptions?
 // JOIN clause
 // ============================================================================
 
-JoinClause <- __ ( LEFT __ )? JOIN __ StringLiteral JoinSourceFormat? JoinAlias? __ ON __ Expression JoinWithin?
+JoinClause <- __ ( LEFT __ )? JOIN __ ( SubquerySource / StringLiteral JoinSourceFormat? JoinAlias? ) __ ON __ Expression JoinWithin?
 
 JoinSourceFormat <- __ FORMAT __ FormatName FormatOptions?
 
