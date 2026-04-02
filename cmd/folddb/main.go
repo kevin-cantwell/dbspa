@@ -306,8 +306,11 @@ func run() error {
 		return err
 	}
 
+	// Detect streaming EXEC join: JOIN EXEC(...) AS STREAM
+	isStreamingExecJoin := stmt.Join != nil && stmt.Join.Exec != nil && stmt.Join.Exec.Mode == "STREAM"
+
 	// Detect stream-stream join: both FROM and JOIN are Kafka URIs
-	// Subquery and EXEC sources are never stream-stream (they're materialized).
+	// Subquery and EXEC TABLE sources are never stream-stream (they're materialized).
 	isStreamStreamJoin := false
 	if stmt.Join != nil && stmt.Join.Subquery == nil && stmt.Join.Exec == nil && stmt.From != nil && stmt.FromSubquery == nil && stmt.FromExec == nil {
 		leftIsKafka := strings.HasPrefix(stmt.From.URI, "kafka://")
@@ -342,10 +345,10 @@ func run() error {
 		isStreamingSubq = false
 	}
 
-	// Build DD join operator if JOIN is present (skip for stream-stream and streaming subquery)
+	// Build DD join operator if JOIN is present (skip for stream-stream, streaming subquery, and streaming exec)
 	var joinOp *engine.DDJoinOp
 	var streamingSubqCh <-chan engine.Record
-	if stmt.Join != nil && !isStreamStreamJoin && !isStreamingSubq {
+	if stmt.Join != nil && !isStreamStreamJoin && !isStreamingSubq && !isStreamingExecJoin {
 		var err error
 		joinOp, err = buildDDJoinOp(stmt, arrangementMemLimit)
 		if err != nil {
@@ -358,6 +361,14 @@ func run() error {
 		joinOp, streamingSubqCh, subqErr = buildStreamingSubqueryJoinOp(runCtx, stmt, arrangementMemLimit)
 		if subqErr != nil {
 			return subqErr
+		}
+	} else if isStreamingExecJoin {
+		// Build the DD join operator for streaming EXEC join:
+		// Right side starts empty and receives deltas from the EXEC command output.
+		var execErr error
+		joinOp, streamingSubqCh, execErr = buildStreamingExecJoinOp(runCtx, stmt, arrangementMemLimit)
+		if execErr != nil {
+			return execErr
 		}
 	}
 
@@ -437,6 +448,21 @@ func run() error {
 		recordCh := make(chan engine.Record, 256)
 		go func() {
 			defer close(recordCh)
+
+			// In TABLE mode, warn if the command hasn't exited after 30s
+			// (it may be a long-running command that should use AS STREAM).
+			var done chan struct{}
+			if stmt.FromExec.Mode == "TABLE" {
+				done = make(chan struct{})
+				go func() {
+					select {
+					case <-time.After(30 * time.Second):
+						fmt.Fprintf(os.Stderr, "Warning: EXEC command running for 30s. If it produces continuous output, use AS STREAM.\n")
+					case <-done:
+					}
+				}()
+			}
+
 			if sd, ok := dec.(format.StreamDecoder); ok {
 				if err := sd.DecodeStream(execSrc.ReadRaw(), recordCh); err != nil {
 					fmt.Fprintf(os.Stderr, "Warning: EXEC stream decode error: %v\n", err)
@@ -453,6 +479,9 @@ func run() error {
 						select {
 						case recordCh <- rec:
 						case <-runCtx.Done():
+							if done != nil {
+								close(done)
+							}
 							return
 						}
 					}
@@ -461,6 +490,9 @@ func run() error {
 			// Wait for command to finish; non-zero exit is a warning, not an error
 			if err := execSrc.Wait(); err != nil {
 				fmt.Fprintf(os.Stderr, "Warning: EXEC command exited with error: %v\n", err)
+			}
+			if done != nil {
+				close(done)
 			}
 		}()
 
@@ -1537,7 +1569,7 @@ func printQueryPlan(stmt *ast.SelectStatement) {
 
 	// Source
 	if stmt.FromExec != nil {
-		fmt.Fprintf(os.Stderr, "  Source: EXEC('%s')\n", stmt.FromExec.Command)
+		fmt.Fprintf(os.Stderr, "  Source: EXEC('%s') AS %s\n", stmt.FromExec.Command, stmt.FromExec.Mode)
 	} else if stmt.FromSubquery != nil {
 		fmt.Fprintf(os.Stderr, "  Source: Subquery (alias: %s)\n", stmt.FromSubquery.Alias)
 	} else if stmt.From != nil && stmt.From.URI != "" {
@@ -1553,7 +1585,7 @@ func printQueryPlan(stmt *ast.SelectStatement) {
 	// Join
 	if stmt.Join != nil {
 		if stmt.Join.Exec != nil {
-			fmt.Fprintf(os.Stderr, "  %s: EXEC('%s')", stmt.Join.Type, stmt.Join.Exec.Command)
+			fmt.Fprintf(os.Stderr, "  %s: EXEC('%s') AS %s", stmt.Join.Type, stmt.Join.Exec.Command, stmt.Join.Exec.Mode)
 		} else if stmt.Join.Subquery != nil {
 			if isStreamingSubquery(stmt.Join.Subquery) {
 				fmt.Fprintf(os.Stderr, "  %s: Streaming Subquery (alias: %s)", stmt.Join.Type, stmt.Join.Subquery.Alias)
@@ -2218,8 +2250,19 @@ func materializeExecSource(exec *ast.ExecSource) ([]engine.Record, error) {
 		return nil, fmt.Errorf("EXEC start error: %w", err)
 	}
 
+	// TABLE mode: warn if the command hasn't exited after 30s
+	done := make(chan struct{})
+	go func() {
+		select {
+		case <-time.After(30 * time.Second):
+			fmt.Fprintf(os.Stderr, "Warning: EXEC command running for 30s. If it produces continuous output, use AS STREAM.\n")
+		case <-done:
+		}
+	}()
+
 	dec, err := format.NewDecoderWithOptions(exec.Format, exec.FormatOptions)
 	if err != nil {
+		close(done)
 		return nil, fmt.Errorf("EXEC decoder error: %w", err)
 	}
 
@@ -2251,8 +2294,78 @@ func materializeExecSource(exec *ast.ExecSource) ([]engine.Record, error) {
 	if err := execSrc.Wait(); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: EXEC command exited with error: %v\n", err)
 	}
+	close(done)
 
 	return records, nil
+}
+
+// buildStreamingExecJoinOp constructs a DDJoinOp for JOIN EXEC(...) AS STREAM.
+// The EXEC command runs concurrently, feeding decoded records into a channel
+// that drives ProcessRightDelta. The right side starts empty.
+func buildStreamingExecJoinOp(ctx context.Context, stmt *ast.SelectStatement, arrangementMemLimit int) (*engine.DDJoinOp, <-chan engine.Record, error) {
+	join := stmt.Join
+
+	execSrc, err := source.NewExecSource(ctx, join.Exec.Command)
+	if err != nil {
+		return nil, nil, fmt.Errorf("EXEC start error: %w", err)
+	}
+
+	dec, err := format.NewDecoderWithOptions(join.Exec.Format, join.Exec.FormatOptions)
+	if err != nil {
+		return nil, nil, fmt.Errorf("EXEC decoder error: %w", err)
+	}
+
+	// Build record channel from exec stdout
+	recordCh := make(chan engine.Record, 256)
+	go func() {
+		defer close(recordCh)
+		if sd, ok := dec.(format.StreamDecoder); ok {
+			if err := sd.DecodeStream(execSrc.ReadRaw(), recordCh); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: EXEC stream decode error: %v\n", err)
+			}
+		} else {
+			rawCh := execSrc.Read()
+			for raw := range rawCh {
+				recs, err := decodeWithCSVHeader(dec, raw)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "Warning: EXEC decode error: %v\n", err)
+					continue
+				}
+				for _, rec := range recs {
+					select {
+					case recordCh <- rec:
+					case <-ctx.Done():
+						return
+					}
+				}
+			}
+		}
+		if err := execSrc.Wait(); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: EXEC command exited with error: %v\n", err)
+		}
+	}()
+
+	streamAlias := stmt.FromAlias
+	tableAlias := join.Alias
+
+	streamKey, tableKey, err := engine.ExtractEquiJoinKeys(join.Condition, streamAlias, tableAlias)
+	if err != nil {
+		return nil, nil, fmt.Errorf("join key extraction error: %w", err)
+	}
+
+	op := engine.NewDDJoinOp(streamKey, tableKey, streamAlias, tableAlias, join.Type == "LEFT JOIN")
+
+	if arrangementMemLimit > 0 {
+		op.Left = engine.NewDiskArrangement(streamKey, arrangementMemLimit, "")
+		op.Right = engine.NewDiskArrangement(tableKey, arrangementMemLimit, "")
+	}
+
+	// Streaming EXEC: right side receives live deltas
+	op.RightIsStatic = false
+
+	op.ProjectedColumns = engine.ExtractReferencedColumns(stmt)
+
+	return op, recordCh, nil
 }
 
 func loadSeedFile(seed *ast.SeedClause) ([]engine.Record, error) {
