@@ -2199,6 +2199,126 @@ func TestPositiveSQL(t *testing.T) {
 			}
 		},
 	},
+	// =====================================================================
+	// EXEC AS STREAM / AS TABLE
+	// =====================================================================
+	{
+		name: "FROM EXEC default mode is TABLE",
+		sql:  "SELECT * FROM EXEC('cat data.json')",
+		check: func(t *testing.T, stmt *ast.SelectStatement) {
+			if stmt.FromExec == nil {
+				t.Fatal("expected FromExec")
+			}
+			if stmt.FromExec.Mode != "TABLE" {
+				t.Errorf("mode: got %q, want %q", stmt.FromExec.Mode, "TABLE")
+			}
+		},
+	},
+	{
+		name: "FROM EXEC AS TABLE",
+		sql:  "SELECT * FROM EXEC('cat data.json') AS TABLE",
+		check: func(t *testing.T, stmt *ast.SelectStatement) {
+			if stmt.FromExec == nil {
+				t.Fatal("expected FromExec")
+			}
+			if stmt.FromExec.Mode != "TABLE" {
+				t.Errorf("mode: got %q, want %q", stmt.FromExec.Mode, "TABLE")
+			}
+		},
+	},
+	{
+		name: "FROM EXEC AS STREAM",
+		sql:  "SELECT * FROM EXEC('tail -f /var/log/app.json') AS STREAM",
+		check: func(t *testing.T, stmt *ast.SelectStatement) {
+			if stmt.FromExec == nil {
+				t.Fatal("expected FromExec")
+			}
+			if stmt.FromExec.Mode != "STREAM" {
+				t.Errorf("mode: got %q, want %q", stmt.FromExec.Mode, "STREAM")
+			}
+		},
+	},
+	{
+		name: "FROM EXEC with alias AS STREAM",
+		sql:  "SELECT e.x FROM EXEC('tail -f log.json') e AS STREAM WHERE e.x > 1",
+		check: func(t *testing.T, stmt *ast.SelectStatement) {
+			if stmt.FromExec == nil {
+				t.Fatal("expected FromExec")
+			}
+			if stmt.FromExec.Mode != "STREAM" {
+				t.Errorf("mode: got %q, want %q", stmt.FromExec.Mode, "STREAM")
+			}
+			if stmt.FromAlias != "e" {
+				t.Errorf("alias: got %q, want %q", stmt.FromAlias, "e")
+			}
+		},
+	},
+	{
+		name: "FROM EXEC AS TABLE with FORMAT",
+		sql:  "SELECT * FROM EXEC('cat data.csv') AS TABLE FORMAT CSV(header=true)",
+		check: func(t *testing.T, stmt *ast.SelectStatement) {
+			if stmt.FromExec == nil {
+				t.Fatal("expected FromExec")
+			}
+			if stmt.FromExec.Mode != "TABLE" {
+				t.Errorf("mode: got %q, want %q", stmt.FromExec.Mode, "TABLE")
+			}
+			if stmt.FromExec.Format != "CSV" {
+				t.Errorf("format: got %q, want %q", stmt.FromExec.Format, "CSV")
+			}
+		},
+	},
+	{
+		name: "JOIN EXEC AS TABLE",
+		sql:  "SELECT * FROM stdin e JOIN EXEC('psql -c \"COPY users TO STDOUT\"') u AS TABLE FORMAT CSV ON e.id = u.id",
+		check: func(t *testing.T, stmt *ast.SelectStatement) {
+			if stmt.Join == nil || stmt.Join.Exec == nil {
+				t.Fatal("expected JOIN EXEC")
+			}
+			if stmt.Join.Exec.Mode != "TABLE" {
+				t.Errorf("mode: got %q, want %q", stmt.Join.Exec.Mode, "TABLE")
+			}
+			if stmt.Join.Alias != "u" {
+				t.Errorf("alias: got %q, want %q", stmt.Join.Alias, "u")
+			}
+		},
+	},
+	{
+		name: "JOIN EXEC AS STREAM",
+		sql:  "SELECT * FROM stdin e JOIN EXEC('tail -f events.json') u AS STREAM ON e.id = u.id",
+		check: func(t *testing.T, stmt *ast.SelectStatement) {
+			if stmt.Join == nil || stmt.Join.Exec == nil {
+				t.Fatal("expected JOIN EXEC")
+			}
+			if stmt.Join.Exec.Mode != "STREAM" {
+				t.Errorf("mode: got %q, want %q", stmt.Join.Exec.Mode, "STREAM")
+			}
+		},
+	},
+	{
+		name: "SEED FROM EXEC default TABLE",
+		sql:  "SELECT region, COUNT(*) FROM 'kafka://b/t' SEED FROM EXEC('bq query --format=json \"SELECT * FROM snap\"') GROUP BY region",
+		check: func(t *testing.T, stmt *ast.SelectStatement) {
+			if stmt.Seed == nil || stmt.Seed.Exec == nil {
+				t.Fatal("expected SEED EXEC")
+			}
+			if stmt.Seed.Exec.Mode != "TABLE" {
+				t.Errorf("mode: got %q, want %q", stmt.Seed.Exec.Mode, "TABLE")
+			}
+		},
+	},
+	{
+		name: "SEED FROM EXEC AS TABLE explicit",
+		sql:  "SELECT region, COUNT(*) FROM 'kafka://b/t' SEED FROM EXEC('bq query --nouse_legacy_sql \"SELECT * FROM snap\"') AS TABLE GROUP BY region",
+		check: func(t *testing.T, stmt *ast.SelectStatement) {
+			if stmt.Seed == nil || stmt.Seed.Exec == nil {
+				t.Fatal("expected SEED EXEC")
+			}
+			if stmt.Seed.Exec.Mode != "TABLE" {
+				t.Errorf("mode: got %q, want %q", stmt.Seed.Exec.Mode, "TABLE")
+			}
+		},
+	},
 	}
 
 	for _, tt := range tests {

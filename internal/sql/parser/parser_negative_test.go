@@ -547,6 +547,17 @@ func TestNegativeSQL(t *testing.T) {
 			sql:         "SELECT * FROM EXEC('echo hello'",
 			errContains: "",
 		},
+		// ===== EXEC AS STREAM / AS TABLE errors =====
+		{
+			name:        "EXEC AS INVALID mode",
+			sql:         "SELECT * FROM EXEC('echo hello') AS INVALID",
+			errContains: "expected STREAM or TABLE after AS",
+		},
+		{
+			name:        "SEED FROM EXEC AS STREAM rejected",
+			sql:         "SELECT region, COUNT(*) FROM 'kafka://b/t' SEED FROM EXEC('bq query') AS STREAM GROUP BY region",
+			errContains: "SEED FROM EXEC cannot use AS STREAM",
+		},
 	}
 
 	for _, tt := range tests {
