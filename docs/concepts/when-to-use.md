@@ -33,7 +33,7 @@ Capability
 |---|---|---|
 | Install | `brew install folddb` | Cluster: JobManager + TaskManagers + ZooKeeper |
 | First query | 10 seconds | 30+ minutes (write job, configure, deploy) |
-| State backend | In-memory (single machine) | RocksDB (distributed, terabytes) |
+| State backend | In-memory + checkpoint to disk | RocksDB (distributed, terabytes) |
 | Exactly-once | No (at-least-once) | Yes |
 | Horizontal scale | No | Yes |
 | Fault tolerance | Checkpoint to disk | Distributed snapshots |
