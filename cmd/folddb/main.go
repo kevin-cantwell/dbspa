@@ -158,6 +158,10 @@ type cliFlags struct {
 	sql                string // original SQL for fingerprinting
 }
 
+// activeDLWriter is the package-level dead letter writer, set in run().
+// Used by withSchemaTracking to route schema drift errors to the DLQ.
+var activeDLWriter *deadLetterWriter
+
 func run() error {
 	var cli CLI
 	ctx := kong.Parse(&cli,
@@ -264,6 +268,7 @@ func run() error {
 		if err != nil {
 			return fmt.Errorf("cannot open dead letter file: %w", err)
 		}
+		activeDLWriter = dlWriter // make available to withSchemaTracking
 		defer dlWriter.Close()
 	}
 
@@ -1816,6 +1821,10 @@ func withSchemaTracking(ctx context.Context, in <-chan engine.Record) <-chan eng
 		defer close(out)
 		for rec := range in {
 			if err := tracker.Track(rec); err != nil {
+				if activeDLWriter != nil {
+					raw, _ := json.Marshal(rec.Columns)
+					activeDLWriter.Write(err.Error(), raw, 0, 0)
+				}
 				fmt.Fprintf(os.Stderr, "Error: %v (record skipped)\n", err)
 				continue
 			}
