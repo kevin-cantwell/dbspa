@@ -74,7 +74,7 @@ SELECT *
 FROM (SELECT * FROM (SELECT id, name FROM '/data/users.ndjson') inner_t) outer_t
 ```
 
-The inner query supports the full SQL dialect: WHERE, GROUP BY, HAVING, JOIN, LIMIT, etc. Kafka sources are not supported inside subqueries.
+The inner query supports the full SQL dialect: WHERE, GROUP BY, HAVING, JOIN, LIMIT, etc. Kafka sources are not supported inside FROM subqueries (derived tables). For Kafka sources in JOIN subqueries, see [Streaming Subqueries](../concepts/joins.md#streaming-subqueries).
 
 ### Kafka URI parameters
 
@@ -292,6 +292,8 @@ JOIN (SELECT customer_id, COUNT(*) AS order_count
 ```
 
 An alias is mandatory for the subquery. The alias is used to qualify column references in the ON condition and SELECT list.
+
+**Streaming subqueries:** When the inner query's FROM source is a Kafka topic (`kafka://`), the subquery runs concurrently with the outer query instead of being materialized. The inner query must have GROUP BY -- its accumulation results feed into the DD join as live Z-set deltas. The outer query sees live-updating results from the inner aggregation. See [Streaming Subqueries](../concepts/joins.md#streaming-subqueries) for details.
 
 ### WITHIN INTERVAL
 

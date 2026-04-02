@@ -168,7 +168,59 @@ Without subqueries, you would need to pre-compute the aggregation in a separate 
 3. The materialized results are loaded into the right-side join arrangement.
 4. Stream processing begins, joining each incoming record against the pre-computed table.
 
-The subquery supports the full FoldDB SQL dialect (WHERE, GROUP BY, HAVING, LIMIT, nested JOINs). Kafka sources inside subqueries are not supported.
+The subquery supports the full FoldDB SQL dialect (WHERE, GROUP BY, HAVING, LIMIT, nested JOINs). For file-based subqueries, Kafka sources are not supported (they would block forever). For Kafka-based subqueries, see Streaming Subqueries below.
+
+## Streaming Subqueries
+
+When the inner query's FROM source is a Kafka topic (`kafka://`), the subquery runs **concurrently** with the outer query instead of being materialized first. The inner query's accumulation results feed into the DD join as live Z-set deltas via `ProcessRightDelta`.
+
+### How it works
+
+```
+Inner query goroutine:
+  Kafka CDC --> Debezium decode --> Accumulate --> Z-set deltas --> channel
+
+Outer query goroutine:                                              |
+  Kafka events --> Decode --> ProcessLeftDelta <-> DD Join <-- ProcessRightDelta (from channel)
+                                                    |
+                                                  Output
+```
+
+1. The inner subquery starts in a goroutine: Kafka source, decode, filter, and accumulate.
+2. Each accumulation change emits a retraction of the old value and an insertion of the new value to a shared channel.
+3. The outer query reads from that channel via `ProcessRightDelta`, updating the right-side arrangement.
+4. Left-side records from the outer query are joined against the live-updating right arrangement.
+5. Both goroutines run concurrently, connected by the shared DD join operator (protected by a mutex).
+
+### CDC composition use case
+
+The flagship use case is composing two Kafka streams -- one for raw events, one for CDC-derived aggregates:
+
+```sql
+SELECT e.user_id, r.revenue
+FROM 'kafka://broker/events' e
+JOIN (
+    SELECT region, SUM(amount) AS revenue
+    FROM 'kafka://broker/orders.cdc' FORMAT DEBEZIUM
+    GROUP BY region
+) r ON e.region = r.region
+```
+
+The inner query maintains a live revenue-per-region aggregation from the CDC stream. The outer query joins each incoming event against the current aggregation state. When an order is updated or deleted in the source database, the CDC stream produces a change, the inner accumulator updates, and the DD join retracts stale results and emits corrected ones.
+
+### Retraction propagation
+
+Retractions flow end-to-end through the pipeline:
+
+1. **Source:** A Debezium update produces a retraction of the old row and insertion of the new row.
+2. **Accumulator:** The group's aggregate changes. The accumulator emits a retraction of the old aggregate value (weight=-1) and an insertion of the new value (weight=+1).
+3. **DD Join:** `ProcessRightDelta` applies these deltas to the right arrangement. For each retracted right record, the join produces retractions for all matching left records (`output_weight = left_weight * right_weight`). For each inserted right record, the join produces new results.
+4. **Sink:** The changelog or TUI renders the corrections.
+
+### Requirements and limitations
+
+- **GROUP BY is mandatory.** The inner subquery must have a GROUP BY clause (or aggregates that imply a single group). Without accumulation, raw Kafka events do not form a useful join table -- each event would insert a row that is never retracted, growing the arrangement unboundedly. If GROUP BY is absent, FoldDB prints a warning and falls back to materialized execution (which blocks forever on Kafka).
+- **Not supported in serve mode.** Streaming subqueries are not yet available when running `folddb serve`.
 
 ## Limitations
 

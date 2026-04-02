@@ -171,6 +171,52 @@ JOIN '/data/users.parquet' u ON e.user_id = u.id
 SELECT * FROM '/data/logs.csv' WHERE level = 'ERROR'
 ```
 
+## Streaming Subquery Execution
+
+When a JOIN subquery's FROM source is a Kafka topic, FoldDB runs the inner and outer queries concurrently. This avoids the materialization deadlock (Kafka never reaches EOF, so a materialized subquery would block forever).
+
+### Concurrent pipeline
+
+```
+                    ┌─────────────────────────────────────────────────┐
+                    │  Inner query goroutine                          │
+                    │                                                 │
+                    │  Kafka CDC ──▶ Decode ──▶ Filter ──▶ Accumulate │
+                    │                                          │      │
+                    └──────────────────────────────────────────┼──────┘
+                                                               │
+                                                        Z-set deltas
+                                                        (chan Record)
+                                                               │
+                                                               ▼
+┌──────────────────────────────────────────────────────────────────────────┐
+│  Outer query goroutine                                                   │
+│                                                                          │
+│  Kafka events ──▶ Decode ──▶ ProcessLeftDelta ──┐                        │
+│                                                 ├──▶ DDJoinOp ──▶ Sink   │
+│                      ProcessRightDelta ◀────────┘       │                │
+│                      (from inner channel)            mutex-protected     │
+└──────────────────────────────────────────────────────────────────────────┘
+```
+
+### Execution flow
+
+1. `buildStreamingSubqueryJoinOp` creates a DDJoinOp with an empty right arrangement (`RightIsStatic = false`) and starts the inner query via `executeStreamingSubquery`.
+2. `applyStreamingSubqueryJoin` spawns two goroutines:
+    - **Right feeder:** reads from the inner query's output channel and calls `ProcessRightDelta` for each record.
+    - **Left feeder:** reads from the outer query's source and calls `ProcessLeftDeltaStream`.
+3. Both goroutines share the DDJoinOp, which is mutex-protected. When either side produces a delta, it is joined against the other side's arrangement.
+4. The output channel is closed only when both goroutines finish (tracked by a `sync.WaitGroup`).
+
+### Delta semantics
+
+The inner query's accumulator emits retraction+insertion pairs for every group change. For example, if region "us-east" revenue goes from 100 to 105:
+
+- Emit `{region: "us-east", revenue: 100, weight: -1}` (retraction)
+- Emit `{region: "us-east", revenue: 105, weight: +1}` (insertion)
+
+The DDJoinOp processes these as right-side deltas. The retraction removes the old revenue from the arrangement and produces retractions for all matching left records. The insertion adds the new revenue and produces updated join results. The output weight follows the standard DD formula: `output_weight = left_weight * right_weight`.
+
 ## SEED FROM
 
 For cold starts when Kafka retention is insufficient:

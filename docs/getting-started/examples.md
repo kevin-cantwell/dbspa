@@ -144,6 +144,23 @@ folddb -i data.ndjson \
    WHERE total > 1000"
 ```
 
+## Streaming subqueries
+
+Join a live event stream against a concurrently-running CDC aggregation:
+
+```bash
+# Enrich events with live revenue-per-region from a CDC stream
+folddb "SELECT e.user_id, r.revenue
+        FROM 'kafka://broker/events' e
+        JOIN (
+            SELECT region, SUM(amount) AS revenue
+            FROM 'kafka://broker/orders.cdc' FORMAT DEBEZIUM
+            GROUP BY region
+        ) r ON e.region = r.region"
+```
+
+The inner subquery maintains a live aggregation of order revenue by region. The outer query joins each event against the current aggregation state. When an order changes in the source database, the CDC stream updates the inner aggregation, and the DD join retracts stale results and emits corrected ones.
+
 ## Deduplication
 
 ```bash
