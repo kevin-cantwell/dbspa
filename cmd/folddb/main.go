@@ -309,13 +309,32 @@ func run() error {
 		return fmt.Errorf("stream-stream joins require a WITHIN INTERVAL clause to bound retention")
 	}
 
-	// Build DD join operator if JOIN is present
+	// Detect streaming subquery: JOIN against a subquery whose FROM is a Kafka stream.
+	// These run concurrently — the inner query feeds Z-set deltas to ProcessRightDelta.
+	isStreamingSubq := stmt.Join != nil && isStreamingSubquery(stmt.Join.Subquery)
+
+	// Streaming subqueries without GROUP BY fall back to materialized execution (with warning).
+	if isStreamingSubq && stmt.Join.Subquery.Query.GroupBy == nil && !hasAggregateInSelect(stmt.Join.Subquery.Query.Columns) {
+		fmt.Fprintf(os.Stderr, "Warning: streaming subquery without GROUP BY — falling back to materialized execution (will block until Kafka source ends)\n")
+		isStreamingSubq = false
+	}
+
+	// Build DD join operator if JOIN is present (skip for stream-stream and streaming subquery)
 	var joinOp *engine.DDJoinOp
-	if stmt.Join != nil && !isStreamStreamJoin {
+	var streamingSubqCh <-chan engine.Record
+	if stmt.Join != nil && !isStreamStreamJoin && !isStreamingSubq {
 		var err error
 		joinOp, err = buildDDJoinOp(stmt, q.ArrangementMemLimit)
 		if err != nil {
 			return err
+		}
+	} else if isStreamingSubq {
+		// Build the DD join operator for streaming subquery:
+		// Right side starts empty and receives deltas from the inner query.
+		var subqErr error
+		joinOp, streamingSubqCh, subqErr = buildStreamingSubqueryJoinOp(runCtx, stmt, q.ArrangementMemLimit)
+		if subqErr != nil {
+			return subqErr
 		}
 	}
 
@@ -342,7 +361,9 @@ func run() error {
 
 		// Apply JOIN if present
 		var finalCh <-chan engine.Record = recordCh
-		if joinOp != nil {
+		if joinOp != nil && streamingSubqCh != nil {
+			finalCh = applyStreamingSubqueryJoin(runCtx, joinOp, recordCh, streamingSubqCh)
+		} else if joinOp != nil {
 			finalCh = applyJoin(runCtx, joinOp, recordCh)
 		}
 
@@ -367,7 +388,7 @@ func run() error {
 	}
 
 	if fromURI != "" && strings.HasPrefix(fromURI, "kafka://") {
-		return runKafka(runCtx, stmt, dec, isAccumulating, isWindowed, flags, dlWriter, joinOp)
+		return runKafka(runCtx, stmt, dec, isAccumulating, isWindowed, flags, dlWriter, joinOp, streamingSubqCh)
 	}
 
 	// DuckDB file/database source: route file paths and database URIs to DuckDB.
@@ -392,7 +413,9 @@ func run() error {
 
 		// Apply JOIN if present
 		var finalCh <-chan engine.Record = recordCh
-		if joinOp != nil {
+		if joinOp != nil && streamingSubqCh != nil {
+			finalCh = applyStreamingSubqueryJoin(runCtx, joinOp, recordCh, streamingSubqCh)
+		} else if joinOp != nil {
 			finalCh = applyJoin(runCtx, joinOp, recordCh)
 		}
 
@@ -432,6 +455,45 @@ func run() error {
 		reader = f
 	}
 	inputSrc := &source.Stdin{Reader: reader}
+
+	// For streaming subquery joins with stdin source: decode stdin into a channel,
+	// apply the streaming join, and route to the appropriate fromRecords path.
+	if joinOp != nil && streamingSubqCh != nil {
+		recordCh := make(chan engine.Record, 256)
+		go func() {
+			defer close(recordCh)
+			if sd, ok := dec.(format.StreamDecoder); ok {
+				if err := sd.DecodeStream(inputSrc.ReadRaw(), recordCh); err != nil {
+					fmt.Fprintf(os.Stderr, "Warning: stream decode error: %v\n", err)
+				}
+			} else {
+				rawCh := inputSrc.Read()
+				for raw := range rawCh {
+					recs, err := decodeWithCSVHeader(dec, raw)
+					if err != nil {
+						fmt.Fprintf(os.Stderr, "Warning: decode error: %v\n", err)
+						continue
+					}
+					for _, rec := range recs {
+						select {
+						case recordCh <- rec:
+						case <-runCtx.Done():
+							return
+						}
+					}
+				}
+			}
+		}()
+		finalCh := applyStreamingSubqueryJoin(runCtx, joinOp, recordCh, streamingSubqCh)
+		if isWindowed {
+			return runWindowedFromRecords(runCtx, stmt, finalCh, flags)
+		}
+		if isAccumulating {
+			return runAccumulatingFromRecords(runCtx, stmt, finalCh, flags)
+		}
+		return runNonAccumulatingFromRecords(runCtx, stmt, finalCh)
+	}
+
 	if isWindowed {
 		return runWindowed(runCtx, stmt, inputSrc, dec, flags, dlWriter, joinOp)
 	}
@@ -455,7 +517,7 @@ func getSQL(q *QueryCmd) (string, error) {
 	return "", fmt.Errorf("usage: folddb <SQL> or folddb -f <file.sql>")
 }
 
-func runKafka(ctx context.Context, stmt *ast.SelectStatement, dec format.Decoder, isAccumulating, isWindowed bool, flags cliFlags, dl *deadLetterWriter, joinOp *engine.DDJoinOp) error {
+func runKafka(ctx context.Context, stmt *ast.SelectStatement, dec format.Decoder, isAccumulating, isWindowed bool, flags cliFlags, dl *deadLetterWriter, joinOp *engine.DDJoinOp, streamingSubqCh <-chan engine.Record) error {
 	cfg, err := source.ParseKafkaURI(stmt.From.URI)
 	if err != nil {
 		return err
@@ -503,7 +565,9 @@ func runKafka(ctx context.Context, stmt *ast.SelectStatement, dec format.Decoder
 
 	// Apply JOIN if present
 	var finalCh <-chan engine.Record = recordCh
-	if joinOp != nil {
+	if joinOp != nil && streamingSubqCh != nil {
+		finalCh = applyStreamingSubqueryJoin(ctx, joinOp, recordCh, streamingSubqCh)
+	} else if joinOp != nil {
 		finalCh = applyJoin(ctx, joinOp, recordCh)
 	}
 
@@ -1291,7 +1355,11 @@ func printQueryPlan(stmt *ast.SelectStatement) {
 	// Join
 	if stmt.Join != nil {
 		if stmt.Join.Subquery != nil {
-			fmt.Fprintf(os.Stderr, "  %s: Subquery (alias: %s)", stmt.Join.Type, stmt.Join.Subquery.Alias)
+			if isStreamingSubquery(stmt.Join.Subquery) {
+				fmt.Fprintf(os.Stderr, "  %s: Streaming Subquery (alias: %s)", stmt.Join.Type, stmt.Join.Subquery.Alias)
+			} else {
+				fmt.Fprintf(os.Stderr, "  %s: Subquery (alias: %s)", stmt.Join.Type, stmt.Join.Subquery.Alias)
+			}
 		} else {
 			fmt.Fprintf(os.Stderr, "  %s: %s", stmt.Join.Type, stmt.Join.Source.URI)
 		}
@@ -1517,6 +1585,11 @@ func runServe(c *ServeCmd) error {
 			}
 			return fmt.Errorf("stream-stream joins are not yet supported in serve mode")
 		}
+	}
+
+	// Streaming subqueries in serve mode are not yet supported
+	if stmt.Join != nil && isStreamingSubquery(stmt.Join.Subquery) {
+		return fmt.Errorf("streaming subqueries (Kafka in JOIN subquery) are not yet supported in serve mode")
 	}
 
 	// Build DD join operator if JOIN is present
