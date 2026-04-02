@@ -423,21 +423,20 @@ func buildStreamingSubqueryJoinOp(ctx context.Context, stmt *ast.SelectStatement
 // receives right-side deltas from a streaming subquery. Returns the joined output channel.
 // The right delta goroutine runs concurrently with the left delta processing.
 //
-// When the left side (bounded source like a file) finishes, the right side's context
-// is cancelled so that the streaming subquery goroutine terminates cleanly.
-// The output channel is closed only when both goroutines have finished.
+// The left side (e.g., a file) is loaded fully into the left arrangement as static
+// reference data. The right side (streaming subquery from Kafka) runs continuously,
+// and each right-side delta is joined against ALL left records via ProcessRightDelta.
+// The query runs until the parent context is cancelled (Ctrl+C / --timeout) or the
+// right-side channel closes — NOT when the left side finishes loading.
 func applyStreamingSubqueryJoin(ctx context.Context, joinOp *engine.DDJoinOp, leftIn <-chan engine.Record, rightIn <-chan engine.Record) <-chan engine.Record {
 	out := make(chan engine.Record, 256)
-
-	// Derive a child context that we cancel when the left side finishes.
-	// This ensures the right-side streaming subquery (Kafka) terminates
-	// instead of blocking forever when the left source is bounded (e.g., file).
-	innerCtx, innerCancel := context.WithCancel(ctx)
 
 	var wg sync.WaitGroup
 	wg.Add(2)
 
-	// Feed right-side deltas from the streaming subquery
+	// Feed right-side deltas from the streaming subquery.
+	// This goroutine runs until the right channel closes or the parent context
+	// is cancelled. It does NOT stop when the left side finishes.
 	go func() {
 		defer wg.Done()
 		for {
@@ -447,24 +446,24 @@ func applyStreamingSubqueryJoin(ctx context.Context, joinOp *engine.DDJoinOp, le
 					return
 				}
 				joinOp.ProcessRightDelta(engine.Batch{rec}, out)
-			case <-innerCtx.Done():
+			case <-ctx.Done():
 				return
 			}
 		}
 	}()
 
 	// Feed left-side deltas from the outer query's source.
-	// When the left side is exhausted, cancel the inner context to stop the right side.
+	// When the left side is exhausted (EOF), the goroutine finishes but the
+	// right side keeps running — the left records remain in the arrangement
+	// for ProcessRightDelta lookups.
 	go func() {
 		defer wg.Done()
-		defer innerCancel()
 		joinOp.ProcessLeftDeltaStream(ctx, leftIn, out)
 	}()
 
 	// Close output when both sides are done
 	go func() {
 		wg.Wait()
-		innerCancel() // ensure cleanup even if right finishes first
 		close(out)
 	}()
 

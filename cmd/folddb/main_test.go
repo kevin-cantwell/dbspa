@@ -2663,10 +2663,10 @@ func TestIsStreamingSubquery_KafkaVariants(t *testing.T) {
 	}
 }
 
-func TestApplyStreamingSubqueryJoin_BoundedLeftTerminates(t *testing.T) {
-	// When the left side (bounded source like a file) finishes, the streaming
-	// subquery join should terminate cleanly — the right-side goroutine should
-	// be cancelled via context, and the output channel should close.
+func TestApplyStreamingSubqueryJoin_FileLeftKeepsRunning(t *testing.T) {
+	// File left + streaming right: after the left side finishes loading,
+	// the right side should keep running. New right-side deltas should
+	// produce join output against the loaded left records.
 	op := engine.NewDDJoinOp(
 		&ast.ColumnRef{Name: "id"},
 		&ast.ColumnRef{Name: "id"},
@@ -2677,9 +2677,33 @@ func TestApplyStreamingSubqueryJoin_BoundedLeftTerminates(t *testing.T) {
 	leftCh := make(chan engine.Record, 10)
 	rightCh := make(chan engine.Record, 10)
 
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
-	// Seed right side with a record
+	outCh := applyStreamingSubqueryJoin(ctx, op, leftCh, rightCh)
+
+	// Load all left records (file data), then close left channel (EOF)
+	leftCh <- engine.Record{
+		Columns: map[string]engine.Value{
+			"id":   engine.IntValue{V: 1},
+			"name": engine.TextValue{V: "alice"},
+		},
+		Weight: 1,
+	}
+	leftCh <- engine.Record{
+		Columns: map[string]engine.Value{
+			"id":   engine.IntValue{V: 2},
+			"name": engine.TextValue{V: "bob"},
+		},
+		Weight: 1,
+	}
+	close(leftCh)
+
+	// Give the left goroutine time to process and finish
+	time.Sleep(50 * time.Millisecond)
+
+	// Now send right-side deltas AFTER left has finished.
+	// These should join against the loaded left records.
 	rightCh <- engine.Record{
 		Columns: map[string]engine.Value{
 			"id":    engine.IntValue{V: 1},
@@ -2688,46 +2712,57 @@ func TestApplyStreamingSubqueryJoin_BoundedLeftTerminates(t *testing.T) {
 		Weight: 1,
 	}
 
-	outCh := applyStreamingSubqueryJoin(ctx, op, leftCh, rightCh)
-
-	// Let right delta process
-	for i := 0; i < 1000; i++ {
-		if len(rightCh) == 0 {
-			break
+	// Should get a join result for alice + total=100
+	select {
+	case rec := <-outCh:
+		if name, ok := rec.Columns["name"].(engine.TextValue); !ok || name.V != "alice" {
+			t.Errorf("expected name=alice, got %v", rec.Columns["name"])
 		}
+		if total, ok := rec.Columns["total"].(engine.IntValue); !ok || total.V != 100 {
+			t.Errorf("expected total=100, got %v", rec.Columns["total"])
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for join output after left EOF — right side should keep running")
 	}
 
-	// Send a matching left record, then close left (simulates bounded file EOF)
-	leftCh <- engine.Record{
+	// Send another right-side delta for a different left record
+	rightCh <- engine.Record{
 		Columns: map[string]engine.Value{
-			"id":   engine.IntValue{V: 1},
-			"name": engine.TextValue{V: "alice"},
+			"id":    engine.IntValue{V: 2},
+			"total": engine.IntValue{V: 200},
 		},
 		Weight: 1,
 	}
-	close(leftCh)
-	// NOTE: rightCh is NOT closed — simulates an unbounded Kafka stream
 
-	// The output channel should close within a reasonable time
-	// because the left side finishing cancels the right-side context.
+	select {
+	case rec := <-outCh:
+		if name, ok := rec.Columns["name"].(engine.TextValue); !ok || name.V != "bob" {
+			t.Errorf("expected name=bob, got %v", rec.Columns["name"])
+		}
+		if total, ok := rec.Columns["total"].(engine.IntValue); !ok || total.V != 200 {
+			t.Errorf("expected total=200, got %v", rec.Columns["total"])
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for second join result — right side should keep running")
+	}
+
+	// Cancel context to terminate the join
+	cancel()
+
+	// Output channel should close after context cancellation
 	done := make(chan struct{})
-	var results []engine.Record
 	go func() {
-		for rec := range outCh {
-			results = append(results, rec)
+		for range outCh {
+			// drain
 		}
 		close(done)
 	}()
 
 	select {
 	case <-done:
-		// Success: output channel closed
+		// Success: output channel closed after context cancel
 	case <-time.After(5 * time.Second):
-		t.Fatal("timed out waiting for output channel to close — right-side goroutine may be hanging")
-	}
-
-	if len(results) == 0 {
-		t.Fatal("expected at least one join result")
+		t.Fatal("timed out waiting for output channel to close after context cancel")
 	}
 }
 
