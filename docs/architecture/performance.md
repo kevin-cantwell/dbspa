@@ -66,8 +66,8 @@ Features used: Debezium CDC retractions, DD join against DuckDB-loaded Parquet (
 
 | Format | Time | Records/sec |
 |---|---|---|
-| JSON Debezium | 988ms | **101K** |
-| **Avro Debezium** | **875ms** | **114K** |
+| JSON Debezium | 964ms | **104K** |
+| **Avro Debezium** | **841ms** | **119K** |
 
 ### Wire Size
 
@@ -108,7 +108,7 @@ The full complex query (CDC + JOIN + 7 aggregates) went through five rounds of o
 | Fast key extraction + skip left arrangement | 46,500/sec | 6.9x |
 | Decode: LazyJsonValue, eliminate double parse | 50,000/sec | 7.5x |
 | Typed int64 index + cross-type coercion | 50,000/sec | (fixed Avro joins) |
-| Projection pushdown into join merge | **114,000/sec** | **17x** |
+| Projection pushdown into join merge | **119,000/sec** | **17.8x** |
 
 ### Key optimizations explained
 
@@ -121,6 +121,28 @@ The full complex query (CDC + JOIN + 7 aggregates) went through five rounds of o
 **Typed int64 index.** The arrangement uses `map[int64][]Record` for integer join keys, eliminating `strconv.FormatInt` per lookup. Cross-type coercion means `TextValue{"42"}` matches `IntValue{42}`.
 
 **Projection pushdown.** The join merge only copies columns referenced by the query. For 6 used columns from a 30-column merge, this reduces per-record allocation by 5x.
+
+## Disk-Backed Arrangements
+
+For large joins and long windows, arrangements can spill to disk using [Badger](https://github.com/dgraph-io/badger) (a pure Go LSM-tree KV store). Enable with `--arrangement-mem-limit N`:
+
+```bash
+folddb --arrangement-mem-limit 10000 "SELECT ... FROM ... JOIN ..."
+```
+
+When the in-memory arrangement exceeds N records, the oldest entries (by timestamp) are spilled to Badger on disk. Lookups merge results from memory and disk transparently.
+
+### Overhead
+
+Benchmarked with a 100K-row reference table, 99% spilled to disk:
+
+| Mode | Time | Records/sec | Overhead |
+|---|---|---|---|
+| In-memory (default) | 1.05s | 95K | — |
+| Disk (limit=10K, 90K spilled) | 1.08s | 93K | 2.5% |
+| Disk (limit=1K, 99K spilled) | 1.09s | 92K | 4% |
+
+The overhead is minimal because hot join probes still hit the in-memory portion first, and Badger's prefix scans are fast for the cold path.
 
 ## Profiling
 
