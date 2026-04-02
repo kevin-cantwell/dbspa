@@ -37,6 +37,8 @@ cat data.json | folddb "SELECT * WHERE status = 'active'"
 | `--state-dir <path>` | | `~/.folddb/state` | Directory for checkpoint files |
 | `--checkpoint-interval <dur>` | | `5s` | How often to flush checkpoints |
 | `--dead-letter <file>` | | | Route deserialization errors to NDJSON file |
+| `--arrangement-mem-limit <n>` | | 0 (unlimited) | Max in-memory records per arrangement before spilling to disk |
+| `--cpuprofile <file>` | | | Write CPU profile to file (for `go tool pprof`) |
 | `--dry-run` | | false | Parse and print query plan without executing |
 | `--explain` | | false | Print query plan, then execute |
 
@@ -61,6 +63,19 @@ folddb --timeout 30s "SELECT * FROM 'kafka://broker/events'"
 
 # Dead letter output
 folddb --dead-letter errors.ndjson "SELECT * FROM 'kafka://broker/events'"
+
+# Disk-backed arrangements (spill to disk after 10K records in memory)
+folddb --arrangement-mem-limit 10000 \
+  "SELECT o.*, c.name FROM 'kafka://broker/orders' o JOIN '/data/customers.parquet' c ON o.customer_id = c.id"
+
+# CPU profiling
+folddb --cpuprofile prof.out "SELECT status, COUNT(*) GROUP BY status"
+go tool pprof prof.out
+
+# Debezium Avro with schema registry
+folddb "SELECT _op, customer_id, total
+        FROM 'kafka://broker/orders.cdc?registry=http://schema-registry:8081'
+        FORMAT DEBEZIUM_AVRO"
 ```
 
 ## serve

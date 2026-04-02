@@ -46,6 +46,30 @@ FROM 'kafka://production/orders.cdc'
 FROM 'kafka://staging/events'
 ```
 
+### Schema registry
+
+The `registry` field specifies the URL of a Confluent Schema Registry for Avro and Protobuf schema resolution. It can be set per cluster in the credentials file or as a URI query parameter.
+
+**In the credentials file:**
+
+```toml
+[kafka.production]
+brokers = ["pkc-xxx.confluent.cloud:9092"]
+sasl_mechanism = "PLAIN"
+sasl_username = "my-api-key"
+sasl_password = "my-api-secret"
+registry = "https://psrc-xxx.confluent.cloud"
+```
+
+**As a URI parameter:**
+
+```sql
+FROM 'kafka://broker/topic?registry=http://schema-registry:8081' FORMAT AVRO
+FROM 'kafka://broker/topic?registry=http://schema-registry:8081' FORMAT DEBEZIUM_AVRO
+```
+
+When a registry is configured, FoldDB auto-detects the [Confluent wire format](formats.md#confluent-wire-format) (magic byte `0x00` + 4-byte schema ID) and fetches the schema on first encounter. Schemas are cached locally since schema IDs are immutable in the Confluent registry.
+
 ### Supported authentication methods
 
 | Method | Configuration |
@@ -103,7 +127,17 @@ sqlite3 orders.db "SELECT * FROM result ORDER BY cnt DESC"
 
 ## Memory limit
 
-FoldDB keeps all accumulator state in memory. The default limit is 1GB. When exceeded, a warning is logged but processing continues (no disk spill in v0).
+FoldDB keeps all accumulator state in memory. The default limit is 1GB. When exceeded, a warning is logged but processing continues.
+
+## Arrangement memory limit
+
+For joins and windowed queries, the `--arrangement-mem-limit` flag controls how many records are kept in memory per arrangement before spilling to disk (via [Badger](https://github.com/dgraph-io/badger)):
+
+```bash
+folddb --arrangement-mem-limit 10000 "SELECT ... FROM ... JOIN ..."
+```
+
+When unset (default), arrangements are fully in-memory. When set, records beyond the limit are spilled to a Badger LSM-tree on disk. Lookups merge results from memory and disk transparently. See [Disk-Backed Arrangements](../architecture/performance.md#disk-backed-arrangements) for benchmarks.
 
 ## Output mode auto-detection
 

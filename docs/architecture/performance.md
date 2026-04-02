@@ -98,6 +98,24 @@ DuckDB is ~55x faster on pure batch queries due to SIMD vectorized execution acr
 
     FoldDB uses DuckDB internally for file scanning — you get DuckDB's read performance with FoldDB's streaming semantics.
 
+## Live Kafka Benchmarks
+
+End-to-end benchmarks with a live Kafka producer and FoldDB consumer. These measure real-world throughput including network I/O, Kafka consumer overhead, deserialization, and aggregation.
+
+### Burst Throughput (200K messages, GROUP BY)
+
+A producer writes 200K messages to a Kafka topic in a burst. FoldDB consumes with a GROUP BY aggregation query.
+
+| Scenario | Throughput | Notes |
+|---|---|---|
+| JSON, GROUP BY (5 groups) | **68K msgs/sec** | Producer burst, consumer steady-state |
+
+The bottleneck is JSON decoding, not Kafka consumption or aggregation. With Avro encoding, throughput increases proportionally to the decode savings.
+
+### Sustained Throughput
+
+For sustained streaming (producer rate-limited to match consumer), FoldDB processes at the same throughput as the stdin benchmarks above -- the Kafka consumer adds negligible overhead once messages are in the fetch buffer.
+
 ## Optimization History
 
 The full complex query (CDC + JOIN + 7 aggregates) went through five rounds of optimization:

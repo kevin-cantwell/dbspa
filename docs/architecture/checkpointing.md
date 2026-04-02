@@ -98,6 +98,12 @@ Last flush:  2026-03-28T14:02:31Z
 
 When both `--stateful` and `--state file.db` are used, the SQLite UPSERT and the checkpoint flush are **not** in the same transaction. A crash between them can produce a SQLite state slightly ahead of or behind the checkpoint. On restart, replayed records re-UPSERT into SQLite, converging to the correct state (UPSERT is idempotent for accumulating queries).
 
+## Disk-backed arrangements
+
+When `--arrangement-mem-limit` is set, join arrangements spill to disk using [Badger](https://github.com/dgraph-io/badger) (a pure Go LSM-tree KV store). The arrangement data is stored separately from checkpoints -- it lives in a temporary directory and is rebuilt on restart from the checkpoint state.
+
+Disk-backed arrangements prevent OOM for large joins or long `WITHIN INTERVAL` windows. See [Performance: Disk-Backed Arrangements](performance.md#disk-backed-arrangements) for overhead benchmarks.
+
 ## Interaction with SEED FROM
 
 If a checkpoint exists, it takes precedence over `SEED FROM`. The seed is a cold-start fallback — it is only used when no checkpoint matches the query fingerprint.

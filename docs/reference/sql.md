@@ -8,8 +8,8 @@ FoldDB's SQL is aligned with **PostgreSQL** — the same dialect DuckDB aligns t
 SELECT [DISTINCT] expr [AS alias], ...
 FROM source [FORMAT format_spec]
 [SEED FROM file_path]
-[JOIN file_path alias [FORMAT format_spec] ON condition]
-[LEFT JOIN file_path alias [FORMAT format_spec] ON condition]
+[JOIN source alias [FORMAT format_spec] ON condition [WITHIN INTERVAL duration]]
+[LEFT JOIN source alias [FORMAT format_spec] ON condition [WITHIN INTERVAL duration]]
 [WHERE condition]
 [GROUP BY expr, ...]
 [HAVING condition]
@@ -102,6 +102,7 @@ Declares the input format. Placed after the `FROM` clause.
 
 ```sql
 FORMAT DEBEZIUM
+FORMAT DEBEZIUM_AVRO
 FORMAT CSV
 FORMAT CSV(delimiter='|', header=true, quote='"', null_string='')
 FORMAT AVRO
@@ -239,14 +240,32 @@ Terminates after N output records. For non-accumulating queries, this is straigh
 
 ## JOIN
 
-Stream-to-table equi-join.
+Equi-join between a stream and a table, a stream and a CDC source, or two streams.
 
 ```sql
+-- Stream-to-file
 JOIN '/data/users.parquet' u ON e.user_id = u.id
 LEFT JOIN '/data/users.csv' u FORMAT CSV(header=true) ON e.user_id = u.id
+
+-- Stream-to-stream (WITHIN is mandatory)
+FROM 'kafka://broker/orders' o
+JOIN 'kafka://broker/payments' p ON o.order_id = p.order_id
+WITHIN INTERVAL '10 minutes'
 ```
 
-See [Joins](../concepts/joins.md).
+### WITHIN INTERVAL
+
+Required for stream-to-stream joins. Bounds how long records are retained in the join arrangements. Records older than the interval are evicted and their join results are retracted.
+
+```sql
+WITHIN INTERVAL '10 minutes'
+WITHIN INTERVAL '1 hour'
+WITHIN INTERVAL '30 seconds'
+```
+
+Without `WITHIN`, a stream-to-stream join is rejected at parse time.
+
+See [Joins](../concepts/joins.md) for full details on DD joins, CDC propagation, and stream-to-stream semantics.
 
 ## Expressions
 

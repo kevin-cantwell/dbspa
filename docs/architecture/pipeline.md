@@ -61,6 +61,7 @@ Like accumulating, but records are assigned to [time windows](../concepts/window
 | stdin | Reads lines from `os.Stdin` or `--input` file. Line-based for JSON/CSV; raw reader for binary formats. |
 | Kafka | Uses `franz-go`. One goroutine per partition. Fan-in to a shared channel. Offset control via URI params. |
 | File (`--input`) | Opens the file, passes the reader to the decoder. Parquet requires a seekable file. |
+| DuckDB | Embedded DuckDB engine for file queries. See [DuckDB Integration](#duckdb-integration) below. |
 
 ## Decoder layer
 
@@ -120,6 +121,55 @@ Non-accumulating queries bypass both the batch stage and the accumulator -- part
 | `TUISink` | Accumulating, TTY | Live-updating table at 15fps |
 | `SQLiteSink` | `--state file.db` | UPSERT for accumulating, INSERT for non-accumulating |
 | `HTTPSink` | `folddb serve` | In-memory state via HTTP + SSE |
+
+## DuckDB Integration
+
+FoldDB embeds [DuckDB](https://duckdb.org/) as the table query engine for file-based sources. DuckDB is a vectorized columnar engine optimized for batch analytics -- it handles Parquet, CSV, and JSON files orders of magnitude faster than FoldDB's own decoders.
+
+### When DuckDB is used
+
+File paths ending in `.parquet`, `.csv`, or `.json` are automatically routed to DuckDB. This applies to:
+
+- **Direct file queries:** `FROM '/path/to/file.parquet'` executes in DuckDB.
+- **Join table side:** `JOIN '/data/users.parquet' u ON ...` loads the file via DuckDB into a DD join arrangement.
+
+### How it works
+
+```
+Stream source --> FoldDB pipeline --> DD Join --> Output
+                                       ^
+DuckDB query --> Result as Arrangement --+
+```
+
+1. FoldDB translates the relevant portion of the query (predicate pushdown, column pruning) into a DuckDB SQL query.
+2. DuckDB executes the query natively, leveraging columnar storage, SIMD vectorization, and row group statistics.
+3. Results are returned as `[]Record` and loaded into the pipeline (either directly to the sink for standalone queries, or into a DD join arrangement for joins).
+
+### Predicate pushdown and column pruning
+
+When FoldDB routes a query to DuckDB, it pushes down:
+
+- **WHERE predicates** -- DuckDB skips entire row groups using column statistics, achieving nearly 2M records/sec on filters vs 277K for NDJSON.
+- **Column references** -- only columns referenced by the query are read from the file. For wide Parquet files, this dramatically reduces I/O.
+
+### DuckDB scans, FoldDB aggregates
+
+For `GROUP BY` queries on files, DuckDB handles the scan and FoldDB handles the aggregation. This is because FoldDB's accumulator supports incremental updates and Z-set semantics, which DuckDB's batch engine does not. The scan is fast (DuckDB), and the aggregation throughput is dominated by accumulator updates regardless of the decoder (~110K records/sec).
+
+### Syntax
+
+```sql
+-- DuckDB handles the file query natively
+SELECT * FROM '/data/orders.parquet' WHERE region = 'us-east'
+
+-- Stream joined against DuckDB-loaded table
+SELECT e.*, u.name
+FROM 'kafka://broker/events' e
+JOIN '/data/users.parquet' u ON e.user_id = u.id
+
+-- Works with CSV and JSON too
+SELECT * FROM '/data/logs.csv' WHERE level = 'ERROR'
+```
 
 ## SEED FROM
 

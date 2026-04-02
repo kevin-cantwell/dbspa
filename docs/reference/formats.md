@@ -67,13 +67,64 @@ FORMAT AVRO
 FORMAT AVRO(registry='http://registry:8081')
 ```
 
-**With schema registry:** Kafka messages using the Confluent wire format (magic byte `0x00` + 4-byte schema ID) are auto-detected. The schema is fetched from the registry and cached.
+**With schema registry:** Kafka messages using the Confluent wire format (magic byte `0x00` + 4-byte schema ID) are auto-detected. The schema is fetched from the registry and cached. See [Confluent Wire Format](#confluent-wire-format) below for details.
 
 **Without registry:** stdin or file input must be Avro OCF (self-contained with embedded schema).
 
 ```bash
 cat data.avro | folddb "SELECT * FORMAT AVRO"
 ```
+
+## Debezium Avro
+
+Avro-encoded Debezium CDC envelopes. Combines the CDC semantics of `FORMAT DEBEZIUM` with the compact binary encoding of Avro.
+
+```sql
+FORMAT DEBEZIUM_AVRO
+```
+
+Debezium Avro messages use the Confluent wire format and require a schema registry:
+
+```sql
+FROM 'kafka://broker/orders.cdc?registry=http://schema-registry:8081' FORMAT DEBEZIUM_AVRO
+```
+
+**Benefits over JSON Debezium:**
+
+- **2.4x smaller wire size** -- 14 MB vs 33 MB for 100K CDC events (see [Performance](../architecture/performance.md#wire-size)).
+- **Typed before/after records** -- the Avro schema defines the field types, so there is no JSON re-parse step. Fields arrive as native integers, floats, and strings.
+- **Faster decoding** -- binary Avro decoding is cheaper than JSON parsing for large payloads.
+
+The same Debezium [virtual columns](sql.md#debezium-virtual-columns) (`_op`, `_before`, `_after`, `_table`, `_db`, `_ts`, `_source`) and [op-to-weight mapping](#debezium) apply.
+
+## Confluent Wire Format
+
+Production Kafka deployments using the Confluent Schema Registry encode messages with a 5-byte header:
+
+| Bytes | Content |
+|---|---|
+| 1 | Magic byte `0x00` |
+| 4 | Schema ID (big-endian `uint32`) |
+| remaining | Avro (or Protobuf) payload |
+
+When FoldDB detects this header on a Kafka message, it:
+
+1. Extracts the 4-byte schema ID.
+2. Fetches the schema from the registry via HTTP (`GET /schemas/ids/{id}`).
+3. Caches the schema locally. Schema IDs are immutable in the Confluent registry, so a given ID always maps to the same schema.
+4. Decodes the payload using the fetched schema.
+
+The registry URL is configured via the `?registry=` URI parameter or the [credentials file](configuration.md#credentials-file):
+
+```sql
+-- Via URI parameter
+FROM 'kafka://broker/topic?registry=http://schema-registry:8081' FORMAT AVRO
+
+-- Via credentials file (registry field under [kafka.cluster-name])
+FROM 'kafka://production/topic' FORMAT AVRO
+```
+
+This wire format is used by both `FORMAT AVRO` and `FORMAT DEBEZIUM_AVRO`.
 
 ## Protobuf
 
