@@ -272,6 +272,36 @@ Both goroutines call ProcessLeftDelta/ProcessRightDelta respectively. DDJoinOp h
 
 ---
 
+### 12. Subqueries
+
+**Status:** In progress
+
+**Problem:** FoldDB can't compose queries. You can't use the result of one query as input to another — every query is a single flat pipeline. This prevents CDC aggregation from being used as a join input, and prevents derived tables.
+
+**Design:**
+
+Two forms, same mechanism:
+
+1. **Subquery in FROM**: `FROM (SELECT ... GROUP BY ...) t`
+2. **Subquery as JOIN source**: `JOIN (SELECT ... GROUP BY ...) r ON ...`
+
+Both parse `(SELECT ...)` as a source, execute the inner query to completion, materialize the results, and use them as a record source or join arrangement in the outer query.
+
+**Parser change:** When FROM or JOIN encounters `(`, parse a full SelectStatement recursively. Wrap in a `SubquerySource` AST node.
+
+```go
+type SubquerySource struct {
+    Query *SelectStatement
+    Alias string
+}
+```
+
+**Execution:** The inner query runs first (blocking), materializes all results into `[]Record`. For FROM subquery, these records feed the outer pipeline. For JOIN subquery, they load into a DD join arrangement.
+
+**Limitation (v1):** Subqueries are materialized — the inner query runs to completion before the outer query starts. For streaming subqueries (Kafka in the inner query), this means the outer query doesn't start until the inner stream ends (or times out). True streaming subqueries (concurrent inner+outer) are a future feature.
+
+---
+
 ### 11. Confluent Schema Registry Integration
 
 **Status:** In progress
