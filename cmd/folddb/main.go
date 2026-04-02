@@ -411,6 +411,15 @@ func run() error {
 
 		// For accumulating/windowed queries or queries with joins, DuckDB
 		// provides the source data and FoldDB handles the rest.
+		//
+		// OPTIMIZATION OPPORTUNITY: For bounded file queries with GROUP BY (no JOIN),
+		// DuckDB could compute the entire aggregation result directly (full pushdown).
+		// Currently we route these through "DuckDB scan → FoldDB aggregate" which
+		// produces streaming changelog output (retraction/insertion pairs). This is
+		// correct behavior and consistent with how streaming sources work, but for
+		// bounded file-only queries the changelog format is surprising — users expect
+		// a simple result set. A future optimization could detect this case and push
+		// the GROUP BY into DuckDB, returning the final result directly.
 		recordCh := make(chan engine.Record, 256)
 		go func() {
 			defer close(recordCh)
