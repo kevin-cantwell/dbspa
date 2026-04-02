@@ -177,6 +177,14 @@ var positiveQueries = []string{
 	"SELECT e.id FROM stdin e LEFT JOIN EXEC('echo {\"id\":1}') u ON e.id = u.id",
 	"SELECT region, COUNT(*) FROM 'kafka://b/t' SEED FROM EXEC('bq query --format=json \"SELECT * FROM snap\"') GROUP BY region",
 	"SELECT * FROM EXEC('cat data.csv') FORMAT CSV(header=true)",
+	// EXEC AS STREAM / AS TABLE
+	"SELECT * FROM EXEC('cat data.json') AS TABLE",
+	"SELECT * FROM EXEC('tail -f /var/log/app.json') AS STREAM",
+	"SELECT e.x FROM EXEC('tail -f log.json') e AS STREAM WHERE e.x > 1",
+	"SELECT * FROM EXEC('cat data.csv') AS TABLE FORMAT CSV(header=true)",
+	"SELECT * FROM stdin e JOIN EXEC('psql -c \"COPY users TO STDOUT\"') u AS TABLE FORMAT CSV ON e.id = u.id",
+	"SELECT * FROM stdin e JOIN EXEC('tail -f events.json') u AS STREAM ON e.id = u.id",
+	"SELECT region, COUNT(*) FROM 'kafka://b/t' SEED FROM EXEC('bq query') AS TABLE GROUP BY region",
 	// Subqueries
 	"SELECT * FROM (SELECT * FROM '/data/file.csv') t",
 	"SELECT * FROM (SELECT status, COUNT(*) AS cnt GROUP BY status) t WHERE cnt > 100",
@@ -267,6 +275,7 @@ var negativeQueries = []string{
 	"SELECT * FROM EXEC",
 	"SELECT * FROM EXEC()",
 	"SELECT * FROM EXEC(123)",
+	"SELECT * FROM EXEC('echo hello') AS INVALID",
 	"SELECT * FROM (SELECT 1) WHERE",
 	"SELECT * FROM (SELECT * FROM 'kafka://b/t')",
 	"SELECT * FROM 'kafka://b/t1' UNION SELECT * FROM 'kafka://b/t2'",

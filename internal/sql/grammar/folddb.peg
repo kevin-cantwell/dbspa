@@ -63,13 +63,17 @@ ImplicitAlias <- !ClauseKeyword !AS !ReservedKeyword BareName
 // FROM clause
 // ============================================================================
 
-FromClause <- __ FROM __ ( ExecSource / SubquerySource / Source ) InlineFromFormat? FromAlias?
+FromClause <- __ FROM __ ( ExecSource ExecAlias? ExecModeHint? / SubquerySource / Source InlineFromFormat? FromAlias? )
+
+ExecAlias <- __ !ClauseKeyword !AS BareName
 
 Source <- StringLiteral / BareSource
 
 BareSource <- Identifier
 
 ExecSource <- EXEC _ '(' _ StringLiteral _ ')'
+
+ExecModeHint <- __ AS __ ( STREAM / TABLE )
 
 SubquerySource <- '(' _ SelectStatement _ ')' __ SubqueryAlias
 
@@ -90,7 +94,7 @@ PostFromFormatClause <- __ FORMAT __ FormatName FormatOptions?
 // JOIN clause
 // ============================================================================
 
-JoinClause <- __ ( LEFT __ )? JOIN __ ( ExecSource ExecJoinFormat? JoinAlias? / SubquerySource / StringLiteral JoinSourceFormat? JoinAlias? ) __ ON __ Expression JoinWithin?
+JoinClause <- __ ( LEFT __ )? JOIN __ ( ExecSource ExecAlias? ExecModeHint? ExecJoinFormat? / SubquerySource / StringLiteral JoinSourceFormat? JoinAlias? ) __ ON __ Expression JoinWithin?
 
 ExecJoinFormat <- __ FORMAT __ FormatName FormatOptions?
 
@@ -110,7 +114,7 @@ PostJoinFormatClause <- __ FORMAT __ FormatName FormatOptions?
 // SEED clause
 // ============================================================================
 
-SeedClause <- __ SEED __ FROM __ ( ExecSource / StringLiteral ) SeedFormat?
+SeedClause <- __ SEED __ FROM __ ( ExecSource ExecModeHint? / StringLiteral ) SeedFormat?
 
 SeedFormat <- __ FORMAT __ FormatName FormatOptions?
 
@@ -411,6 +415,8 @@ JOIN       <- [Jj][Oo][Ii][Nn] !IdentChar
 LEFT       <- [Ll][Ee][Ff][Tt] !IdentChar
 ON         <- [Oo][Nn] !IdentChar
 EXEC       <- [Ee][Xx][Ee][Cc] !IdentChar
+STREAM     <- [Ss][Tt][Rr][Ee][Aa][Mm] !IdentChar
+TABLE      <- [Tt][Aa][Bb][Ll][Ee] !IdentChar
 
 // Aggregate functions
 COUNT                <- [Cc][Oo][Uu][Nn][Tt] !IdentChar
@@ -473,7 +479,7 @@ ReservedKeyword <- ( SELECT / DISTINCT / FROM / WHERE / GROUP / BY / HAVING
     / EMIT / FINAL / EARLY / EVENT / TIME / WATERMARK / DEDUPLICATE / WITHIN
     / CAPACITY / FORMAT / AS / AND / OR / NOT / IN / BETWEEN / IS / NULL
     / TRUE / FALSE / LIKE / ILIKE / CASE / WHEN / THEN / ELSE / END / INTERVAL
-    / CAST / SEED / JOIN / LEFT / ON / EXEC
+    / CAST / SEED / JOIN / LEFT / ON / EXEC / STREAM / TABLE
     / COUNT / SUM / AVG / MIN / MAX / MEDIAN / FIRST / LAST
     / ARRAY_AGG / APPROX_COUNT_DISTINCT
     / COALESCE / NULLIF / LENGTH / UPPER / LOWER / TRIM / LTRIM / RTRIM
