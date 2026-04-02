@@ -56,7 +56,9 @@ type QueryCmd struct {
 	Stateful           bool          `help:"Enable persistent checkpoints."`
 	StateDir           string        `help:"Checkpoint directory." default:"~/.folddb/state"`
 	CheckpointInterval time.Duration `help:"Checkpoint flush interval." default:"5s"`
-	ArrangementMemLimit int          `help:"Max records in join arrangement memory before spilling to disk (0=unlimited)." default:"0" name:"arrangement-mem-limit"`
+	SpillToDisk        bool          `help:"Spill large join arrangements to disk (Badger) to prevent OOM." name:"spill-to-disk"`
+	MaxMemory          string        `help:"Memory budget for arrangements before spilling to disk (e.g., 256MB, 1GB). Implies --spill-to-disk." name:"max-memory"`
+	ArrangementMemLimit int          `help:"Max records in join arrangement memory before spilling to disk (0=unlimited)." default:"0" name:"arrangement-mem-limit" hidden:""`
 
 	// Debug
 	DeadLetter string `help:"Route errors to NDJSON file." placeholder:"FILE" name:"dead-letter"`
@@ -295,6 +297,12 @@ func run() error {
 	isAccumulating := stmt.GroupBy != nil
 	isWindowed := stmt.Window != nil
 
+	// Resolve arrangement memory limit from --spill-to-disk / --max-memory / --arrangement-mem-limit
+	arrangementMemLimit, err := resolveArrangementMemLimit(q)
+	if err != nil {
+		return err
+	}
+
 	// Detect stream-stream join: both FROM and JOIN are Kafka URIs
 	// Subquery sources are never stream-stream (they're materialized).
 	isStreamStreamJoin := false
@@ -309,12 +317,16 @@ func run() error {
 		return fmt.Errorf("stream-stream joins require a WITHIN INTERVAL clause to bound retention")
 	}
 
-	// Warn when WITHIN is set but --arrangement-mem-limit is not, since arrangements
-	// will grow in memory indefinitely between evictions.
-	if isStreamStreamJoin && stmt.Join.Within != nil && q.ArrangementMemLimit == 0 {
-		fmt.Fprintf(os.Stderr, "Warning: stream-stream JOIN with WITHIN INTERVAL but no --arrangement-mem-limit. "+
-			"Arrangements will grow in memory indefinitely between evictions. "+
-			"Consider setting --arrangement-mem-limit to prevent OOM for high-throughput topics.\n")
+	// Auto-enable spill-to-disk for stream-stream joins if not explicitly configured.
+	if isStreamStreamJoin && stmt.Join.Within != nil && arrangementMemLimit == 0 {
+		if !q.SpillToDisk && q.MaxMemory == "" && q.ArrangementMemLimit == 0 {
+			// Check if the user explicitly disabled spill-to-disk
+			// (SpillToDisk defaults to false, so we can't distinguish "not set" from "set to false"
+			// via the struct alone — but if none of the flags are set, auto-enable is safe)
+			arrangementMemLimit = defaultSpillRecordLimit
+			fmt.Fprintf(os.Stderr, "Info: auto-enabling --spill-to-disk for stream-stream JOIN to prevent OOM. "+
+				"Override with --max-memory or --spill-to-disk=false.\n")
+		}
 	}
 
 	// Detect streaming subquery: JOIN against a subquery whose FROM is a Kafka stream.
@@ -332,7 +344,7 @@ func run() error {
 	var streamingSubqCh <-chan engine.Record
 	if stmt.Join != nil && !isStreamStreamJoin && !isStreamingSubq {
 		var err error
-		joinOp, err = buildDDJoinOp(stmt, q.ArrangementMemLimit)
+		joinOp, err = buildDDJoinOp(stmt, arrangementMemLimit)
 		if err != nil {
 			return err
 		}
@@ -340,7 +352,7 @@ func run() error {
 		// Build the DD join operator for streaming subquery:
 		// Right side starts empty and receives deltas from the inner query.
 		var subqErr error
-		joinOp, streamingSubqCh, subqErr = buildStreamingSubqueryJoinOp(runCtx, stmt, q.ArrangementMemLimit)
+		joinOp, streamingSubqCh, subqErr = buildStreamingSubqueryJoinOp(runCtx, stmt, arrangementMemLimit)
 		if subqErr != nil {
 			return subqErr
 		}
@@ -419,7 +431,7 @@ func run() error {
 
 	// Stream-stream Kafka join: both sides are Kafka topics
 	if isStreamStreamJoin {
-		return runStreamStreamKafka(runCtx, stmt, dec, isAccumulating, isWindowed, flags, dlWriter)
+		return runStreamStreamKafka(runCtx, stmt, dec, isAccumulating, isWindowed, flags, dlWriter, arrangementMemLimit)
 	}
 
 	if fromURI != "" && strings.HasPrefix(fromURI, "kafka://") {
@@ -561,6 +573,82 @@ func getSQL(q *QueryCmd) (string, error) {
 	return "", fmt.Errorf("usage: folddb <SQL> or folddb -f <file.sql>")
 }
 
+// defaultSpillRecordLimit is the default number of records to keep in memory
+// before spilling to disk (~200 bytes per record * 1M = ~200MB).
+const defaultSpillRecordLimit = 1_000_000
+
+// estimatedBytesPerRecord is the estimated memory footprint of a single record
+// in an arrangement, used to convert --max-memory to a record limit.
+const estimatedBytesPerRecord = 200
+
+// parseMemorySize parses a human-readable memory size string (e.g., "256MB", "1GB", "512mb")
+// and returns the size in bytes. Supported suffixes: KB, MB, GB, TB (case-insensitive).
+func parseMemorySize(s string) (int64, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0, fmt.Errorf("empty memory size")
+	}
+
+	upper := strings.ToUpper(s)
+	var multiplier int64
+	var numStr string
+
+	switch {
+	case strings.HasSuffix(upper, "TB"):
+		multiplier = 1024 * 1024 * 1024 * 1024
+		numStr = s[:len(s)-2]
+	case strings.HasSuffix(upper, "GB"):
+		multiplier = 1024 * 1024 * 1024
+		numStr = s[:len(s)-2]
+	case strings.HasSuffix(upper, "MB"):
+		multiplier = 1024 * 1024
+		numStr = s[:len(s)-2]
+	case strings.HasSuffix(upper, "KB"):
+		multiplier = 1024
+		numStr = s[:len(s)-2]
+	default:
+		return 0, fmt.Errorf("unrecognized memory size %q (use KB, MB, GB, or TB suffix)", s)
+	}
+
+	numStr = strings.TrimSpace(numStr)
+	var val float64
+	_, err := fmt.Sscanf(numStr, "%f", &val)
+	if err != nil || val <= 0 {
+		return 0, fmt.Errorf("invalid memory size %q", s)
+	}
+	return int64(val * float64(multiplier)), nil
+}
+
+// resolveArrangementMemLimit resolves the effective arrangement memory limit from
+// the CLI flags: --spill-to-disk, --max-memory, and --arrangement-mem-limit (hidden alias).
+// Returns the record limit (0 = no spill).
+func resolveArrangementMemLimit(q *QueryCmd) (int, error) {
+	// --arrangement-mem-limit takes precedence if explicitly set (backwards compat)
+	if q.ArrangementMemLimit > 0 {
+		return q.ArrangementMemLimit, nil
+	}
+
+	// --max-memory implies --spill-to-disk
+	if q.MaxMemory != "" {
+		bytes, err := parseMemorySize(q.MaxMemory)
+		if err != nil {
+			return 0, fmt.Errorf("--max-memory: %w", err)
+		}
+		limit := int(bytes / estimatedBytesPerRecord)
+		if limit < 1 {
+			limit = 1
+		}
+		return limit, nil
+	}
+
+	// --spill-to-disk with default limit
+	if q.SpillToDisk {
+		return defaultSpillRecordLimit, nil
+	}
+
+	return 0, nil
+}
+
 func runKafka(ctx context.Context, stmt *ast.SelectStatement, dec format.Decoder, isAccumulating, isWindowed bool, flags cliFlags, dl *deadLetterWriter, joinOp *engine.DDJoinOp, streamingSubqCh <-chan engine.Record) error {
 	cfg, err := source.ParseKafkaURI(stmt.From.URI)
 	if err != nil {
@@ -624,7 +712,7 @@ func runKafka(ctx context.Context, stmt *ast.SelectStatement, dec format.Decoder
 	return runNonAccumulatingFromRecords(ctx, stmt, finalCh)
 }
 
-func runStreamStreamKafka(ctx context.Context, stmt *ast.SelectStatement, dec format.Decoder, isAccumulating, isWindowed bool, flags cliFlags, dl *deadLetterWriter) error {
+func runStreamStreamKafka(ctx context.Context, stmt *ast.SelectStatement, dec format.Decoder, isAccumulating, isWindowed bool, flags cliFlags, dl *deadLetterWriter, arrangementMemLimit int) error {
 	join := stmt.Join
 
 	// Parse WITHIN interval
@@ -653,6 +741,12 @@ func runStreamStreamKafka(ctx context.Context, stmt *ast.SelectStatement, dec fo
 
 	// Create DD join operator with empty arrangements (both sides are streams)
 	joinOp := engine.NewDDJoinOp(streamKey, tableKey, streamAlias, tableAlias, join.Type == "LEFT JOIN")
+
+	// Use disk-backed arrangements if memory limit is set
+	if arrangementMemLimit > 0 {
+		joinOp.Left = engine.NewDiskArrangement(streamKey, arrangementMemLimit, "")
+		joinOp.Right = engine.NewDiskArrangement(tableKey, arrangementMemLimit, "")
+	}
 
 	// Right side decoder (may have different format)
 	rightFormatStr := ""

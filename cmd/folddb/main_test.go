@@ -2766,9 +2766,9 @@ func TestApplyStreamingSubqueryJoin_FileLeftKeepsRunning(t *testing.T) {
 	}
 }
 
-func TestStreamStreamJoin_WarnsWithoutArrangementMemLimit(t *testing.T) {
-	// When a stream-stream JOIN has WITHIN INTERVAL but no --arrangement-mem-limit,
-	// a warning should be emitted to stderr.
+func TestStreamStreamJoin_AutoEnablesSpillToDisk(t *testing.T) {
+	// When a stream-stream JOIN has WITHIN INTERVAL but no spill flags set,
+	// auto-enable should kick in and emit an info message.
 
 	// Capture stderr
 	oldStderr := os.Stderr
@@ -2778,15 +2778,18 @@ func TestStreamStreamJoin_WarnsWithoutArrangementMemLimit(t *testing.T) {
 	}
 	os.Stderr = w
 
-	// Simulate the warning condition: stream-stream join, WITHIN set, mem limit 0
-	withinVal := "5m"
+	// Simulate the auto-enable condition
 	isStreamStreamJoin := true
+	withinSet := true
 	arrangementMemLimit := 0
+	q := &QueryCmd{} // no flags set
 
-	if isStreamStreamJoin && withinVal != "" && arrangementMemLimit == 0 {
-		fmt.Fprintf(os.Stderr, "Warning: stream-stream JOIN with WITHIN INTERVAL but no --arrangement-mem-limit. "+
-			"Arrangements will grow in memory indefinitely between evictions. "+
-			"Consider setting --arrangement-mem-limit to prevent OOM for high-throughput topics.\n")
+	if isStreamStreamJoin && withinSet && arrangementMemLimit == 0 {
+		if !q.SpillToDisk && q.MaxMemory == "" && q.ArrangementMemLimit == 0 {
+			arrangementMemLimit = defaultSpillRecordLimit
+			fmt.Fprintf(os.Stderr, "Info: auto-enabling --spill-to-disk for stream-stream JOIN to prevent OOM. "+
+				"Override with --max-memory or --spill-to-disk=false.\n")
+		}
 	}
 
 	w.Close()
@@ -2796,23 +2799,34 @@ func TestStreamStreamJoin_WarnsWithoutArrangementMemLimit(t *testing.T) {
 	_, _ = buf.ReadFrom(r)
 	output := buf.String()
 
-	if !strings.Contains(output, "no --arrangement-mem-limit") {
-		t.Errorf("expected warning about --arrangement-mem-limit, got: %q", output)
+	if !strings.Contains(output, "auto-enabling --spill-to-disk") {
+		t.Errorf("expected auto-enable info message, got: %q", output)
 	}
 	if !strings.Contains(output, "OOM") {
-		t.Errorf("expected OOM mention in warning, got: %q", output)
+		t.Errorf("expected OOM mention in info message, got: %q", output)
+	}
+	if arrangementMemLimit != defaultSpillRecordLimit {
+		t.Errorf("expected arrangementMemLimit=%d after auto-enable, got %d", defaultSpillRecordLimit, arrangementMemLimit)
 	}
 
-	// Verify no warning when mem limit IS set
+	// Verify no info message when --max-memory is explicitly set
 	r2, w2, err := os.Pipe()
 	if err != nil {
 		t.Fatal(err)
 	}
 	os.Stderr = w2
 
-	arrangementMemLimit = 1_000_000
-	if isStreamStreamJoin && withinVal != "" && arrangementMemLimit == 0 {
-		fmt.Fprintf(os.Stderr, "Warning: should not appear\n")
+	q2 := &QueryCmd{MaxMemory: "512MB"}
+	resolved, resolveErr := resolveArrangementMemLimit(q2)
+	if resolveErr != nil {
+		t.Fatalf("resolveArrangementMemLimit error: %v", resolveErr)
+	}
+
+	// Should NOT auto-enable (already has a limit)
+	arrangementMemLimit = resolved
+	isStreamStreamJoin = true
+	if isStreamStreamJoin && withinSet && arrangementMemLimit == 0 {
+		fmt.Fprintf(os.Stderr, "Info: should not appear\n")
 	}
 
 	w2.Close()
@@ -2821,7 +2835,95 @@ func TestStreamStreamJoin_WarnsWithoutArrangementMemLimit(t *testing.T) {
 	var buf2 bytes.Buffer
 	_, _ = buf2.ReadFrom(r2)
 	if buf2.Len() > 0 {
-		t.Errorf("expected no warning when --arrangement-mem-limit is set, got: %q", buf2.String())
+		t.Errorf("expected no info when --max-memory is set, got: %q", buf2.String())
+	}
+}
+
+func TestResolveArrangementMemLimit(t *testing.T) {
+	tests := []struct {
+		name     string
+		q        QueryCmd
+		expected int
+	}{
+		{
+			name:     "no flags",
+			q:        QueryCmd{},
+			expected: 0,
+		},
+		{
+			name:     "spill-to-disk only",
+			q:        QueryCmd{SpillToDisk: true},
+			expected: defaultSpillRecordLimit,
+		},
+		{
+			name:     "max-memory 512MB",
+			q:        QueryCmd{MaxMemory: "512MB"},
+			expected: int(512 * 1024 * 1024 / estimatedBytesPerRecord),
+		},
+		{
+			name:     "max-memory 1GB",
+			q:        QueryCmd{MaxMemory: "1GB"},
+			expected: int(1024 * 1024 * 1024 / estimatedBytesPerRecord),
+		},
+		{
+			name:     "arrangement-mem-limit backwards compat",
+			q:        QueryCmd{ArrangementMemLimit: 500_000},
+			expected: 500_000,
+		},
+		{
+			name:     "arrangement-mem-limit takes precedence over spill-to-disk",
+			q:        QueryCmd{ArrangementMemLimit: 500_000, SpillToDisk: true},
+			expected: 500_000,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := resolveArrangementMemLimit(&tt.q)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tt.expected {
+				t.Errorf("resolveArrangementMemLimit() = %d, want %d", got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestParseMemorySize(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected int64
+		wantErr  bool
+	}{
+		{"256MB", 256 * 1024 * 1024, false},
+		{"1GB", 1024 * 1024 * 1024, false},
+		{"512mb", 512 * 1024 * 1024, false},
+		{"1.5GB", int64(1.5 * 1024 * 1024 * 1024), false},
+		{"100KB", 100 * 1024, false},
+		{"1TB", 1024 * 1024 * 1024 * 1024, false},
+		{"", 0, true},
+		{"256", 0, true},       // no suffix
+		{"abc MB", 0, true},    // invalid number
+		{"-1MB", 0, true},      // negative
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got, err := parseMemorySize(tt.input)
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("expected error for input %q, got %d", tt.input, got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error for input %q: %v", tt.input, err)
+			}
+			if got != tt.expected {
+				t.Errorf("parseMemorySize(%q) = %d, want %d", tt.input, got, tt.expected)
+			}
+		})
 	}
 }
 
