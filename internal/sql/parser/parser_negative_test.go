@@ -526,6 +526,27 @@ func TestNegativeSQL(t *testing.T) {
 			sql:         "SELECT * FROM (SELECT 1) WHERE",
 			errContains: "subquery requires an alias",
 		},
+		// ===== EXEC errors =====
+		{
+			name:        "EXEC without parens",
+			sql:         "SELECT * FROM EXEC",
+			errContains: "EXEC requires parentheses",
+		},
+		{
+			name:        "EXEC with empty command",
+			sql:         "SELECT * FROM EXEC('')",
+			errContains: "EXEC command string must not be empty",
+		},
+		{
+			name:        "EXEC with non-string argument",
+			sql:         "SELECT * FROM EXEC(123)",
+			errContains: "EXEC requires a single-quoted command string",
+		},
+		{
+			name:        "EXEC missing closing paren",
+			sql:         "SELECT * FROM EXEC('echo hello'",
+			errContains: "",
+		},
 	}
 
 	for _, tt := range tests {

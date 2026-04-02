@@ -2097,6 +2097,108 @@ func TestPositiveSQL(t *testing.T) {
 			}
 		},
 	},
+	// =====================================================================
+	// EXEC
+	// =====================================================================
+	{
+		name: "FROM EXEC basic",
+		sql:  "SELECT * FROM EXEC('echo hello')",
+		check: func(t *testing.T, stmt *ast.SelectStatement) {
+			if stmt.FromExec == nil {
+				t.Fatal("expected FromExec")
+			}
+			if stmt.FromExec.Command != "echo hello" {
+				t.Errorf("command: got %q, want %q", stmt.FromExec.Command, "echo hello")
+			}
+		},
+	},
+	{
+		name: "FROM EXEC with alias",
+		sql:  "SELECT e.x FROM EXEC('cat data.json') e WHERE e.x > 1",
+		check: func(t *testing.T, stmt *ast.SelectStatement) {
+			if stmt.FromExec == nil {
+				t.Fatal("expected FromExec")
+			}
+			if stmt.FromExec.Command != "cat data.json" {
+				t.Errorf("command: got %q, want %q", stmt.FromExec.Command, "cat data.json")
+			}
+			if stmt.FromAlias != "e" {
+				t.Errorf("alias: got %q, want %q", stmt.FromAlias, "e")
+			}
+		},
+	},
+	{
+		name: "FROM EXEC with FORMAT",
+		sql:  "SELECT * FROM EXEC('cat data.csv') FORMAT CSV(header=true)",
+		check: func(t *testing.T, stmt *ast.SelectStatement) {
+			if stmt.FromExec == nil {
+				t.Fatal("expected FromExec")
+			}
+			if stmt.FromExec.Format != "CSV" {
+				t.Errorf("format: got %q, want %q", stmt.FromExec.Format, "CSV")
+			}
+			if stmt.FromExec.FormatOptions["header"] != "true" {
+				t.Errorf("header option: got %q, want %q", stmt.FromExec.FormatOptions["header"], "true")
+			}
+		},
+	},
+	{
+		name: "JOIN EXEC",
+		sql:  "SELECT e.id, u.name FROM stdin e JOIN EXEC('cat /tmp/users.ndjson') u ON e.user_id = u.id",
+		check: func(t *testing.T, stmt *ast.SelectStatement) {
+			if stmt.Join == nil {
+				t.Fatal("expected JOIN")
+			}
+			if stmt.Join.Exec == nil {
+				t.Fatal("expected JOIN EXEC")
+			}
+			if stmt.Join.Exec.Command != "cat /tmp/users.ndjson" {
+				t.Errorf("command: got %q, want %q", stmt.Join.Exec.Command, "cat /tmp/users.ndjson")
+			}
+			if stmt.Join.Alias != "u" {
+				t.Errorf("alias: got %q, want %q", stmt.Join.Alias, "u")
+			}
+		},
+	},
+	{
+		name: "JOIN EXEC with FORMAT",
+		sql:  "SELECT * FROM stdin e JOIN EXEC('psql -c \"COPY users TO STDOUT\"') u FORMAT CSV ON e.id = u.id",
+		check: func(t *testing.T, stmt *ast.SelectStatement) {
+			if stmt.Join == nil || stmt.Join.Exec == nil {
+				t.Fatal("expected JOIN EXEC")
+			}
+			if stmt.Join.Exec.Format != "CSV" {
+				t.Errorf("format: got %q, want %q", stmt.Join.Exec.Format, "CSV")
+			}
+		},
+	},
+	{
+		name: "SEED FROM EXEC",
+		sql:  "SELECT region, COUNT(*) FROM 'kafka://b/t' SEED FROM EXEC('bq query --format=json \"SELECT * FROM snap\"') GROUP BY region",
+		check: func(t *testing.T, stmt *ast.SelectStatement) {
+			if stmt.Seed == nil {
+				t.Fatal("expected SEED")
+			}
+			if stmt.Seed.Exec == nil {
+				t.Fatal("expected SEED EXEC")
+			}
+			if stmt.Seed.Exec.Command != "bq query --format=json \"SELECT * FROM snap\"" {
+				t.Errorf("command: got %q", stmt.Seed.Exec.Command)
+			}
+		},
+	},
+	{
+		name: "LEFT JOIN EXEC",
+		sql:  "SELECT * FROM stdin e LEFT JOIN EXEC('cat ref.json') r ON e.id = r.id",
+		check: func(t *testing.T, stmt *ast.SelectStatement) {
+			if stmt.Join == nil || stmt.Join.Exec == nil {
+				t.Fatal("expected LEFT JOIN EXEC")
+			}
+			if stmt.Join.Type != "LEFT JOIN" {
+				t.Errorf("join type: got %q, want %q", stmt.Join.Type, "LEFT JOIN")
+			}
+		},
+	},
 	}
 
 	for _, tt := range tests {
