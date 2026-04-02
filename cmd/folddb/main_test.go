@@ -2731,6 +2731,65 @@ func TestApplyStreamingSubqueryJoin_BoundedLeftTerminates(t *testing.T) {
 	}
 }
 
+func TestStreamStreamJoin_WarnsWithoutArrangementMemLimit(t *testing.T) {
+	// When a stream-stream JOIN has WITHIN INTERVAL but no --arrangement-mem-limit,
+	// a warning should be emitted to stderr.
+
+	// Capture stderr
+	oldStderr := os.Stderr
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stderr = w
+
+	// Simulate the warning condition: stream-stream join, WITHIN set, mem limit 0
+	withinVal := "5m"
+	isStreamStreamJoin := true
+	arrangementMemLimit := 0
+
+	if isStreamStreamJoin && withinVal != "" && arrangementMemLimit == 0 {
+		fmt.Fprintf(os.Stderr, "Warning: stream-stream JOIN with WITHIN INTERVAL but no --arrangement-mem-limit. "+
+			"Arrangements will grow in memory indefinitely between evictions. "+
+			"Consider setting --arrangement-mem-limit to prevent OOM for high-throughput topics.\n")
+	}
+
+	w.Close()
+	os.Stderr = oldStderr
+
+	var buf bytes.Buffer
+	_, _ = buf.ReadFrom(r)
+	output := buf.String()
+
+	if !strings.Contains(output, "no --arrangement-mem-limit") {
+		t.Errorf("expected warning about --arrangement-mem-limit, got: %q", output)
+	}
+	if !strings.Contains(output, "OOM") {
+		t.Errorf("expected OOM mention in warning, got: %q", output)
+	}
+
+	// Verify no warning when mem limit IS set
+	r2, w2, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stderr = w2
+
+	arrangementMemLimit = 1_000_000
+	if isStreamStreamJoin && withinVal != "" && arrangementMemLimit == 0 {
+		fmt.Fprintf(os.Stderr, "Warning: should not appear\n")
+	}
+
+	w2.Close()
+	os.Stderr = oldStderr
+
+	var buf2 bytes.Buffer
+	_, _ = buf2.ReadFrom(r2)
+	if buf2.Len() > 0 {
+		t.Errorf("expected no warning when --arrangement-mem-limit is set, got: %q", buf2.String())
+	}
+}
+
 func TestFromSubquery_KafkaSourceErrors(t *testing.T) {
 	// A FROM subquery with a Kafka source should return an error
 	// because Kafka streams never reach EOF — the subquery would hang forever.

@@ -309,6 +309,14 @@ func run() error {
 		return fmt.Errorf("stream-stream joins require a WITHIN INTERVAL clause to bound retention")
 	}
 
+	// Warn when WITHIN is set but --arrangement-mem-limit is not, since arrangements
+	// will grow in memory indefinitely between evictions.
+	if isStreamStreamJoin && stmt.Join.Within != nil && q.ArrangementMemLimit == 0 {
+		fmt.Fprintf(os.Stderr, "Warning: stream-stream JOIN with WITHIN INTERVAL but no --arrangement-mem-limit. "+
+			"Arrangements will grow in memory indefinitely between evictions. "+
+			"Consider setting --arrangement-mem-limit to prevent OOM for high-throughput topics.\n")
+	}
+
 	// Detect streaming subquery: JOIN against a subquery whose FROM is a Kafka stream.
 	// These run concurrently — the inner query feeds Z-set deltas to ProcessRightDelta.
 	isStreamingSubq := stmt.Join != nil && isStreamingSubquery(stmt.Join.Subquery)
