@@ -296,8 +296,9 @@ func run() error {
 	isWindowed := stmt.Window != nil
 
 	// Detect stream-stream join: both FROM and JOIN are Kafka URIs
+	// Subquery sources are never stream-stream (they're materialized).
 	isStreamStreamJoin := false
-	if stmt.Join != nil && stmt.From != nil {
+	if stmt.Join != nil && stmt.Join.Subquery == nil && stmt.From != nil && stmt.FromSubquery == nil {
 		leftIsKafka := strings.HasPrefix(stmt.From.URI, "kafka://")
 		rightIsKafka := strings.HasPrefix(stmt.Join.Source.URI, "kafka://")
 		isStreamStreamJoin = leftIsKafka && rightIsKafka
@@ -325,6 +326,33 @@ func run() error {
 		stateDir:           q.StateDir,
 		checkpointInterval: q.CheckpointInterval,
 		sql:                sql,
+	}
+
+	// FROM subquery: execute inner query, feed results into outer pipeline
+	if stmt.FromSubquery != nil {
+		subRecords, subErr := executeSubquery(runCtx, stmt.FromSubquery.Query)
+		if subErr != nil {
+			return fmt.Errorf("FROM subquery error: %w", subErr)
+		}
+		recordCh := make(chan engine.Record, len(subRecords))
+		for _, rec := range subRecords {
+			recordCh <- rec
+		}
+		close(recordCh)
+
+		// Apply JOIN if present
+		var finalCh <-chan engine.Record = recordCh
+		if joinOp != nil {
+			finalCh = applyJoin(runCtx, joinOp, recordCh)
+		}
+
+		if isWindowed {
+			return runWindowedFromRecords(runCtx, stmt, finalCh, flags)
+		}
+		if isAccumulating {
+			return runAccumulatingFromRecords(runCtx, stmt, finalCh, flags)
+		}
+		return runNonAccumulatingFromRecords(runCtx, stmt, finalCh)
 	}
 
 	// Determine source and build record channel
@@ -1248,7 +1276,9 @@ func printQueryPlan(stmt *ast.SelectStatement) {
 	fmt.Fprintln(os.Stderr, "Query Plan:")
 
 	// Source
-	if stmt.From != nil && stmt.From.URI != "" {
+	if stmt.FromSubquery != nil {
+		fmt.Fprintf(os.Stderr, "  Source: Subquery (alias: %s)\n", stmt.FromSubquery.Alias)
+	} else if stmt.From != nil && stmt.From.URI != "" {
 		if strings.HasPrefix(stmt.From.URI, "kafka://") {
 			fmt.Fprintf(os.Stderr, "  Source: Kafka (%s)\n", stmt.From.URI)
 		} else {
@@ -1260,7 +1290,11 @@ func printQueryPlan(stmt *ast.SelectStatement) {
 
 	// Join
 	if stmt.Join != nil {
-		fmt.Fprintf(os.Stderr, "  %s: %s", stmt.Join.Type, stmt.Join.Source.URI)
+		if stmt.Join.Subquery != nil {
+			fmt.Fprintf(os.Stderr, "  %s: Subquery (alias: %s)", stmt.Join.Type, stmt.Join.Subquery.Alias)
+		} else {
+			fmt.Fprintf(os.Stderr, "  %s: %s", stmt.Join.Type, stmt.Join.Source.URI)
+		}
 		if stmt.Join.Alias != "" {
 			fmt.Fprintf(os.Stderr, " (alias: %s)", stmt.Join.Alias)
 		}
@@ -1474,7 +1508,7 @@ func runServe(c *ServeCmd) error {
 	isAccumulating := stmt.GroupBy != nil
 
 	// Validate stream-stream join in serve mode
-	if stmt.Join != nil && stmt.From != nil {
+	if stmt.Join != nil && stmt.Join.Subquery == nil && stmt.From != nil && stmt.FromSubquery == nil {
 		leftIsKafka := strings.HasPrefix(stmt.From.URI, "kafka://")
 		rightIsKafka := strings.HasPrefix(stmt.Join.Source.URI, "kafka://")
 		if leftIsKafka && rightIsKafka {
@@ -1924,14 +1958,26 @@ func loadSeedRecords(stmt *ast.SelectStatement) ([]engine.Record, error) {
 func buildDDJoinOp(stmt *ast.SelectStatement, arrangementMemLimit int) (*engine.DDJoinOp, error) {
 	join := stmt.Join
 
-	// Load table file
-	tableFormat := ""
-	if join.Source != nil {
-		tableFormat = join.Source.Format
-	}
-	tableRecords, err := loadTableFile(join.Source.URI, tableFormat)
-	if err != nil {
-		return nil, fmt.Errorf("join table load error: %w", err)
+	var tableRecords []engine.Record
+	var err error
+
+	if join.Subquery != nil {
+		// JOIN source is a subquery — execute it to get materialized records
+		ctx := context.Background()
+		tableRecords, err = executeSubquery(ctx, join.Subquery.Query)
+		if err != nil {
+			return nil, fmt.Errorf("join subquery execution error: %w", err)
+		}
+	} else {
+		// Load table file
+		tableFormat := ""
+		if join.Source != nil {
+			tableFormat = join.Source.Format
+		}
+		tableRecords, err = loadTableFile(join.Source.URI, tableFormat)
+		if err != nil {
+			return nil, fmt.Errorf("join table load error: %w", err)
+		}
 	}
 
 	streamAlias := stmt.FromAlias
