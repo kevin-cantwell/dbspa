@@ -418,6 +418,19 @@ func runKafka(ctx context.Context, stmt *ast.SelectStatement, dec format.Decoder
 		return err
 	}
 
+	// If a Schema Registry URL is configured, use a registry-aware decoder
+	if cfg.Registry != "" {
+		formatStr := ""
+		if stmt.From != nil {
+			formatStr = stmt.From.Format
+		}
+		regDec, err := format.NewDecoderForKafka(formatStr, nil, cfg.Registry)
+		if err != nil {
+			return fmt.Errorf("registry decoder error: %w", err)
+		}
+		dec = regDec
+	}
+
 	kafkaSrc := source.NewKafka(ctx, cfg)
 	kafkaCh := kafkaSrc.Read()
 
@@ -1530,6 +1543,19 @@ func runServeKafka(ctx context.Context, stmt *ast.SelectStatement, dec format.De
 	cfg, err := source.ParseKafkaURI(stmt.From.URI)
 	if err != nil {
 		return err
+	}
+
+	// If a Schema Registry URL is configured, use a registry-aware decoder
+	if cfg.Registry != "" {
+		formatStr := ""
+		if stmt.From != nil {
+			formatStr = stmt.From.Format
+		}
+		regDec, err := format.NewDecoderForKafka(formatStr, nil, cfg.Registry)
+		if err != nil {
+			return fmt.Errorf("registry decoder error: %w", err)
+		}
+		dec = regDec
 	}
 
 	kafkaSrc := source.NewKafka(ctx, cfg)
