@@ -1995,6 +1995,108 @@ func TestPositiveSQL(t *testing.T) {
 				}
 			},
 		},
+	// =====================================================================
+	// Subqueries in FROM and JOIN
+	// =====================================================================
+	{
+		name: "subquery in FROM",
+		sql:  "SELECT * FROM (SELECT * FROM '/data/file.csv') t",
+		check: func(t *testing.T, stmt *ast.SelectStatement) {
+			if stmt.FromSubquery == nil {
+				t.Fatal("expected FromSubquery to be non-nil")
+			}
+			if stmt.FromSubquery.Alias != "t" {
+				t.Errorf("alias: got %q, want %q", stmt.FromSubquery.Alias, "t")
+			}
+			inner := stmt.FromSubquery.Query
+			if inner == nil {
+				t.Fatal("expected inner query to be non-nil")
+			}
+			if inner.From == nil || inner.From.URI != "/data/file.csv" {
+				t.Error("inner query should have FROM '/data/file.csv'")
+			}
+			if stmt.From != nil {
+				t.Error("expected From to be nil when FromSubquery is set")
+			}
+		},
+	},
+	{
+		name: "subquery in FROM with GROUP BY",
+		sql:  "SELECT * FROM (SELECT status, COUNT(*) AS cnt GROUP BY status) t WHERE cnt > 100",
+		check: func(t *testing.T, stmt *ast.SelectStatement) {
+			if stmt.FromSubquery == nil {
+				t.Fatal("expected FromSubquery")
+			}
+			if stmt.FromSubquery.Alias != "t" {
+				t.Errorf("alias: got %q, want %q", stmt.FromSubquery.Alias, "t")
+			}
+			inner := stmt.FromSubquery.Query
+			if len(inner.GroupBy) == 0 {
+				t.Error("inner query should have GROUP BY")
+			}
+			if stmt.Where == nil {
+				t.Error("outer query should have WHERE")
+			}
+		},
+	},
+	{
+		name: "subquery as JOIN source",
+		sql:  "SELECT e.id, r.x FROM stdin e JOIN (SELECT x GROUP BY x) r ON e.id = r.x",
+		check: func(t *testing.T, stmt *ast.SelectStatement) {
+			if stmt.Join == nil {
+				t.Fatal("expected JOIN")
+			}
+			if stmt.Join.Subquery == nil {
+				t.Fatal("expected JOIN subquery")
+			}
+			if stmt.Join.Subquery.Alias != "r" {
+				t.Errorf("alias: got %q, want %q", stmt.Join.Subquery.Alias, "r")
+			}
+			if stmt.Join.Source != nil {
+				t.Error("JOIN.Source should be nil when Subquery is set")
+			}
+			if stmt.Join.Alias != "r" {
+				t.Errorf("JOIN.Alias: got %q, want %q", stmt.Join.Alias, "r")
+			}
+		},
+	},
+	{
+		name: "nested subquery",
+		sql:  "SELECT * FROM (SELECT * FROM (SELECT 1) t1) t2",
+		check: func(t *testing.T, stmt *ast.SelectStatement) {
+			if stmt.FromSubquery == nil {
+				t.Fatal("expected outer FromSubquery")
+			}
+			if stmt.FromSubquery.Alias != "t2" {
+				t.Errorf("outer alias: got %q, want %q", stmt.FromSubquery.Alias, "t2")
+			}
+			inner := stmt.FromSubquery.Query
+			if inner.FromSubquery == nil {
+				t.Fatal("expected nested FromSubquery")
+			}
+			if inner.FromSubquery.Alias != "t1" {
+				t.Errorf("inner alias: got %q, want %q", inner.FromSubquery.Alias, "t1")
+			}
+		},
+	},
+	{
+		name: "LEFT JOIN with subquery",
+		sql:  "SELECT e.id FROM stdin e LEFT JOIN (SELECT id FROM '/tmp/ref.ndjson') r ON e.id = r.id",
+		check: func(t *testing.T, stmt *ast.SelectStatement) {
+			if stmt.Join == nil {
+				t.Fatal("expected JOIN")
+			}
+			if stmt.Join.Type != "LEFT JOIN" {
+				t.Errorf("join type: got %q, want %q", stmt.Join.Type, "LEFT JOIN")
+			}
+			if stmt.Join.Subquery == nil {
+				t.Fatal("expected JOIN subquery")
+			}
+			if stmt.Join.Subquery.Alias != "r" {
+				t.Errorf("alias: got %q, want %q", stmt.Join.Subquery.Alias, "r")
+			}
+		},
+	},
 	}
 
 	for _, tt := range tests {

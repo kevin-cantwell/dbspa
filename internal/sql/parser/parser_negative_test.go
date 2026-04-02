@@ -510,6 +510,22 @@ func TestNegativeSQL(t *testing.T) {
 			sql:         "SELECT a.b.",
 			errContains: "expected field name after dot",
 		},
+		// ===== Subquery errors =====
+		{
+			name:        "subquery in FROM without alias",
+			sql:         "SELECT * FROM (SELECT 1) WHERE x > 1",
+			errContains: "subquery requires an alias",
+		},
+		{
+			name:        "subquery in JOIN without alias",
+			sql:         "SELECT * FROM stdin e JOIN (SELECT x) ON e.id = x",
+			errContains: "subquery requires an alias",
+		},
+		{
+			name:        "subquery with clause keyword as alias",
+			sql:         "SELECT * FROM (SELECT 1) WHERE",
+			errContains: "subquery requires an alias",
+		},
 	}
 
 	for _, tt := range tests {
