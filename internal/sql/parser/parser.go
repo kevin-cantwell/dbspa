@@ -69,6 +69,10 @@ func (p *Parser) parseSelect() (*ast.SelectStatement, error) {
 				p.lex.Next()
 				stmt.FromAlias = next.Literal
 			}
+			// Parse optional AS STREAM / AS TABLE
+			if err := p.parseExecMode(execSrc); err != nil {
+				return nil, err
+			}
 		} else if p.lex.Peek().Type == lexer.TokenLParen {
 			// Check for subquery: FROM (SELECT ...)
 			subq, err := p.parseSubquerySource()
@@ -588,6 +592,10 @@ func (p *Parser) parseJoinClause() (*ast.JoinClause, error) {
 			p.lex.Next()
 			alias = next.Literal
 		}
+		// Parse optional AS STREAM / AS TABLE
+		if err := p.parseExecMode(execSrc); err != nil {
+			return nil, err
+		}
 		// Parse optional FORMAT
 		if execSrc.Format == "" && p.lex.Peek().Type == lexer.TokenFormat {
 			if err := p.parseFormatIntoExec(execSrc); err != nil {
@@ -668,6 +676,13 @@ func (p *Parser) parseSeedClause() (*ast.SeedClause, error) {
 		if err != nil {
 			return nil, err
 		}
+		// Parse optional AS STREAM / AS TABLE
+		if err := p.parseExecMode(execSrc); err != nil {
+			return nil, err
+		}
+		if execSrc.Mode == "STREAM" {
+			return nil, p.errorf(p.lex.Peek(), "SEED FROM EXEC cannot use AS STREAM (seed must be bounded)")
+		}
 		// Parse optional FORMAT
 		if execSrc.Format == "" && p.lex.Peek().Type == lexer.TokenFormat {
 			if err := p.parseFormatIntoExec(execSrc); err != nil {
@@ -706,7 +721,27 @@ func (p *Parser) parseExecSource() (*ast.ExecSource, error) {
 	if err := p.expect(lexer.TokenRParen); err != nil {
 		return nil, err
 	}
-	return &ast.ExecSource{Command: cmdTok.Literal}, nil
+	exec := &ast.ExecSource{Command: cmdTok.Literal}
+	return exec, nil
+}
+
+// parseExecMode checks for an optional AS STREAM / AS TABLE hint after an
+// EXEC source (and its optional alias). If present it sets exec.Mode;
+// otherwise it defaults to "TABLE".
+func (p *Parser) parseExecMode(exec *ast.ExecSource) error {
+	if p.lex.Peek().Type == lexer.TokenAs {
+		p.lex.Next() // consume AS
+		modeTok := p.lex.Next()
+		mode := strings.ToUpper(modeTok.Literal)
+		if mode != "STREAM" && mode != "TABLE" {
+			return p.errorf(modeTok, "expected STREAM or TABLE after AS, got %q", modeTok.Literal)
+		}
+		exec.Mode = mode
+	}
+	if exec.Mode == "" {
+		exec.Mode = "TABLE"
+	}
+	return nil
 }
 
 // parseFormatIntoExec consumes a FORMAT clause and writes the format name and
