@@ -56,8 +56,21 @@ func (p *Parser) parseSelect() (*ast.SelectStatement, error) {
 	// FROM (optional)
 	if p.lex.Peek().Type == lexer.TokenFrom {
 		p.lex.Next()
-		// Check for subquery: FROM (SELECT ...)
-		if p.lex.Peek().Type == lexer.TokenLParen {
+		// Check for EXEC: FROM EXEC('command')
+		if p.lex.Peek().Type == lexer.TokenExec {
+			execSrc, err := p.parseExecSource()
+			if err != nil {
+				return nil, err
+			}
+			stmt.FromExec = execSrc
+			// Parse optional alias after EXEC(...)
+			next := p.lex.Peek()
+			if next.Type == lexer.TokenIdent && !isClauseKeyword(next.Type) {
+				p.lex.Next()
+				stmt.FromAlias = next.Literal
+			}
+		} else if p.lex.Peek().Type == lexer.TokenLParen {
+			// Check for subquery: FROM (SELECT ...)
 			subq, err := p.parseSubquerySource()
 			if err != nil {
 				return nil, err
@@ -77,6 +90,12 @@ func (p *Parser) parseSelect() (*ast.SelectStatement, error) {
 	// FORMAT after FROM source+alias but before JOIN (e.g., FROM stdin e FORMAT DEBEZIUM JOIN ...)
 	if stmt.From != nil && stmt.From.Format == "" && p.lex.Peek().Type == lexer.TokenFormat {
 		if err := p.parseFormatInto(stmt.From); err != nil {
+			return nil, err
+		}
+	}
+	// FORMAT after FROM EXEC(...) [alias] FORMAT ...
+	if stmt.FromExec != nil && stmt.FromExec.Format == "" && p.lex.Peek().Type == lexer.TokenFormat {
+		if err := p.parseFormatIntoExec(stmt.FromExec); err != nil {
 			return nil, err
 		}
 	}
@@ -238,13 +257,17 @@ func (p *Parser) parseSelect() (*ast.SelectStatement, error) {
 	// This allows: SELECT ... WHERE ... FORMAT CSV
 	// Also: SELECT ... FROM stdin JOIN ... WHERE ... FORMAT DEBEZIUM
 	if p.lex.Peek().Type == lexer.TokenFormat {
-		if stmt.From == nil {
+		if stmt.FromExec != nil && stmt.FromExec.Format == "" {
+			if err := p.parseFormatIntoExec(stmt.FromExec); err != nil {
+				return nil, err
+			}
+		} else if stmt.From == nil && stmt.FromExec == nil {
 			src, err := p.parseStandaloneFormat()
 			if err != nil {
 				return nil, err
 			}
 			stmt.From = src
-		} else if stmt.From.Format == "" {
+		} else if stmt.From != nil && stmt.From.Format == "" {
 			if err := p.parseFormatInto(stmt.From); err != nil {
 				return nil, err
 			}
@@ -546,12 +569,32 @@ func (p *Parser) parseJoinClause() (*ast.JoinClause, error) {
 		return nil, err
 	}
 
-	// Parse join source: subquery or string literal (file path)
+	// Parse join source: EXEC, subquery, or string literal (file path)
 	var src *ast.TableSource
 	var subq *ast.SubquerySource
+	var execSrc *ast.ExecSource
 	var alias string
 
-	if p.lex.Peek().Type == lexer.TokenLParen {
+	if p.lex.Peek().Type == lexer.TokenExec {
+		// EXEC as JOIN source: JOIN EXEC('command') alias
+		var err error
+		execSrc, err = p.parseExecSource()
+		if err != nil {
+			return nil, err
+		}
+		// Parse optional alias
+		next := p.lex.Peek()
+		if next.Type == lexer.TokenIdent && !isClauseKeyword(next.Type) {
+			p.lex.Next()
+			alias = next.Literal
+		}
+		// Parse optional FORMAT
+		if execSrc.Format == "" && p.lex.Peek().Type == lexer.TokenFormat {
+			if err := p.parseFormatIntoExec(execSrc); err != nil {
+				return nil, err
+			}
+		}
+	} else if p.lex.Peek().Type == lexer.TokenLParen {
 		// Subquery as JOIN source: JOIN (SELECT ...) alias
 		var err error
 		subq, err = p.parseSubquerySource()
@@ -562,7 +605,7 @@ func (p *Parser) parseJoinClause() (*ast.JoinClause, error) {
 	} else {
 		tok := p.lex.Peek()
 		if tok.Type != lexer.TokenString {
-			return nil, p.errorf(tok, "expected file path string or subquery after JOIN, got %q", tok.Literal)
+			return nil, p.errorf(tok, "expected file path string, subquery, or EXEC() after JOIN, got %q", tok.Literal)
 		}
 		var err error
 		src, err = p.parseTableSource()
@@ -605,22 +648,38 @@ func (p *Parser) parseJoinClause() (*ast.JoinClause, error) {
 		Type:      joinType,
 		Source:    src,
 		Subquery:  subq,
+		Exec:      execSrc,
 		Alias:     alias,
 		Condition: cond,
 		Within:    within,
 	}, nil
 }
 
-// parseSeedClause parses SEED FROM '<file-path>' [FORMAT <format>]
+// parseSeedClause parses SEED FROM '<file-path>' [FORMAT <format>] or SEED FROM EXEC('command')
 func (p *Parser) parseSeedClause() (*ast.SeedClause, error) {
 	p.lex.Next() // consume SEED
 	if err := p.expect(lexer.TokenFrom); err != nil {
 		return nil, err
 	}
 
+	// Check for EXEC source
+	if p.lex.Peek().Type == lexer.TokenExec {
+		execSrc, err := p.parseExecSource()
+		if err != nil {
+			return nil, err
+		}
+		// Parse optional FORMAT
+		if execSrc.Format == "" && p.lex.Peek().Type == lexer.TokenFormat {
+			if err := p.parseFormatIntoExec(execSrc); err != nil {
+				return nil, err
+			}
+		}
+		return &ast.SeedClause{Exec: execSrc}, nil
+	}
+
 	tok := p.lex.Peek()
 	if tok.Type != lexer.TokenString {
-		return nil, p.errorf(tok, "expected file path string after SEED FROM, got %q", tok.Literal)
+		return nil, p.errorf(tok, "expected file path string or EXEC() after SEED FROM, got %q", tok.Literal)
 	}
 	src, err := p.parseTableSource()
 	if err != nil {
@@ -628,6 +687,78 @@ func (p *Parser) parseSeedClause() (*ast.SeedClause, error) {
 	}
 
 	return &ast.SeedClause{Source: src}, nil
+}
+
+// parseExecSource parses EXEC('command') and returns an ExecSource.
+// The EXEC keyword has already been peeked but not consumed.
+func (p *Parser) parseExecSource() (*ast.ExecSource, error) {
+	execTok := p.lex.Next() // consume EXEC
+	if err := p.expect(lexer.TokenLParen); err != nil {
+		return nil, p.errorf(execTok, "EXEC requires parentheses: EXEC('command')")
+	}
+	cmdTok := p.lex.Next()
+	if cmdTok.Type != lexer.TokenString {
+		return nil, p.errorf(cmdTok, "EXEC requires a single-quoted command string, got %q", cmdTok.Literal)
+	}
+	if cmdTok.Literal == "" {
+		return nil, p.errorf(cmdTok, "EXEC command string must not be empty")
+	}
+	if err := p.expect(lexer.TokenRParen); err != nil {
+		return nil, err
+	}
+	return &ast.ExecSource{Command: cmdTok.Literal}, nil
+}
+
+// parseFormatIntoExec consumes a FORMAT clause and writes the format name and
+// options into the given ExecSource. The caller must have already verified
+// that the next token is TokenFormat.
+func (p *Parser) parseFormatIntoExec(src *ast.ExecSource) error {
+	p.lex.Next() // consume FORMAT
+	fmtTok := p.lex.Next()
+	if fmtTok.Type == lexer.TokenEOF {
+		return p.errorf(fmtTok, "expected format name after FORMAT")
+	}
+	src.Format = strings.ToUpper(fmtTok.Literal)
+	// Parse optional format options: FORMAT CSV(key=value, ...)
+	if p.lex.Peek().Type == lexer.TokenLParen {
+		p.lex.Next()
+		opts := make(map[string]string)
+		for p.lex.Peek().Type != lexer.TokenRParen && p.lex.Peek().Type != lexer.TokenEOF {
+			keyTok := p.lex.Next()
+			if keyTok.Type != lexer.TokenIdent && !lexer.IsKeyword(keyTok.Type) {
+				return p.errorf(keyTok, "expected option name, got %q", keyTok.Literal)
+			}
+			key := strings.ToLower(keyTok.Literal)
+			if err := p.expect(lexer.TokenEq); err != nil {
+				return err
+			}
+			valTok := p.lex.Next()
+			var val string
+			switch valTok.Type {
+			case lexer.TokenString:
+				val = valTok.Literal
+			case lexer.TokenTrue:
+				val = "true"
+			case lexer.TokenFalse:
+				val = "false"
+			case lexer.TokenInteger:
+				val = valTok.Literal
+			case lexer.TokenIdent:
+				val = valTok.Literal
+			default:
+				return p.errorf(valTok, "expected option value, got %q", valTok.Literal)
+			}
+			opts[key] = val
+			if p.lex.Peek().Type == lexer.TokenComma {
+				p.lex.Next()
+			}
+		}
+		if err := p.expect(lexer.TokenRParen); err != nil {
+			return err
+		}
+		src.FormatOptions = opts
+	}
+	return nil
 }
 
 func (p *Parser) parseWindowClause() (*ast.WindowClause, error) {
@@ -1378,7 +1509,7 @@ func isClauseKeyword(tt lexer.TokenType) bool {
 		lexer.TokenOrder, lexer.TokenLimit, lexer.TokenWindow, lexer.TokenEmit,
 		lexer.TokenEvent, lexer.TokenWatermark, lexer.TokenDeduplicate,
 		lexer.TokenFormat, lexer.TokenJoin, lexer.TokenLeft, lexer.TokenOn,
-		lexer.TokenWithin:
+		lexer.TokenWithin, lexer.TokenExec:
 		return true
 	}
 	return false

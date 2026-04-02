@@ -14,7 +14,9 @@ type Expr interface {
 
 // ExecSource represents a shell command whose stdout is used as a record source.
 type ExecSource struct {
-	Command string // the shell command to execute
+	Command       string            // the shell command to execute
+	Format        string            // e.g., "CSV", "DEBEZIUM", empty for default (NDJSON)
+	FormatOptions map[string]string // e.g., delimiter=',', header=true
 }
 
 func (*ExecSource) nodeTag() {}

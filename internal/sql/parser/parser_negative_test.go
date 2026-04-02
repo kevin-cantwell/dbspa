@@ -343,7 +343,7 @@ func TestNegativeSQL(t *testing.T) {
 		{
 			name:        "JOIN without source",
 			sql:         "SELECT * FROM stdin JOIN ON x = y",
-			errContains: "expected file path string or subquery after JOIN",
+			errContains: "expected file path string, subquery, or EXEC() after JOIN",
 		},
 		{
 			name:        "LEFT without JOIN",
@@ -416,12 +416,12 @@ func TestNegativeSQL(t *testing.T) {
 		{
 			name:        "SEED FROM missing file path",
 			sql:         "SELECT * FROM 'kafka://b/t' SEED FROM",
-			errContains: "expected file path string after SEED FROM",
+			errContains: "expected file path string or EXEC() after SEED FROM",
 		},
 		{
 			name:        "SEED FROM with bare identifier instead of string",
 			sql:         "SELECT * FROM 'kafka://b/t' SEED FROM snapshot",
-			errContains: "expected file path string after SEED FROM",
+			errContains: "expected file path string or EXEC() after SEED FROM",
 		},
 
 		// ===== Unsupported SQL features =====
