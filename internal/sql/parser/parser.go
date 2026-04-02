@@ -296,6 +296,9 @@ func (p *Parser) parseStandaloneFormat() (*ast.TableSource, error) {
 func (p *Parser) parseFormatInto(src *ast.TableSource) error {
 	p.lex.Next() // consume FORMAT
 	fmtTok := p.lex.Next()
+	if fmtTok.Type == lexer.TokenEOF {
+		return p.errorf(fmtTok, "expected format name after FORMAT")
+	}
 	src.Format = strings.ToUpper(fmtTok.Literal)
 	// Parse optional format options: FORMAT CSV(key=value, ...)
 	if p.lex.Peek().Type == lexer.TokenLParen {
@@ -1022,8 +1025,9 @@ func (p *Parser) parsePrimary() (ast.Expr, error) {
 		p.lex.Next()
 		return &ast.NullLiteral{}, nil
 	case lexer.TokenStar:
-		p.lex.Next()
-		return &ast.StarExpr{}, nil
+		// Star (*) is only valid as a standalone SELECT column or inside COUNT(*).
+		// Both are handled before reaching parsePrimary. Reject it here.
+		return nil, p.errorf(tok, "'*' is not valid in this position")
 	case lexer.TokenInterval:
 		p.lex.Next()
 		valTok := p.lex.Next()
@@ -1081,6 +1085,9 @@ func (p *Parser) parseCastFunction() (ast.Expr, error) {
 func (p *Parser) parseCaseExpr() (ast.Expr, error) {
 	p.lex.Next() // consume CASE
 	var whens []ast.CaseWhen
+	if p.lex.Peek().Type != lexer.TokenWhen {
+		return nil, p.errorf(p.lex.Peek(), "CASE requires at least one WHEN branch")
+	}
 	for p.lex.Peek().Type == lexer.TokenWhen {
 		p.lex.Next()
 		cond, err := p.parseExpr()
@@ -1175,6 +1182,35 @@ func (p *Parser) parseIdentOrFunction() (ast.Expr, error) {
 				return nil, err
 			}
 			return &ast.FunctionCall{Name: funcName, Args: []ast.Expr{&ast.StarExpr{}}}, nil
+		}
+
+		// EXTRACT(field FROM expr) special case — standard SQL syntax
+		if funcName == "EXTRACT" {
+			fieldTok := p.lex.Next()
+			if fieldTok.Type == lexer.TokenFrom {
+				// EXTRACT(FROM ...) — missing field
+				return nil, p.errorf(fieldTok, "expected field name before FROM in EXTRACT")
+			}
+			if p.lex.Peek().Type == lexer.TokenFrom {
+				// EXTRACT(year FROM ts) — standard SQL
+				p.lex.Next() // consume FROM
+				expr, err := p.parseExpr()
+				if err != nil {
+					return nil, err
+				}
+				if err := p.expect(lexer.TokenRParen); err != nil {
+					return nil, err
+				}
+				return &ast.FunctionCall{
+					Name: funcName,
+					Args: []ast.Expr{
+						&ast.StringLiteral{Value: strings.ToLower(fieldTok.Literal)},
+						expr,
+					},
+				}, nil
+			}
+			// EXTRACT(expr) — non-standard, single-arg form. Put the token back.
+			p.lex.Backup()
 		}
 
 		// DISTINCT inside aggregate
