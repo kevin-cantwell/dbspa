@@ -3036,6 +3036,112 @@ func TestFromSubquery_StreamingProducesContinuousOutput(t *testing.T) {
 	cancel() // clean up
 }
 
+func TestFromStreamingSubquery_DeltasFilteredByOuterWhere(t *testing.T) {
+	// Simulate a streaming FROM subquery where the inner accumulating query
+	// produces Z-set deltas that are filtered by the outer WHERE clause.
+	// This tests the core pipeline: inner Kafka-like accumulation -> channel -> outer WHERE filter.
+	//
+	// Scenario: inner query aggregates order counts by status.
+	// Outer query filters for statuses with count > 2.
+	// As deltas arrive, some groups cross the threshold and should appear in output.
+
+	// Simulate the inner streaming subquery output channel (accumulation deltas)
+	innerCh := make(chan engine.Record, 20)
+
+	// Feed accumulation deltas: status="active" count goes 1 -> 2 -> 3
+	// Delta 1: +active cnt=1 (initial insert)
+	innerCh <- engine.Record{
+		Columns: map[string]engine.Value{
+			"status": engine.TextValue{V: "active"},
+			"cnt":    engine.IntValue{V: 1},
+		},
+		Weight: 1,
+	}
+	// Delta 2: -active cnt=1 (retraction), +active cnt=2 (new value)
+	innerCh <- engine.Record{
+		Columns: map[string]engine.Value{
+			"status": engine.TextValue{V: "active"},
+			"cnt":    engine.IntValue{V: 1},
+		},
+		Weight: -1,
+	}
+	innerCh <- engine.Record{
+		Columns: map[string]engine.Value{
+			"status": engine.TextValue{V: "active"},
+			"cnt":    engine.IntValue{V: 2},
+		},
+		Weight: 1,
+	}
+	// Delta 3: -active cnt=2 (retraction), +active cnt=3 (new value -- now passes WHERE cnt > 2)
+	innerCh <- engine.Record{
+		Columns: map[string]engine.Value{
+			"status": engine.TextValue{V: "active"},
+			"cnt":    engine.IntValue{V: 2},
+		},
+		Weight: -1,
+	}
+	innerCh <- engine.Record{
+		Columns: map[string]engine.Value{
+			"status": engine.TextValue{V: "active"},
+			"cnt":    engine.IntValue{V: 3},
+		},
+		Weight: 1,
+	}
+	// Also add a group that never crosses the threshold
+	innerCh <- engine.Record{
+		Columns: map[string]engine.Value{
+			"status": engine.TextValue{V: "pending"},
+			"cnt":    engine.IntValue{V: 1},
+		},
+		Weight: 1,
+	}
+	close(innerCh)
+
+	// Apply the outer pipeline with WHERE cnt > 2
+	// This mirrors what happens in a FROM streaming subquery: deltas are piped
+	// through the outer SELECT/WHERE pipeline.
+	whereExpr := &ast.BinaryExpr{
+		Left:  &ast.ColumnRef{Name: "cnt"},
+		Op:    ">",
+		Right: &ast.NumberLiteral{Value: "2"},
+	}
+
+	pipeline := &engine.Pipeline{
+		Columns: []ast.Column{
+			{Expr: &ast.ColumnRef{Name: "status"}, Alias: "status"},
+			{Expr: &ast.ColumnRef{Name: "cnt"}, Alias: "cnt"},
+		},
+		Where: whereExpr,
+	}
+
+	outputCh := make(chan engine.Record, 20)
+	go func() {
+		pipeline.Process(innerCh, outputCh)
+	}()
+
+	var results []engine.Record
+	for rec := range outputCh {
+		results = append(results, rec)
+	}
+
+	// Only the delta with cnt=3 (weight=+1) should pass the WHERE filter.
+	// cnt=1 and cnt=2 should be filtered out, as should pending (cnt=1).
+	// Retractions with cnt=1 and cnt=2 also don't pass cnt > 2.
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result passing WHERE cnt > 2, got %d: %v", len(results), results)
+	}
+
+	if status, ok := results[0].Columns["status"].(engine.TextValue); !ok || status.V != "active" {
+		t.Errorf("expected status=active, got %v", results[0].Columns["status"])
+	}
+	if cnt, ok := results[0].Columns["cnt"].(engine.IntValue); !ok || cnt.V != 3 {
+		t.Errorf("expected cnt=3, got %v", results[0].Columns["cnt"])
+	}
+	if results[0].Weight != 1 {
+		t.Errorf("expected weight=+1, got %d", results[0].Weight)
+	}
+}
+
 func TestE2E_SubqueryAliasMandatory(t *testing.T) {
 	// FROM subquery without alias should fail
 	sql := "SELECT * FROM (SELECT status, COUNT(*) AS cnt GROUP BY status)"
