@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"sync/atomic"
 
 	"github.com/kevin-cantwell/folddb/internal/engine"
@@ -77,7 +78,9 @@ func executeSubquery(ctx context.Context, stmt *ast.SelectStatement) ([]engine.R
 		sourceRecords = ch
 
 	case fromURI != "" && strings.HasPrefix(fromURI, "kafka://"):
-		return nil, fmt.Errorf("Kafka sources in subqueries are not yet supported")
+		// Kafka sources in materialized subqueries block forever (no EOF).
+		// Streaming subqueries are handled via executeStreamingSubquery instead.
+		return nil, fmt.Errorf("Kafka sources in subqueries must be streaming (use as JOIN subquery with GROUP BY)")
 
 	default:
 		// stdin source (no FROM or FROM stdin)
@@ -267,4 +270,181 @@ func buildSubqueryJoinOp(ctx context.Context, stmt *ast.SelectStatement) (*engin
 	op.Right.Apply(tableBatch)
 
 	return op, nil
+}
+
+// isStreamingSubquery returns true if the subquery's FROM source is a Kafka stream.
+// Streaming subqueries run concurrently with the outer query, feeding Z-set deltas
+// into the DD join via ProcessRightDelta. The subquery must have GROUP BY — without
+// accumulation, raw events don't form a useful join table.
+func isStreamingSubquery(sq *ast.SubquerySource) bool {
+	if sq == nil || sq.Query == nil || sq.Query.From == nil {
+		return false
+	}
+	return strings.HasPrefix(sq.Query.From.URI, "kafka://")
+}
+
+// executeStreamingSubquery runs an accumulating subquery concurrently,
+// sending Z-set deltas (retraction+insertion pairs) to the returned channel.
+// The channel is closed when the context is cancelled or the Kafka source ends.
+//
+// The inner query runs: Kafka → decode → filter → accumulate → outCh
+// Each accumulator change emits a retraction of the old value and insertion of
+// the new value, which the outer query's DD join consumes via ProcessRightDelta.
+func executeStreamingSubquery(ctx context.Context, stmt *ast.SelectStatement) (<-chan engine.Record, error) {
+	if stmt.From == nil || !strings.HasPrefix(stmt.From.URI, "kafka://") {
+		return nil, fmt.Errorf("streaming subquery requires a kafka:// source")
+	}
+
+	// If SELECT has aggregates but no GROUP BY, create an implicit single group
+	if stmt.GroupBy == nil && hasAggregateInSelect(stmt.Columns) {
+		stmt.GroupBy = []ast.Expr{}
+	}
+
+	if stmt.GroupBy == nil {
+		return nil, fmt.Errorf("streaming subquery must have GROUP BY (raw events without accumulation don't form a useful join table)")
+	}
+
+	aggCols, err := engine.ParseAggColumns(stmt.Columns, stmt.GroupBy)
+	if err != nil {
+		return nil, fmt.Errorf("streaming subquery aggregate setup: %w", err)
+	}
+
+	// Parse Kafka URI
+	cfg, err := source.ParseKafkaURI(stmt.From.URI)
+	if err != nil {
+		return nil, fmt.Errorf("streaming subquery kafka URI: %w", err)
+	}
+
+	// Build decoder
+	formatStr := stmt.From.Format
+	formatOpts := stmt.From.FormatOptions
+	var dec format.Decoder
+	if cfg.Registry != "" {
+		dec, err = format.NewDecoderForKafka(formatStr, formatOpts, cfg.Registry)
+	} else {
+		dec, err = format.NewDecoderWithOptions(formatStr, formatOpts)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("streaming subquery decoder: %w", err)
+	}
+
+	outCh := make(chan engine.Record, 256)
+
+	go func() {
+		defer close(outCh)
+
+		kafkaSrc := source.NewKafka(ctx, cfg)
+		kafkaCh := kafkaSrc.Read()
+
+		// Decode Kafka records into engine records
+		recordCh := make(chan engine.Record, 256)
+		go func() {
+			defer close(recordCh)
+			for kr := range kafkaCh {
+				if kr.Value == nil {
+					continue // tombstone
+				}
+				recs, err := decodeWithCSVHeader(dec, kr.Value)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "Warning: streaming subquery decode error: %v\n", err)
+					continue
+				}
+				recs = format.InjectKafkaVirtuals(recs, kr)
+				for _, rec := range recs {
+					select {
+					case recordCh <- rec:
+					case <-ctx.Done():
+						return
+					}
+				}
+			}
+		}()
+
+		// Run accumulating pipeline: filter + aggregate
+		aggOp := engine.NewAggregateOp(aggCols, stmt.GroupBy, stmt.Having)
+		var inputCount atomic.Int64
+		fused := &engine.FusedAggregateProcessor{
+			Where:       stmt.Where,
+			AggregateOp: aggOp,
+			InputCount:  &inputCount,
+		}
+
+		batchedCh := engine.BatchChannel(recordCh, engine.DefaultBatchSize)
+
+		// Forward aggregation deltas to outCh (the channel the outer join reads from)
+		fused.ProcessBatches(batchedCh, outCh)
+	}()
+
+	return outCh, nil
+}
+
+// buildStreamingSubqueryJoinOp constructs a DDJoinOp for a streaming subquery JOIN.
+// Unlike buildDDJoinOp which materializes the right side, this starts the right
+// arrangement empty and returns a channel of Z-set deltas from the inner query.
+// The caller is responsible for feeding these deltas to ProcessRightDelta.
+func buildStreamingSubqueryJoinOp(ctx context.Context, stmt *ast.SelectStatement, arrangementMemLimit int) (*engine.DDJoinOp, <-chan engine.Record, error) {
+	join := stmt.Join
+
+	// Start the streaming inner query
+	innerCh, err := executeStreamingSubquery(ctx, join.Subquery.Query)
+	if err != nil {
+		return nil, nil, fmt.Errorf("streaming subquery: %w", err)
+	}
+
+	streamAlias := stmt.FromAlias
+	tableAlias := join.Alias
+
+	streamKey, tableKey, err := engine.ExtractEquiJoinKeys(join.Condition, streamAlias, tableAlias)
+	if err != nil {
+		return nil, nil, fmt.Errorf("join key extraction error: %w", err)
+	}
+
+	op := engine.NewDDJoinOp(streamKey, tableKey, streamAlias, tableAlias, join.Type == "LEFT JOIN")
+
+	// Use disk-backed arrangements if memory limit is set
+	if arrangementMemLimit > 0 {
+		op.Left = engine.NewDiskArrangement(streamKey, arrangementMemLimit, "")
+		op.Right = engine.NewDiskArrangement(tableKey, arrangementMemLimit, "")
+	}
+
+	// Streaming subquery: right side is NOT static — it receives live deltas.
+	op.RightIsStatic = false
+
+	// Projection pushdown
+	op.ProjectedColumns = engine.ExtractReferencedColumns(stmt)
+
+	return op, innerCh, nil
+}
+
+// applyStreamingSubqueryJoin wraps a left record channel with a DD join that also
+// receives right-side deltas from a streaming subquery. Returns the joined output channel.
+// The right delta goroutine runs concurrently with the left delta processing.
+// The output channel is closed only when both goroutines have finished.
+func applyStreamingSubqueryJoin(ctx context.Context, joinOp *engine.DDJoinOp, leftIn <-chan engine.Record, rightIn <-chan engine.Record) <-chan engine.Record {
+	out := make(chan engine.Record, 256)
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	// Feed right-side deltas from the streaming subquery
+	go func() {
+		defer wg.Done()
+		for rec := range rightIn {
+			joinOp.ProcessRightDelta(engine.Batch{rec}, out)
+		}
+	}()
+
+	// Feed left-side deltas from the outer query's source
+	go func() {
+		defer wg.Done()
+		joinOp.ProcessLeftDeltaStream(ctx, leftIn, out)
+	}()
+
+	// Close output when both sides are done
+	go func() {
+		wg.Wait()
+		close(out)
+	}()
+
+	return out
 }
