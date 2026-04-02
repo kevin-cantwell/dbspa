@@ -36,6 +36,19 @@ func executeSubquery(ctx context.Context, stmt *ast.SelectStatement) ([]engine.R
 	var sourceRecords <-chan engine.Record
 
 	switch {
+	case stmt.FromExec != nil:
+		// EXEC source: run command, materialize records
+		recs, err := materializeExecSource(stmt.FromExec)
+		if err != nil {
+			return nil, fmt.Errorf("subquery EXEC error: %w", err)
+		}
+		ch := make(chan engine.Record, len(recs))
+		for _, rec := range recs {
+			ch <- rec
+		}
+		close(ch)
+		sourceRecords = ch
+
 	case stmt.FromSubquery != nil:
 		// Nested subquery: execute recursively
 		inner, err := executeSubquery(ctx, stmt.FromSubquery.Query)
@@ -233,7 +246,13 @@ func buildSubqueryJoinOp(ctx context.Context, stmt *ast.SelectStatement) (*engin
 	var tableRecords []engine.Record
 	var err error
 
-	if join.Subquery != nil {
+	if join.Exec != nil {
+		// JOIN source is EXEC — run command, materialize records
+		tableRecords, err = materializeExecSource(join.Exec)
+		if err != nil {
+			return nil, fmt.Errorf("join EXEC error: %w", err)
+		}
+	} else if join.Subquery != nil {
 		// JOIN source is itself a subquery — execute recursively
 		tableRecords, err = executeSubquery(ctx, join.Subquery.Query)
 		if err != nil {

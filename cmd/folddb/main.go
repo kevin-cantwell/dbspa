@@ -257,6 +257,9 @@ func run() error {
 	if stmt.From != nil {
 		formatStr = stmt.From.Format
 		formatOpts = stmt.From.FormatOptions
+	} else if stmt.FromExec != nil {
+		formatStr = stmt.FromExec.Format
+		formatOpts = stmt.FromExec.FormatOptions
 	}
 	dec, err := format.NewDecoderWithOptions(formatStr, formatOpts)
 	if err != nil {
@@ -304,9 +307,9 @@ func run() error {
 	}
 
 	// Detect stream-stream join: both FROM and JOIN are Kafka URIs
-	// Subquery sources are never stream-stream (they're materialized).
+	// Subquery and EXEC sources are never stream-stream (they're materialized).
 	isStreamStreamJoin := false
-	if stmt.Join != nil && stmt.Join.Subquery == nil && stmt.From != nil && stmt.FromSubquery == nil {
+	if stmt.Join != nil && stmt.Join.Subquery == nil && stmt.Join.Exec == nil && stmt.From != nil && stmt.FromSubquery == nil && stmt.FromExec == nil {
 		leftIsKafka := strings.HasPrefix(stmt.From.URI, "kafka://")
 		rightIsKafka := strings.HasPrefix(stmt.Join.Source.URI, "kafka://")
 		isStreamStreamJoin = leftIsKafka && rightIsKafka
@@ -405,6 +408,61 @@ func run() error {
 			recordCh <- rec
 		}
 		close(recordCh)
+
+		// Apply JOIN if present
+		var finalCh <-chan engine.Record = recordCh
+		if joinOp != nil && streamingSubqCh != nil {
+			finalCh = applyStreamingSubqueryJoin(runCtx, joinOp, recordCh, streamingSubqCh)
+		} else if joinOp != nil {
+			finalCh = applyJoin(runCtx, joinOp, recordCh)
+		}
+
+		if isWindowed {
+			return runWindowedFromRecords(runCtx, stmt, finalCh, flags)
+		}
+		if isAccumulating {
+			return runAccumulatingFromRecords(runCtx, stmt, finalCh, flags)
+		}
+		return runNonAccumulatingFromRecords(runCtx, stmt, finalCh)
+	}
+
+	// FROM EXEC: run shell command, use stdout as record source
+	if stmt.FromExec != nil {
+		execSrc, execErr := source.NewExecSource(runCtx, stmt.FromExec.Command)
+		if execErr != nil {
+			return fmt.Errorf("EXEC error: %w", execErr)
+		}
+
+		// Build decoded record channel from exec stdout
+		recordCh := make(chan engine.Record, 256)
+		go func() {
+			defer close(recordCh)
+			if sd, ok := dec.(format.StreamDecoder); ok {
+				if err := sd.DecodeStream(execSrc.ReadRaw(), recordCh); err != nil {
+					fmt.Fprintf(os.Stderr, "Warning: EXEC stream decode error: %v\n", err)
+				}
+			} else {
+				rawCh := execSrc.Read()
+				for raw := range rawCh {
+					recs, err := decodeWithCSVHeader(dec, raw)
+					if err != nil {
+						fmt.Fprintf(os.Stderr, "Warning: EXEC decode error: %v\n", err)
+						continue
+					}
+					for _, rec := range recs {
+						select {
+						case recordCh <- rec:
+						case <-runCtx.Done():
+							return
+						}
+					}
+				}
+			}
+			// Wait for command to finish; non-zero exit is a warning, not an error
+			if err := execSrc.Wait(); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: EXEC command exited with error: %v\n", err)
+			}
+		}()
 
 		// Apply JOIN if present
 		var finalCh <-chan engine.Record = recordCh
@@ -1478,7 +1536,9 @@ func printQueryPlan(stmt *ast.SelectStatement) {
 	fmt.Fprintln(os.Stderr, "Query Plan:")
 
 	// Source
-	if stmt.FromSubquery != nil {
+	if stmt.FromExec != nil {
+		fmt.Fprintf(os.Stderr, "  Source: EXEC('%s')\n", stmt.FromExec.Command)
+	} else if stmt.FromSubquery != nil {
 		fmt.Fprintf(os.Stderr, "  Source: Subquery (alias: %s)\n", stmt.FromSubquery.Alias)
 	} else if stmt.From != nil && stmt.From.URI != "" {
 		if strings.HasPrefix(stmt.From.URI, "kafka://") {
@@ -1492,7 +1552,9 @@ func printQueryPlan(stmt *ast.SelectStatement) {
 
 	// Join
 	if stmt.Join != nil {
-		if stmt.Join.Subquery != nil {
+		if stmt.Join.Exec != nil {
+			fmt.Fprintf(os.Stderr, "  %s: EXEC('%s')", stmt.Join.Type, stmt.Join.Exec.Command)
+		} else if stmt.Join.Subquery != nil {
 			if isStreamingSubquery(stmt.Join.Subquery) {
 				fmt.Fprintf(os.Stderr, "  %s: Streaming Subquery (alias: %s)", stmt.Join.Type, stmt.Join.Subquery.Alias)
 			} else {
@@ -1510,11 +1572,19 @@ func printQueryPlan(stmt *ast.SelectStatement) {
 
 	// Seed
 	if stmt.Seed != nil {
-		fmt.Fprintf(os.Stderr, "  Seed: %s", stmt.Seed.Source.URI)
-		if stmt.Seed.Source.Format != "" {
-			fmt.Fprintf(os.Stderr, " (format: %s)", stmt.Seed.Source.Format)
+		if stmt.Seed.Exec != nil {
+			fmt.Fprintf(os.Stderr, "  Seed: EXEC('%s')", stmt.Seed.Exec.Command)
+			if stmt.Seed.Exec.Format != "" {
+				fmt.Fprintf(os.Stderr, " (format: %s)", stmt.Seed.Exec.Format)
+			}
+			fmt.Fprintf(os.Stderr, "\n")
+		} else {
+			fmt.Fprintf(os.Stderr, "  Seed: %s", stmt.Seed.Source.URI)
+			if stmt.Seed.Source.Format != "" {
+				fmt.Fprintf(os.Stderr, " (format: %s)", stmt.Seed.Source.Format)
+			}
+			fmt.Fprintf(os.Stderr, "\n")
 		}
-		fmt.Fprintf(os.Stderr, "\n")
 	}
 
 	// Format
@@ -1712,6 +1782,11 @@ func runServe(c *ServeCmd) error {
 	}
 
 	isAccumulating := stmt.GroupBy != nil
+
+	// EXEC() is not allowed in serve mode — HTTP clients must not trigger shell commands
+	if stmt.FromExec != nil || (stmt.Join != nil && stmt.Join.Exec != nil) || (stmt.Seed != nil && stmt.Seed.Exec != nil) {
+		return fmt.Errorf("EXEC() is not allowed in serve mode (security: HTTP clients must not trigger shell commands)")
+	}
 
 	// Validate stream-stream join in serve mode
 	if stmt.Join != nil && stmt.Join.Subquery == nil && stmt.From != nil && stmt.FromSubquery == nil {
@@ -2133,7 +2208,57 @@ func handleDeserError(dl *deadLetterWriter, err error, raw []byte, offset, parti
 }
 
 // loadSeedFile loads all records from a SEED FROM file (no WHERE filtering).
+// materializeExecSource runs an EXEC command to completion and returns all
+// decoded records. Used for JOIN and SEED FROM positions where the source
+// must be fully materialized before the outer query begins.
+func materializeExecSource(exec *ast.ExecSource) ([]engine.Record, error) {
+	ctx := context.Background()
+	execSrc, err := source.NewExecSource(ctx, exec.Command)
+	if err != nil {
+		return nil, fmt.Errorf("EXEC start error: %w", err)
+	}
+
+	dec, err := format.NewDecoderWithOptions(exec.Format, exec.FormatOptions)
+	if err != nil {
+		return nil, fmt.Errorf("EXEC decoder error: %w", err)
+	}
+
+	var records []engine.Record
+
+	if sd, ok := dec.(format.StreamDecoder); ok {
+		ch := make(chan engine.Record, 256)
+		go func() {
+			if err := sd.DecodeStream(execSrc.ReadRaw(), ch); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: EXEC stream decode error: %v\n", err)
+			}
+		}()
+		for rec := range ch {
+			records = append(records, rec)
+		}
+	} else {
+		rawCh := execSrc.Read()
+		for raw := range rawCh {
+			recs, err := decodeWithCSVHeader(dec, raw)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: EXEC decode error: %v\n", err)
+				continue
+			}
+			records = append(records, recs...)
+		}
+	}
+
+	// Wait for command to finish; non-zero exit is a warning
+	if err := execSrc.Wait(); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: EXEC command exited with error: %v\n", err)
+	}
+
+	return records, nil
+}
+
 func loadSeedFile(seed *ast.SeedClause) ([]engine.Record, error) {
+	if seed.Exec != nil {
+		return materializeExecSource(seed.Exec)
+	}
 	seedFormat := ""
 	if seed.Source != nil {
 		seedFormat = seed.Source.Format
@@ -2172,7 +2297,13 @@ func buildDDJoinOp(stmt *ast.SelectStatement, arrangementMemLimit int) (*engine.
 	var tableRecords []engine.Record
 	var err error
 
-	if join.Subquery != nil {
+	if join.Exec != nil {
+		// JOIN source is EXEC — run command, read all stdout, decode records
+		tableRecords, err = materializeExecSource(join.Exec)
+		if err != nil {
+			return nil, fmt.Errorf("join EXEC error: %w", err)
+		}
+	} else if join.Subquery != nil {
 		// JOIN source is a subquery — execute it to get materialized records
 		ctx := context.Background()
 		tableRecords, err = executeSubquery(ctx, join.Subquery.Query)
