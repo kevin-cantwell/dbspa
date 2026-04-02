@@ -371,6 +371,12 @@ func run() error {
 		return fmt.Errorf("source type %q is not supported. Supported: kafka://, file paths (.parquet, .csv, .json), pg://, mysql://", scheme)
 	}
 
+	// Reject bare file paths that weren't handled by DuckDB (unrecognized extension)
+	if fromURI != "" && !strings.HasPrefix(fromURI, "stdin://") &&
+		(strings.HasPrefix(fromURI, "/") || strings.HasPrefix(fromURI, "./") || strings.HasPrefix(fromURI, "../")) {
+		return fmt.Errorf("cannot determine format for %q. Use a recognized extension (.parquet, .csv, .json, .ndjson, .avro) or specify FORMAT explicitly", fromURI)
+	}
+
 	// Default: stdin source (or --input file)
 	var reader io.Reader = os.Stdin
 	if q.Input != "" {

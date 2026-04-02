@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"io"
+	"math"
 	"slices"
 	"sort"
 	"strconv"
@@ -155,7 +156,11 @@ func writeValue(w *bufio.Writer, v engine.Value) {
 	case engine.IntValue:
 		w.WriteString(strconv.FormatInt(val.V, 10))
 	case engine.FloatValue:
-		w.WriteString(strconv.FormatFloat(val.V, 'f', -1, 64))
+		if math.IsInf(val.V, 0) || math.IsNaN(val.V) {
+			w.WriteString("null")
+		} else {
+			w.WriteString(strconv.FormatFloat(val.V, 'f', -1, 64))
+		}
 	case engine.BoolValue:
 		if val.V {
 			w.WriteString("true")
