@@ -14,6 +14,7 @@ type KafkaConfig struct {
 	Offset    string   // "earliest", "latest", ISO timestamp, or integer offset
 	Partitions []int32 // nil means all
 	Group     string   // consumer group ID; empty = ephemeral
+	Registry  string   // Confluent Schema Registry URL (e.g., "http://schema-registry:8081")
 	SASLUser  string
 	SASLPass  string
 	SASLMech  string   // "PLAIN", "SCRAM-SHA-256", "SCRAM-SHA-512"
@@ -97,6 +98,9 @@ func ParseKafkaURI(raw string) (*KafkaConfig, error) {
 	}
 	if v := q.Get("tls_ca"); v != "" {
 		cfg.TLSCA = v
+	}
+	if v := q.Get("registry"); v != "" {
+		cfg.Registry = v
 	}
 
 	return cfg, nil
