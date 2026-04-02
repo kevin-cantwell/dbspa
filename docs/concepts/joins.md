@@ -139,7 +139,7 @@ The join merge only copies columns that are referenced by the query. For a 30-co
 
 ## Disk-backed arrangements
 
-For large joins or long windows, arrangements can spill to disk. See [Disk-Backed Arrangements](../architecture/performance.md#disk-backed-arrangements) for details on the `--arrangement-mem-limit` flag.
+For large joins or long windows, arrangements can spill to disk. Enable with `--spill-to-disk` or set a memory budget with `--max-memory` (e.g., `--max-memory 512MB`). Stream-stream joins auto-enable spill-to-disk. See [Disk-Backed Arrangements](../architecture/performance.md#disk-backed-arrangements) for overhead benchmarks.
 
 ## Subquery as JOIN source
 
@@ -170,7 +170,38 @@ Without subqueries, you would need to pre-compute the aggregation in a separate 
 
 The subquery supports the full FoldDB SQL dialect (WHERE, GROUP BY, HAVING, LIMIT, nested JOINs). For file-based subqueries, Kafka sources are not supported (they would block forever). For Kafka-based subqueries, see Streaming Subqueries below.
 
-## Streaming Subqueries
+## FROM Streaming Subqueries
+
+A FROM subquery can also use a Kafka source. The inner accumulating query runs concurrently and streams its Z-set deltas (retraction+insertion pairs) to the outer query's pipeline. The outer SELECT/WHERE filters operate on each delta as it arrives, enabling real-time filtering of aggregation results.
+
+```sql
+-- Filter for order statuses with more than 100 orders, updated live
+SELECT * FROM (SELECT status, COUNT(*) AS cnt
+                FROM 'kafka://broker/orders.cdc' FORMAT DEBEZIUM
+                GROUP BY status) t
+WHERE cnt > 100
+```
+
+The inner query maintains a live count-per-status aggregation. Each time the count changes, a retraction of the old value and insertion of the new value flow through the outer WHERE filter. Only groups currently exceeding the threshold appear in the output.
+
+## File Left + Streaming Right
+
+When the outer query's FROM source is a file and the JOIN source is a streaming subquery, the file is loaded into the left arrangement as static reference data and the stream runs continuously on the right side. The query keeps running after the file is fully loaded -- right-side deltas are joined against all loaded left records via `ProcessRightDelta`.
+
+```sql
+-- Enrich a static customer list with live order counts
+SELECT c.name, c.tier, r.order_count
+FROM '/data/customers.parquet' c
+JOIN (
+    SELECT customer_id, COUNT(*) AS order_count
+    FROM 'kafka://broker/orders.cdc' FORMAT DEBEZIUM
+    GROUP BY customer_id
+) r ON c.id = r.customer_id
+```
+
+The customer file is loaded once. As orders stream in, the inner subquery updates the count, and the DD join emits corrected results against the full customer table.
+
+## Streaming Subqueries (JOIN)
 
 When the inner query's FROM source is a Kafka topic (`kafka://`), the subquery runs **concurrently** with the outer query instead of being materialized first. The inner query's accumulation results feed into the DD join as live Z-set deltas via `ProcessRightDelta`.
 

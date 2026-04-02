@@ -142,13 +142,19 @@ The full complex query (CDC + JOIN + 7 aggregates) went through five rounds of o
 
 ## Disk-Backed Arrangements
 
-For large joins and long windows, arrangements can spill to disk using [Badger](https://github.com/dgraph-io/badger) (a pure Go LSM-tree KV store). Enable with `--arrangement-mem-limit N`:
+For large joins and long windows, arrangements can spill to disk using [Badger](https://github.com/dgraph-io/badger) (a pure Go LSM-tree KV store). Enable with `--spill-to-disk` or set a memory budget with `--max-memory`:
 
 ```bash
-folddb --arrangement-mem-limit 10000 "SELECT ... FROM ... JOIN ..."
+# Use default memory budget (1M records)
+folddb --spill-to-disk "SELECT ... FROM ... JOIN ..."
+
+# Set explicit memory budget
+folddb --max-memory 512MB "SELECT ... FROM ... JOIN ..."
 ```
 
-When the in-memory arrangement exceeds N records, the oldest entries (by timestamp) are spilled to Badger on disk. Lookups merge results from memory and disk transparently.
+Stream-stream joins (both FROM and JOIN are Kafka topics) auto-enable spill-to-disk to prevent OOM. Override with `--max-memory` to set an explicit budget.
+
+When the in-memory arrangement exceeds the budget, the oldest entries (by timestamp) are spilled to Badger on disk. Lookups merge results from memory and disk transparently.
 
 ### Overhead
 

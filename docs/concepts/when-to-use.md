@@ -38,7 +38,7 @@ Capability
 | Horizontal scale | No | Yes |
 | Fault tolerance | Checkpoint to disk | Distributed snapshots |
 | Throughput | ~100K events/sec | Millions/sec |
-| Large windows (48h+) | Limited by memory | Handles via RocksDB |
+| Large windows (48h+) | Disk spill via `--spill-to-disk` / `--max-memory` | Handles via RocksDB |
 
 **Use Flink when:** You need production-grade streaming with large state, exactly-once guarantees, horizontal scaling, or complex event processing at high throughput.
 

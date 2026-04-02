@@ -100,7 +100,7 @@ When both `--stateful` and `--state file.db` are used, the SQLite UPSERT and the
 
 ## Disk-backed arrangements
 
-When `--arrangement-mem-limit` is set, join arrangements spill to disk using [Badger](https://github.com/dgraph-io/badger) (a pure Go LSM-tree KV store). The arrangement data is stored separately from checkpoints -- it lives in a temporary directory and is rebuilt on restart from the checkpoint state.
+When `--spill-to-disk` or `--max-memory` is set, join arrangements spill to disk using [Badger](https://github.com/dgraph-io/badger) (a pure Go LSM-tree KV store). The arrangement data is stored separately from checkpoints -- it lives in a temporary directory and is rebuilt on restart from the checkpoint state. Stream-stream joins auto-enable spill-to-disk.
 
 Disk-backed arrangements prevent OOM for large joins or long `WITHIN INTERVAL` windows. See [Performance: Disk-Backed Arrangements](performance.md#disk-backed-arrangements) for overhead benchmarks.
 

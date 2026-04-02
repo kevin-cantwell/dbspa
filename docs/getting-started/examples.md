@@ -161,6 +161,53 @@ folddb "SELECT e.user_id, r.revenue
 
 The inner subquery maintains a live aggregation of order revenue by region. The outer query joins each event against the current aggregation state. When an order changes in the source database, the CDC stream updates the inner aggregation, and the DD join retracts stale results and emits corrected ones.
 
+### FROM streaming subquery
+
+Use a Kafka-based subquery as a derived table with outer filtering:
+
+```bash
+# Live order status counts, filtered for statuses with > 100 orders
+folddb "SELECT * FROM (SELECT status, COUNT(*) AS cnt
+                        FROM 'kafka://broker/orders.cdc' FORMAT DEBEZIUM
+                        GROUP BY status) t
+        WHERE cnt > 100"
+```
+
+The inner accumulating query streams Z-set deltas to the outer WHERE filter. As counts change, only groups currently exceeding the threshold appear in output.
+
+### File left + streaming right
+
+Use a static file as reference data with a live streaming subquery on the JOIN side:
+
+```bash
+# Enrich a static customer list with live order counts
+folddb "SELECT c.name, c.tier, r.order_count
+        FROM '/data/customers.parquet' c
+        JOIN (
+            SELECT customer_id, COUNT(*) AS order_count
+            FROM 'kafka://broker/orders.cdc' FORMAT DEBEZIUM
+            GROUP BY customer_id
+        ) r ON c.id = r.customer_id"
+```
+
+The customer file is loaded once. The query keeps running after the file is fully loaded -- right-side deltas produce corrected join results against all loaded left records.
+
+### Spill to disk for large joins
+
+```bash
+# Explicit spill-to-disk
+folddb --spill-to-disk \
+  "SELECT o.*, c.name FROM 'kafka://broker/orders' o
+   JOIN '/data/customers.parquet' c ON o.customer_id = c.id"
+
+# With memory budget
+folddb --max-memory 512MB \
+  "SELECT o.*, c.name FROM 'kafka://broker/orders' o
+   JOIN '/data/customers.parquet' c ON o.customer_id = c.id"
+```
+
+Stream-stream joins auto-enable spill-to-disk to prevent OOM.
+
 ## Deduplication
 
 ```bash
