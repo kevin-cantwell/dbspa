@@ -12,14 +12,25 @@ type Expr interface {
 	exprTag()
 }
 
+// SubquerySource represents a subquery used as a source in FROM or JOIN.
+// The inner query is executed to completion (materialized) before the outer
+// query begins processing. Alias is mandatory — parse error if omitted.
+type SubquerySource struct {
+	Query *SelectStatement
+	Alias string
+}
+
+func (*SubquerySource) nodeTag() {}
+
 // SelectStatement represents a parsed SELECT query.
 type SelectStatement struct {
-	Distinct    bool
-	Columns     []Column
-	From        *TableSource  // nil means stdin
-	FromAlias   string        // optional alias for the FROM source
-	Join        *JoinClause   // nil means no JOIN
-	Seed        *SeedClause   // nil means no SEED FROM
+	Distinct     bool
+	Columns      []Column
+	From         *TableSource    // nil means stdin (mutually exclusive with FromSubquery)
+	FromSubquery *SubquerySource // non-nil when FROM is a subquery
+	FromAlias    string          // optional alias for the FROM source
+	Join         *JoinClause     // nil means no JOIN
+	Seed         *SeedClause     // nil means no SEED FROM
 	Where       Expr          // nil means no WHERE
 	GroupBy     []Expr        // nil means non-accumulating
 	Having      Expr          // nil means no HAVING
@@ -34,11 +45,12 @@ type SelectStatement struct {
 
 // JoinClause represents a JOIN clause in a SELECT statement.
 type JoinClause struct {
-	Type      string       // "JOIN" or "LEFT JOIN"
-	Source    *TableSource // the file/URI to join against
-	Alias     string       // optional alias
-	Condition Expr         // the ON expression
-	Within    *string      // optional: interval bound duration string for stream-stream joins
+	Type      string           // "JOIN" or "LEFT JOIN"
+	Source    *TableSource     // the file/URI to join against (mutually exclusive with Subquery)
+	Subquery  *SubquerySource  // non-nil when JOIN source is a subquery
+	Alias     string           // optional alias
+	Condition Expr             // the ON expression
+	Within    *string          // optional: interval bound duration string for stream-stream joins
 }
 
 func (*JoinClause) nodeTag() {}
