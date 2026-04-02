@@ -357,6 +357,33 @@ func run() error {
 
 	// FROM subquery: execute inner query, feed results into outer pipeline
 	if stmt.FromSubquery != nil {
+		if isStreamingSubquery(stmt.FromSubquery) {
+			// Streaming FROM subquery: inner query is Kafka-based,
+			// emits Z-set deltas continuously. The outer query treats
+			// these as a regular record stream.
+			innerCh, streamErr := executeStreamingSubquery(runCtx, stmt.FromSubquery.Query)
+			if streamErr != nil {
+				return fmt.Errorf("FROM streaming subquery error: %w", streamErr)
+			}
+
+			// Apply JOIN if present
+			var finalCh <-chan engine.Record = innerCh
+			if joinOp != nil && streamingSubqCh != nil {
+				finalCh = applyStreamingSubqueryJoin(runCtx, joinOp, innerCh, streamingSubqCh)
+			} else if joinOp != nil {
+				finalCh = applyJoin(runCtx, joinOp, innerCh)
+			}
+
+			if isWindowed {
+				return runWindowedFromRecords(runCtx, stmt, finalCh, flags)
+			}
+			if isAccumulating {
+				return runAccumulatingFromRecords(runCtx, stmt, finalCh, flags)
+			}
+			return runNonAccumulatingFromRecords(runCtx, stmt, finalCh)
+		}
+
+		// Materialized FROM subquery: run to completion, return records
 		subRecords, subErr := executeSubquery(runCtx, stmt.FromSubquery.Query)
 		if subErr != nil {
 			return fmt.Errorf("FROM subquery error: %w", subErr)

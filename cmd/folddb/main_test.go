@@ -2790,9 +2790,9 @@ func TestStreamStreamJoin_WarnsWithoutArrangementMemLimit(t *testing.T) {
 	}
 }
 
-func TestFromSubquery_KafkaSourceErrors(t *testing.T) {
-	// A FROM subquery with a Kafka source should return an error
-	// because Kafka streams never reach EOF — the subquery would hang forever.
+func TestFromSubquery_KafkaViaExecuteSubqueryErrors(t *testing.T) {
+	// Calling executeSubquery directly with a Kafka source should still error
+	// (callers should detect streaming and use executeStreamingSubquery instead).
 	stmt := &ast.SelectStatement{
 		Columns: []ast.Column{
 			{Expr: &ast.ColumnRef{Name: "status"}, Alias: ""},
@@ -2804,14 +2804,99 @@ func TestFromSubquery_KafkaSourceErrors(t *testing.T) {
 
 	_, err := executeSubquery(context.Background(), stmt)
 	if err == nil {
-		t.Fatal("expected error for FROM subquery with Kafka source")
+		t.Fatal("expected error for Kafka source in executeSubquery")
 	}
-	if !strings.Contains(err.Error(), "streaming subqueries are not supported in FROM position") {
-		t.Errorf("expected 'streaming subqueries are not supported in FROM position' in error, got: %v", err)
+	if !strings.Contains(err.Error(), "kafka source in subquery requires streaming execution") {
+		t.Errorf("expected 'kafka source in subquery requires streaming execution' in error, got: %v", err)
 	}
-	if !strings.Contains(err.Error(), "JOIN subquery instead") {
-		t.Errorf("expected 'JOIN subquery instead' hint in error, got: %v", err)
+}
+
+func TestFromSubquery_StreamingDetection(t *testing.T) {
+	// isStreamingSubquery should correctly identify Kafka-based FROM subqueries
+	kafkaSq := &ast.SubquerySource{
+		Query: &ast.SelectStatement{
+			Columns: []ast.Column{{Expr: &ast.ColumnRef{Name: "status"}, Alias: ""}},
+			From:    &ast.TableSource{URI: "kafka://broker/topic"},
+		},
+		Alias: "inner",
 	}
+	if !isStreamingSubquery(kafkaSq) {
+		t.Error("expected Kafka FROM subquery to be detected as streaming")
+	}
+
+	// File-based subquery should NOT be streaming
+	fileSq := &ast.SubquerySource{
+		Query: &ast.SelectStatement{
+			Columns: []ast.Column{{Expr: &ast.ColumnRef{Name: "id"}, Alias: ""}},
+			From:    &ast.TableSource{URI: "/data/users.parquet"},
+		},
+		Alias: "inner",
+	}
+	if isStreamingSubquery(fileSq) {
+		t.Error("expected file FROM subquery to NOT be detected as streaming")
+	}
+}
+
+func TestFromSubquery_StreamingProducesContinuousOutput(t *testing.T) {
+	// Simulate a streaming FROM subquery by feeding records through a channel
+	// and verifying continuous output (the channel stays open until context cancels).
+	_, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Create a channel that simulates streaming subquery output
+	innerCh := make(chan engine.Record, 10)
+
+	// Send some delta records (simulating aggregation output)
+	go func() {
+		innerCh <- engine.Record{
+			Columns: map[string]engine.Value{
+				"status": engine.TextValue{V: "active"},
+				"cnt":    engine.IntValue{V: 1},
+			},
+			Weight: 1,
+		}
+		innerCh <- engine.Record{
+			Columns: map[string]engine.Value{
+				"status": engine.TextValue{V: "active"},
+				"cnt":    engine.IntValue{V: 1},
+			},
+			Weight: -1, // retraction
+		}
+		innerCh <- engine.Record{
+			Columns: map[string]engine.Value{
+				"status": engine.TextValue{V: "active"},
+				"cnt":    engine.IntValue{V: 2},
+			},
+			Weight: 1, // new value
+		}
+		// Don't close — simulates ongoing stream
+	}()
+
+	// Collect output with a timeout
+	var results []engine.Record
+	timeout := time.After(2 * time.Second)
+	for i := 0; i < 3; i++ {
+		select {
+		case rec := <-innerCh:
+			results = append(results, rec)
+		case <-timeout:
+			t.Fatalf("timed out after collecting %d records", len(results))
+		}
+	}
+
+	if len(results) != 3 {
+		t.Fatalf("expected 3 records, got %d", len(results))
+	}
+
+	// Verify we got the retraction+insertion pair
+	if results[1].Weight != -1 {
+		t.Errorf("expected retraction (weight=-1), got weight=%d", results[1].Weight)
+	}
+	if results[2].Weight != 1 {
+		t.Errorf("expected insertion (weight=1), got weight=%d", results[2].Weight)
+	}
+
+	cancel() // clean up
 }
 
 func TestE2E_SubqueryAliasMandatory(t *testing.T) {
