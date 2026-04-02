@@ -17,13 +17,17 @@ import (
 // Each message is self-describing via the schema ID, which is resolved
 // against the Schema Registry. Schemas are cached — IDs are immutable.
 type ConfluentAvroDecoder struct {
-	Registry *registry.Client
+	Registry  *registry.Client
+	evolution *schemaEvolutionTracker
 }
 
 // NewConfluentAvroDecoder creates a decoder that uses the given registry client
 // to resolve schema IDs in the Confluent wire format.
 func NewConfluentAvroDecoder(reg *registry.Client) *ConfluentAvroDecoder {
-	return &ConfluentAvroDecoder{Registry: reg}
+	return &ConfluentAvroDecoder{
+		Registry:  reg,
+		evolution: newSchemaEvolutionTracker(),
+	}
 }
 
 // Decode handles a single Kafka message with the Confluent wire format.
@@ -55,14 +59,22 @@ func (d *ConfluentAvroDecoder) DecodeMulti(data []byte) ([]engine.Record, error)
 	// Extract schema ID (4-byte big-endian uint32)
 	schemaID := int32(binary.BigEndian.Uint32(data[1:5]))
 
-	// Get codec from registry (cached)
-	codec, err := d.Registry.GetCodec(schemaID)
+	// Get schema from registry (cached) and check for evolution
+	schema, err := d.Registry.GetSchema(schemaID)
 	if err != nil {
 		return nil, fmt.Errorf("confluent avro: schema ID %d: %w", schemaID, err)
 	}
+	if schema.Codec == nil {
+		return nil, fmt.Errorf("confluent avro: schema ID %d is type %q, not AVRO", schemaID, schema.SchemaType)
+	}
+
+	// Check schema evolution
+	if err := d.evolution.checkEvolution(schemaID, schema.Schema); err != nil {
+		return nil, fmt.Errorf("confluent avro: %w", err)
+	}
 
 	// Decode Avro binary payload
-	native, _, err := codec.NativeFromBinary(data[5:])
+	native, _, err := schema.Codec.NativeFromBinary(data[5:])
 	if err != nil {
 		return nil, fmt.Errorf("confluent avro: decode error (schema ID %d): %w", schemaID, err)
 	}
@@ -100,13 +112,17 @@ func IsConfluentWireFormat(data []byte) bool {
 // fields). It strips the wire header, decodes with the registry schema, and
 // applies Debezium CDC semantics (op → weight mapping).
 type ConfluentDebeziumAvroDecoder struct {
-	Registry *registry.Client
-	inner    DebeziumAvroDecoder // reuse envelope decoding logic
+	Registry  *registry.Client
+	inner     DebeziumAvroDecoder // reuse envelope decoding logic
+	evolution *schemaEvolutionTracker
 }
 
 // NewConfluentDebeziumAvroDecoder creates a Debezium-aware Confluent Avro decoder.
 func NewConfluentDebeziumAvroDecoder(reg *registry.Client) *ConfluentDebeziumAvroDecoder {
-	return &ConfluentDebeziumAvroDecoder{Registry: reg}
+	return &ConfluentDebeziumAvroDecoder{
+		Registry:  reg,
+		evolution: newSchemaEvolutionTracker(),
+	}
 }
 
 // Decode handles a single Kafka message.
@@ -129,12 +145,20 @@ func (d *ConfluentDebeziumAvroDecoder) DecodeMulti(data []byte) ([]engine.Record
 		return nil, fmt.Errorf("confluent debezium avro: %w", err)
 	}
 
-	codec, err := d.Registry.GetCodec(schemaID)
+	schema, err := d.Registry.GetSchema(schemaID)
 	if err != nil {
 		return nil, fmt.Errorf("confluent debezium avro: schema ID %d: %w", schemaID, err)
 	}
+	if schema.Codec == nil {
+		return nil, fmt.Errorf("confluent debezium avro: schema ID %d is type %q, not AVRO", schemaID, schema.SchemaType)
+	}
 
-	native, _, err := codec.NativeFromBinary(payload)
+	// Check schema evolution
+	if err := d.evolution.checkEvolution(schemaID, schema.Schema); err != nil {
+		return nil, fmt.Errorf("confluent debezium avro: %w", err)
+	}
+
+	native, _, err := schema.Codec.NativeFromBinary(payload)
 	if err != nil {
 		return nil, fmt.Errorf("confluent debezium avro: decode error (schema ID %d): %w", schemaID, err)
 	}
