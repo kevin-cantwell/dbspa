@@ -2662,6 +2662,30 @@ func TestIsStreamingSubquery_KafkaVariants(t *testing.T) {
 	}
 }
 
+func TestFromSubquery_KafkaSourceErrors(t *testing.T) {
+	// A FROM subquery with a Kafka source should return an error
+	// because Kafka streams never reach EOF — the subquery would hang forever.
+	stmt := &ast.SelectStatement{
+		Columns: []ast.Column{
+			{Expr: &ast.ColumnRef{Name: "status"}, Alias: ""},
+			{Expr: &ast.FunctionCall{Name: "COUNT", Args: []ast.Expr{&ast.StarExpr{}}}, Alias: "cnt"},
+		},
+		From:    &ast.TableSource{URI: "kafka://broker/topic"},
+		GroupBy: []ast.Expr{&ast.ColumnRef{Name: "status"}},
+	}
+
+	_, err := executeSubquery(context.Background(), stmt)
+	if err == nil {
+		t.Fatal("expected error for FROM subquery with Kafka source")
+	}
+	if !strings.Contains(err.Error(), "streaming subqueries are not supported in FROM position") {
+		t.Errorf("expected 'streaming subqueries are not supported in FROM position' in error, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "JOIN subquery instead") {
+		t.Errorf("expected 'JOIN subquery instead' hint in error, got: %v", err)
+	}
+}
+
 func TestE2E_SubqueryAliasMandatory(t *testing.T) {
 	// FROM subquery without alias should fail
 	sql := "SELECT * FROM (SELECT status, COUNT(*) AS cnt GROUP BY status)"

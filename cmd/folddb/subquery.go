@@ -80,7 +80,7 @@ func executeSubquery(ctx context.Context, stmt *ast.SelectStatement) ([]engine.R
 	case fromURI != "" && strings.HasPrefix(fromURI, "kafka://"):
 		// Kafka sources in materialized subqueries block forever (no EOF).
 		// Streaming subqueries are handled via executeStreamingSubquery instead.
-		return nil, fmt.Errorf("Kafka sources in subqueries must be streaming (use as JOIN subquery with GROUP BY)")
+		return nil, fmt.Errorf("streaming subqueries are not supported in FROM position (Kafka never reaches EOF). Use a JOIN subquery instead:\n  SELECT ... FROM 'kafka://...' e JOIN (SELECT ... FROM 'kafka://...' GROUP BY ...) r ON ...")
 
 	default:
 		// stdin source (no FROM or FROM stdin)
