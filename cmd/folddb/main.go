@@ -641,6 +641,9 @@ func runNonAccumulating(ctx context.Context, stmt *ast.SelectStatement, src *sou
 }
 
 func runNonAccumulatingFromRecords(ctx context.Context, stmt *ast.SelectStatement, recordCh <-chan engine.Record) error {
+	// Schema drift detection
+	recordCh = withSchemaTracking(ctx, recordCh)
+
 	// Wire dedup if present
 	if stmt.Deduplicate != nil {
 		recordCh = applyDedup(ctx, stmt.Deduplicate, recordCh)
@@ -745,6 +748,9 @@ func runAccumulating(ctx context.Context, stmt *ast.SelectStatement, src *source
 }
 
 func runAccumulatingFromRecords(ctx context.Context, stmt *ast.SelectStatement, recordCh <-chan engine.Record, flags cliFlags) error {
+	// Schema drift detection
+	recordCh = withSchemaTracking(ctx, recordCh)
+
 	// Batch unfiltered records. The FusedAggregateProcessor applies WHERE
 	// filtering and aggregation in a single pass per batch, eliminating the
 	// intermediate filtered channel and second batch/unbatch cycle.
@@ -995,6 +1001,9 @@ func runWindowed(ctx context.Context, stmt *ast.SelectStatement, src *source.Std
 
 // runWindowedFromRecords runs a windowed aggregation query from a record channel.
 func runWindowedFromRecords(ctx context.Context, stmt *ast.SelectStatement, recordCh <-chan engine.Record, flags cliFlags) error {
+	// Schema drift detection
+	recordCh = withSchemaTracking(ctx, recordCh)
+
 	// SEED FROM: load seed file and prepend to stream (before WHERE filter)
 	if stmt.Seed != nil {
 		seedRecords, seedErr := loadSeedFile(stmt.Seed)
@@ -1651,6 +1660,9 @@ func runServeAccumulating(ctx context.Context, stmt *ast.SelectStatement, src *s
 }
 
 func runServeAccumulatingFromRecords(ctx context.Context, stmt *ast.SelectStatement, recordCh <-chan engine.Record, snk *sink.HTTPSink) error {
+	// Schema drift detection
+	recordCh = withSchemaTracking(ctx, recordCh)
+
 	// Apply WHERE filter
 	filteredCh := make(chan engine.Record)
 	go func() {
@@ -1742,6 +1754,9 @@ func runServeNonAccumulating(ctx context.Context, stmt *ast.SelectStatement, src
 }
 
 func runServeNonAccumulatingFromRecords(ctx context.Context, stmt *ast.SelectStatement, recordCh <-chan engine.Record, snk *sink.HTTPSink) error {
+	// Schema drift detection
+	recordCh = withSchemaTracking(ctx, recordCh)
+
 	pipeline := &engine.Pipeline{
 		Columns: stmt.Columns,
 		Where:   stmt.Where,
@@ -1789,6 +1804,29 @@ func decodeWithCSVHeader(dec format.Decoder, data []byte) ([]engine.Record, erro
 		return nil, nil // skip header, not an error
 	}
 	return recs, err
+}
+
+// withSchemaTracking wraps a record channel with schema drift detection.
+// Records with compatible type drift pass through with a warning to stderr.
+// Records with incompatible type drift are skipped with an error to stderr.
+func withSchemaTracking(ctx context.Context, in <-chan engine.Record) <-chan engine.Record {
+	tracker := engine.NewSchemaTracker()
+	out := make(chan engine.Record, cap(in))
+	go func() {
+		defer close(out)
+		for rec := range in {
+			if err := tracker.Track(rec); err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %v (record skipped)\n", err)
+				continue
+			}
+			select {
+			case out <- rec:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	return out
 }
 
 // deadLetterWriter writes deserialization errors to a file as NDJSON.
