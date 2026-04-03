@@ -78,10 +78,11 @@ dbspa --max-memory 512MB \
 dbspa --cpuprofile prof.out "SELECT status, COUNT(*) GROUP BY status"
 go tool pprof prof.out
 
-# Debezium Avro with schema registry
+# Debezium Avro with schema registry, exactly-once via GTID deduplication
 dbspa "SELECT $op, customer_id, total
         FROM 'kafka://broker/orders.cdc?registry=http://schema-registry:8081'
-        FORMAT AVRO CHANGELOG DEBEZIUM"
+        FORMAT AVRO CHANGELOG DEBEZIUM
+        DEDUPLICATE BY $source.gtid WITHIN '10 minutes'"
 ```
 
 !!! note

@@ -43,7 +43,7 @@ The gap between the checkpoint and the current stream position is replayed (typi
 
 ## Delivery semantics
 
-DBSPA provides **at-least-once** processing, not exactly-once.
+DBSPA is **at-least-once** by default. Use `DEDUPLICATE BY` for exactly-once processing semantics.
 
 The failure window:
 
@@ -55,6 +55,19 @@ The failure window:
 **Crash between step 2 and 3:** Output was emitted but checkpoint was not saved. On restart, records are replayed, producing duplicate output. For changelog consumers that maintain a key-value map, the duplicates are idempotent — the map converges to the correct state.
 
 **Crash between step 3 and 4:** Checkpoint is saved but Kafka offsets are not committed. DBSPA resumes from the locally checkpointed offsets, not the Kafka-committed ones.
+
+### Exactly-once processing with DEDUPLICATE BY
+
+`DEDUPLICATE BY` eliminates duplicate input records within a time window, giving exactly-once processing semantics for the query computation itself:
+
+```sql
+SELECT status, COUNT(*) AS orders
+FROM 'kafka://broker/orders.cdc' CHANGELOG DEBEZIUM
+GROUP BY status
+DEDUPLICATE BY $source.gtid WITHIN '10 minutes'
+```
+
+If Kafka redelivers a message (e.g. after a consumer rebalance), DBSPA recognises the `$source.gtid` and drops the duplicate before it reaches the accumulator. Note that this is exactly-once *processing* — end-to-end delivery to the sink remains at-least-once because the output is not written transactionally.
 
 ## Disk full handling
 

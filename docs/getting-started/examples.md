@@ -54,7 +54,13 @@ dbspa "SELECT region, SUM(total::float) AS revenue
         FROM 'kafka://broker:9092/orders.cdc' CHANGELOG DEBEZIUM
         GROUP BY region"
 
-# Filter only updates — _before/_after virtuals let you compare old and new values
+# Exactly-once processing: deduplicate by transaction ID before accumulating
+dbspa "SELECT status, COUNT(*) AS orders
+        FROM 'kafka://broker:9092/orders.cdc' CHANGELOG DEBEZIUM
+        GROUP BY status
+        DEDUPLICATE BY $source.gtid WITHIN '10 minutes'"
+
+# Filter only updates — $before/$after let you compare old and new values
 dbspa "SELECT order_id,
                $before.status AS old_status,
                $after.status AS new_status

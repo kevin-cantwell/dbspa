@@ -137,13 +137,13 @@ GROUP BY region
 
 ---
 
-## 8. At-least-once delivery
+## 8. At-least-once delivery by default; exactly-once processing via DEDUPLICATE BY
 
 **Problem:** Should DBSPA provide exactly-once output semantics?
 
-**Decision:** No. v0 is at-least-once.
+**Decision:** At-least-once by default. Exactly-once *processing* is available via `DEDUPLICATE BY $source.gtid WITHIN '...'`, which drops duplicate input records before they reach the accumulator. End-to-end exactly-once (including the output sink) is not guaranteed — the sink is not written transactionally.
 
-The failure window:
+The failure window without deduplication:
 
 1. Records processed, accumulator updated.
 2. Output emitted to sink.
@@ -152,7 +152,7 @@ The failure window:
 
 A crash between steps 2 and 3 means output was emitted but checkpoint wasn't saved. On restart, records are replayed, producing duplicate output. For changelog consumers maintaining a key-value map, the duplicates are idempotent.
 
-Exactly-once would require transactional coordination between the output sink and the checkpoint store. This is a v1 consideration for the `--state` SQLite mode specifically.
+With `DEDUPLICATE BY $source.gtid WITHIN '10 minutes'`, replayed records are dropped before step 1, giving exactly-once processing within the deduplication window. Full end-to-end exactly-once would require transactional coordination between the output sink and the checkpoint store.
 
 ---
 

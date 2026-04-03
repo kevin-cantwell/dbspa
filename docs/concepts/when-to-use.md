@@ -34,7 +34,7 @@ Capability
 | Install | `brew install dbspa` | Cluster: JobManager + TaskManagers + ZooKeeper |
 | First query | 10 seconds | 30+ minutes (write job, configure, deploy) |
 | State backend | In-memory + checkpoint to disk | RocksDB (distributed, terabytes) |
-| Exactly-once | No (at-least-once) | Yes |
+| Exactly-once processing | Yes, with `DEDUPLICATE BY` | Yes (built-in) |
 | Horizontal scale | No | Yes |
 | Fault tolerance | Checkpoint to disk | Distributed snapshots |
 | Throughput | ~100K events/sec | Millions/sec |
