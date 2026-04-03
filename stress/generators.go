@@ -90,6 +90,7 @@ func HighRetractionCDCStream(count int, updatePct float64) io.Reader {
 			Amount int
 		}
 		active := make(map[int]*row)
+		activeIDs := make([]int, 0, 1024) // O(1) random pick
 		nextID := 1
 		statuses := []string{"pending", "confirmed", "shipped", "delivered"}
 
@@ -101,6 +102,7 @@ func HighRetractionCDCStream(count int, updatePct float64) io.Reader {
 				o := &row{ID: nextID, Status: "pending", Amount: rng.Intn(1000)}
 				nextID++
 				active[o.ID] = o
+				activeIDs = append(activeIDs, o.ID)
 				enc.Encode(map[string]any{
 					"op":    "c",
 					"after": map[string]any{"id": o.ID, "status": o.Status, "amount": o.Amount},
@@ -108,16 +110,17 @@ func HighRetractionCDCStream(count int, updatePct float64) io.Reader {
 				continue
 			}
 
-			// Pick a random active row and update it
-			idx := rng.Intn(len(active))
+			// Pick a random active row (O(1) via slice)
 			var o *row
-			j := 0
-			for _, v := range active {
-				if j == idx {
-					o = v
-					break
+			for o == nil {
+				idx := rng.Intn(len(activeIDs))
+				id := activeIDs[idx]
+				o = active[id]
+				if o == nil {
+					// Stale entry — swap-remove
+					activeIDs[idx] = activeIDs[len(activeIDs)-1]
+					activeIDs = activeIDs[:len(activeIDs)-1]
 				}
-				j++
 			}
 			before := map[string]any{"id": o.ID, "status": o.Status, "amount": o.Amount}
 
