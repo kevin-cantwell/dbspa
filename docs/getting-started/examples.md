@@ -308,12 +308,30 @@ cat data.csv | folddb "SELECT * FORMAT CSV(delimiter='|', header=true)"
 # Avro from Kafka with schema registry
 folddb "SELECT * FROM 'kafka://broker/events?registry=http://registry:8081' FORMAT AVRO"
 
+# Avro-encoded Debezium CDC (replaces deprecated FORMAT DEBEZIUM_AVRO)
+folddb "SELECT * FROM 'kafka://broker/orders.cdc?registry=http://registry:8081' FORMAT AVRO DEBEZIUM"
+
 # Protobuf with typed messages
 cat data.pb | folddb "SELECT * FORMAT PROTOBUF(message='Order')"
 
 # Parquet file
 folddb -i users.parquet "SELECT * WHERE country = 'US' FORMAT PARQUET"
 ```
+
+## FoldDB changelog piping
+
+Compose FoldDB instances by piping one changelog into another using `FORMAT FOLDDB`:
+
+```bash
+# Instance 1: aggregate orders by status, emit changelog
+folddb "SELECT status, COUNT(*) AS cnt
+        FROM 'kafka://broker/orders' GROUP BY status" | \
+
+# Instance 2: consume changelog, filter for high-count statuses
+folddb "SELECT * FROM stdin FORMAT FOLDDB WHERE cnt > 100"
+```
+
+The `FORMAT FOLDDB` envelope reads the `_weight` field directly from each record, preserving retraction/insertion semantics across the pipe.
 
 ## Output to SQLite
 

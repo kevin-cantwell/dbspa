@@ -162,21 +162,64 @@ EXEC is disabled in serve mode (`folddb serve`). Any query containing EXEC in FR
 
 ## FORMAT
 
-Declares the input format. Placed after the `FROM` clause.
+Declares the input format using a two-tier model: **encoding** (how bytes are serialized) and **envelope** (how to interpret the record). Placed after the `FROM` clause.
 
 ```sql
-FORMAT DEBEZIUM
-FORMAT DEBEZIUM_AVRO
-FORMAT CSV
-FORMAT CSV(delimiter='|', header=true, quote='"', null_string='')
-FORMAT AVRO
-FORMAT AVRO(registry='http://registry:8081')
-FORMAT PROTOBUF
-FORMAT PROTOBUF(message='Order')
-FORMAT PARQUET
+FORMAT <encoding> [<envelope>] [(<options>)]
 ```
 
-Auto-detection: Kafka without a registry defaults to NDJSON. Kafka with a registry auto-detects via the Confluent wire format magic byte. stdin defaults to NDJSON.
+### Encodings
+
+The encoding specifies the serialization format of the raw bytes:
+
+| Encoding | Description |
+|---|---|
+| `JSON` / `NDJSON` | Line-delimited JSON (default) |
+| `AVRO` | Apache Avro -- OCF for files, Confluent wire format for Kafka with registry |
+| `CSV` | Comma-separated values |
+| `PROTOBUF` | Protocol Buffers |
+| `PARQUET` | Apache Parquet (file only) |
+
+### Envelopes
+
+The envelope specifies how to interpret each record and derive Z-set weights:
+
+| Envelope | Description |
+|---|---|
+| *(none)* | Plain records -- every record is an insert (weight=+1) |
+| `DEBEZIUM` | Debezium CDC envelope with `op`/`before`/`after` fields; derives Z-set weights from operations |
+| `FOLDDB` | FoldDB changelog with `_weight` field; reads weight directly |
+
+### Examples
+
+```sql
+FORMAT JSON                             -- plain JSON records
+FORMAT AVRO                             -- plain Avro records
+FORMAT AVRO DEBEZIUM                    -- Avro-encoded Debezium CDC
+FORMAT JSON DEBEZIUM                    -- JSON-encoded Debezium CDC
+FORMAT DEBEZIUM                         -- shorthand: JSON + Debezium
+FORMAT FOLDDB                           -- FoldDB changelog (_weight)
+FORMAT CSV(header=true, delimiter='|')  -- CSV with options
+FORMAT AVRO(registry='http://...') DEBEZIUM  -- Avro with registry + Debezium
+FORMAT PROTOBUF(message='Order')        -- typed Protobuf
+```
+
+### Shorthand
+
+If the first token is an envelope name (`DEBEZIUM`, `FOLDDB`), JSON encoding is assumed:
+
+```sql
+FORMAT DEBEZIUM    -- equivalent to FORMAT JSON DEBEZIUM
+FORMAT FOLDDB      -- equivalent to FORMAT JSON FOLDDB
+```
+
+### Deprecated syntax
+
+`FORMAT DEBEZIUM_AVRO` still works but logs a deprecation warning. Use `FORMAT AVRO DEBEZIUM` instead.
+
+### Auto-detection
+
+Kafka without a registry defaults to NDJSON. Kafka with a registry auto-detects via the Confluent wire format magic byte. stdin defaults to NDJSON.
 
 ## WHERE
 

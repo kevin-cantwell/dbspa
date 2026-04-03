@@ -58,6 +58,24 @@ for line in changelog:
 # state is always the current aggregation result
 ```
 
+## Consuming a changelog with FORMAT FOLDDB
+
+FoldDB's changelog output can be consumed by another FoldDB instance using the `FORMAT FOLDDB` envelope. This enables composing pipelines: one instance produces a changelog, another applies further transformations while preserving the Z-set semantics.
+
+```bash
+# Instance 1: produce a changelog of order counts by status
+folddb "SELECT status, COUNT(*) FROM 'kafka://broker/orders' GROUP BY status" | \
+
+# Instance 2: consume the changelog, apply further filtering
+folddb "SELECT * FROM stdin FORMAT FOLDDB WHERE status = 'pending'"
+```
+
+The `FORMAT FOLDDB` envelope reads the `_weight` field directly from each JSON record instead of treating every record as an insert. This means retractions flow through correctly -- when Instance 1 retracts an old count and inserts a new one, Instance 2 sees both the retraction and insertion, keeping its own state consistent.
+
+Without `FORMAT FOLDDB`, the downstream instance would treat every line (including retractions) as a plain insert with weight=+1, which would produce incorrect results.
+
+See [FORMAT FOLDDB](../reference/formats.md#folddb-changelog) for the full envelope reference.
+
 ## Non-accumulating queries
 
 For non-accumulating queries (no `GROUP BY`), every line is a plain insertion. The `"_weight"` field is omitted for brevity — the output is plain NDJSON:

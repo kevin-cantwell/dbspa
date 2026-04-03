@@ -1,8 +1,20 @@
 # Formats
 
-FoldDB supports multiple input formats. The format is declared with the `FORMAT` clause or auto-detected from the source.
+FoldDB uses a two-tier format model: **encoding** (how bytes are serialized) and **envelope** (how to interpret the record and derive Z-set weights). The format is declared with the `FORMAT` clause or auto-detected from the source.
 
-## NDJSON (default)
+```sql
+FORMAT <encoding> [<envelope>] [(<options>)]
+```
+
+See [FORMAT syntax](sql.md#format) for the full clause reference.
+
+---
+
+## Encodings
+
+Encodings define the wire serialization of each record.
+
+### JSON / NDJSON (default)
 
 Newline-delimited JSON. One JSON object per line.
 
@@ -10,11 +22,11 @@ Newline-delimited JSON. One JSON object per line.
 cat data.ndjson | folddb "SELECT name, age WHERE age > 25"
 ```
 
-No `FORMAT` clause needed — NDJSON is the default for both stdin and Kafka.
+No `FORMAT` clause needed -- NDJSON is the default for both stdin and Kafka.
 
 Each top-level JSON key becomes a column. Nested objects are accessible via JSON operators (`->`, `->>`).
 
-## CSV
+### CSV
 
 ```sql
 FORMAT CSV
@@ -35,30 +47,7 @@ cat data.tsv | folddb "SELECT * FORMAT CSV(delimiter='\t')"
 
 When `header=true`, column names come from the header row. When `header=false`, columns are named `col1`, `col2`, etc.
 
-## Debezium
-
-Debezium CDC envelope format. Used with Kafka sources that carry database change events.
-
-```sql
-FORMAT DEBEZIUM
-```
-
-Debezium records have an `op` field and `before`/`after` payloads. FoldDB unwraps the envelope and derives [diffs](../concepts/diff-model.md) from the `op` field:
-
-| Debezium `op` | FoldDB records emitted |
-|---|---|
-| `c` (create) | 1 record: `(after, weight=+1)` |
-| `u` (update) | 2 records: `(before, weight=-1)` then `(after, weight=+1)` |
-| `d` (delete) | 1 record: `(before, weight=-1)` |
-| `r` (snapshot read) | 1 record: `(after, weight=+1)` |
-| `t` (truncate) | Ignored (logged at warn level) |
-
-When `FORMAT DEBEZIUM` is specified, [virtual columns](sql.md#debezium-virtual-columns) (`_op`, `_before`, `_after`, `_table`, `_db`, `_ts`, `_source`) are available.
-
-!!! note
-    If `_before` is NULL on an update (common without `REPLICA IDENTITY FULL`), the retraction is skipped. FoldDB logs a warning on the first occurrence. Accumulators may drift over time without full replica identity.
-
-## Avro
+### Avro
 
 Apache Avro Object Container File (OCF) format, or Confluent wire format (with schema registry).
 
@@ -75,29 +64,115 @@ FORMAT AVRO(registry='http://registry:8081')
 cat data.avro | folddb "SELECT * FORMAT AVRO"
 ```
 
-## Debezium Avro
+### Protobuf
 
-Avro-encoded Debezium CDC envelopes. Combines the CDC semantics of `FORMAT DEBEZIUM` with the compact binary encoding of Avro.
-
-```sql
-FORMAT DEBEZIUM_AVRO
-```
-
-Debezium Avro messages use the Confluent wire format and require a schema registry:
+Protocol Buffers format.
 
 ```sql
-FROM 'kafka://broker/orders.cdc?registry=http://schema-registry:8081' FORMAT DEBEZIUM_AVRO
+-- Self-describing (includes field descriptors)
+FORMAT PROTOBUF
+
+-- Typed (requires message name)
+FORMAT PROTOBUF(message='Order')
 ```
 
-**Benefits over JSON Debezium:**
+**Self-describing Protobuf** includes enough metadata to decode without a `.proto` file. Fields are named by their field numbers (`field1`, `field2`, etc.) unless the message is self-describing.
+
+**Typed Protobuf** uses a pre-registered message name. The schema must be available (via schema registry or compiled into the data generator).
+
+```bash
+cat data.pb | folddb "SELECT * FORMAT PROTOBUF"
+cat data.pb | folddb "SELECT order_id, status FORMAT PROTOBUF(message='Order')"
+```
+
+### Parquet
+
+Apache Parquet columnar format. Requires a seekable file (not stdin).
+
+```sql
+FORMAT PARQUET
+```
+
+Use with `--input` or in a JOIN:
+
+```bash
+folddb -i data.parquet "SELECT * WHERE status = 'active' FORMAT PARQUET"
+```
+
+```sql
+JOIN '/data/users.parquet' u ON e.user_id = u.id
+```
+
+Parquet is significantly faster than NDJSON (~850K records/sec vs ~275K records/sec) because it uses columnar storage and can push down predicates.
+
+---
+
+## Envelopes
+
+Envelopes define how to interpret each record and derive [Z-set weights](../concepts/diff-model.md). When no envelope is specified, every record is treated as a plain insert (weight=+1).
+
+### Debezium CDC
+
+Debezium CDC envelope format. Used with Kafka sources that carry database change events.
+
+```sql
+FORMAT JSON DEBEZIUM          -- JSON-encoded Debezium CDC
+FORMAT AVRO DEBEZIUM          -- Avro-encoded Debezium CDC
+FORMAT DEBEZIUM               -- shorthand for FORMAT JSON DEBEZIUM
+```
+
+Debezium records have an `op` field and `before`/`after` payloads. FoldDB unwraps the envelope and derives weights from the `op` field:
+
+| Debezium `op` | FoldDB records emitted |
+|---|---|
+| `c` (create) | 1 record: `(after, weight=+1)` |
+| `u` (update) | 2 records: `(before, weight=-1)` then `(after, weight=+1)` |
+| `d` (delete) | 1 record: `(before, weight=-1)` |
+| `r` (snapshot read) | 1 record: `(after, weight=+1)` |
+| `t` (truncate) | Ignored (logged at warn level) |
+
+When a Debezium envelope is specified, [virtual columns](sql.md#debezium-virtual-columns) (`_op`, `_before`, `_after`, `_table`, `_db`, `_ts`, `_source`) are available.
+
+!!! note
+    If `_before` is NULL on an update (common without `REPLICA IDENTITY FULL`), the retraction is skipped. FoldDB logs a warning on the first occurrence. Accumulators may drift over time without full replica identity.
+
+**Avro-encoded Debezium** (`FORMAT AVRO DEBEZIUM`) combines the CDC semantics with the compact binary encoding of Avro. Debezium Avro messages use the Confluent wire format and require a schema registry:
+
+```sql
+FROM 'kafka://broker/orders.cdc?registry=http://schema-registry:8081' FORMAT AVRO DEBEZIUM
+```
+
+Benefits over JSON Debezium:
 
 - **2.4x smaller wire size** -- 14 MB vs 33 MB for 100K CDC events (see [Performance](../architecture/performance.md#wire-size)).
 - **Typed before/after records** -- the Avro schema defines the field types, so there is no JSON re-parse step. Fields arrive as native integers, floats, and strings.
 - **Faster decoding** -- binary Avro decoding is cheaper than JSON parsing for large payloads.
 
-The same Debezium [virtual columns](sql.md#debezium-virtual-columns) (`_op`, `_before`, `_after`, `_table`, `_db`, `_ts`, `_source`) and [op-to-weight mapping](#debezium) apply.
+!!! note "Deprecated syntax"
+    `FORMAT DEBEZIUM_AVRO` still works but logs a deprecation warning. Use `FORMAT AVRO DEBEZIUM` instead.
 
-## Confluent Wire Format
+### FoldDB Changelog
+
+The FoldDB envelope reads the `_weight` field directly from each record, treating it as a Z-set weight. This is the native format of FoldDB's [changelog output](../concepts/changelog-output.md).
+
+```sql
+FORMAT FOLDDB                 -- shorthand for FORMAT JSON FOLDDB
+FORMAT JSON FOLDDB            -- explicit encoding + envelope
+```
+
+The primary use case is **composing FoldDB instances**: one instance produces a changelog, another consumes it with further transformations.
+
+```bash
+# Instance 1: produce a changelog of order counts by status
+folddb "SELECT status, COUNT(*) FROM 'kafka://broker/orders' GROUP BY status" | \
+
+# Instance 2: consume the changelog and filter for pending orders
+folddb "SELECT * FROM stdin FORMAT FOLDDB WHERE status = 'pending'"
+```
+
+Each record must contain a `_weight` field (integer). Positive weights are insertions, negative weights are retractions. Records without a `_weight` field default to weight=+1.
+
+### Confluent Wire Format
 
 Production Kafka deployments using the Confluent Schema Registry encode messages with a 5-byte header:
 
@@ -124,48 +199,9 @@ FROM 'kafka://broker/topic?registry=http://schema-registry:8081' FORMAT AVRO
 FROM 'kafka://production/topic' FORMAT AVRO
 ```
 
-This wire format is used by both `FORMAT AVRO` and `FORMAT DEBEZIUM_AVRO`.
+This wire format is used by both `FORMAT AVRO` and `FORMAT AVRO DEBEZIUM`.
 
-## Protobuf
-
-Protocol Buffers format.
-
-```sql
--- Self-describing (includes field descriptors)
-FORMAT PROTOBUF
-
--- Typed (requires message name)
-FORMAT PROTOBUF(message='Order')
-```
-
-**Self-describing Protobuf** includes enough metadata to decode without a `.proto` file. Fields are named by their field numbers (`field1`, `field2`, etc.) unless the message is self-describing.
-
-**Typed Protobuf** uses a pre-registered message name. The schema must be available (via schema registry or compiled into the data generator).
-
-```bash
-cat data.pb | folddb "SELECT * FORMAT PROTOBUF"
-cat data.pb | folddb "SELECT order_id, status FORMAT PROTOBUF(message='Order')"
-```
-
-## Parquet
-
-Apache Parquet columnar format. Requires a seekable file (not stdin).
-
-```sql
-FORMAT PARQUET
-```
-
-Use with `--input` or in a JOIN:
-
-```bash
-folddb -i data.parquet "SELECT * WHERE status = 'active' FORMAT PARQUET"
-```
-
-```sql
-JOIN '/data/users.parquet' u ON e.user_id = u.id
-```
-
-Parquet is significantly faster than NDJSON (~850K records/sec vs ~275K records/sec) because it uses columnar storage and can push down predicates.
+---
 
 ## Format auto-detection
 

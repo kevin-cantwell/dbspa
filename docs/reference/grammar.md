@@ -83,10 +83,14 @@ join_clause
         [ WITHIN INTERVAL string_literal ]
 
 format_clause
-    ::= FORMAT format_name [ '(' format_options ')' ]
+    ::= FORMAT encoding_name [ '(' format_options ')' ] [ envelope_name ]
+      | FORMAT envelope_name
 
-format_name
-    ::= identifier                    (* DEBEZIUM, CSV, AVRO, PROTOBUF, PARQUET, DEBEZIUM_AVRO *)
+encoding_name
+    ::= JSON | NDJSON | AVRO | CSV | PROTOBUF | PARQUET
+
+envelope_name
+    ::= DEBEZIUM | FOLDDB
 
 format_options
     ::= format_option { ',' format_option }
@@ -311,12 +315,13 @@ Parentheses override precedence.
 The following words are reserved as SQL keywords and cannot be used as unquoted identifiers. Use [quoted identifiers](#identifiers) (`"word"`) to reference columns with these names.
 
 ```
-AND, AS, ASC, BETWEEN, BY, CAPACITY, CASE, CAST, COUNT, CSV, DEBEZIUM,
+AND, AS, ASC, AVRO, BETWEEN, BY, CAPACITY, CASE, CAST, COUNT, CSV, DEBEZIUM,
 DEDUPLICATE, DESC, DISTINCT, EARLY, ELSE, EMIT, END, EVENT, EXEC, EXTRACT,
-FALSE, FINAL, FIRST, FORMAT, FROM, GROUP, HAVING, ILIKE, IN, INTERVAL,
-IS, JOIN, LAST, LEFT, LIKE, LIMIT, NOT, NULL, ON, OR, ORDER, SEED,
-SELECT, SESSION, SLIDING, STREAM, SUM, AVG, MIN, MAX, MEDIAN, TABLE,
-THEN, TIME, TRUE, TUMBLING, WATERMARK, WHEN, WHERE, WINDOW, WITHIN
+FALSE, FINAL, FIRST, FOLDDB, FORMAT, FROM, GROUP, HAVING, ILIKE, IN, INTERVAL,
+IS, JOIN, JSON, LAST, LEFT, LIKE, LIMIT, NDJSON, NOT, NULL, ON, OR, ORDER,
+PARQUET, PROTOBUF, SEED, SELECT, SESSION, SLIDING, STREAM, SUM, AVG, MIN,
+MAX, MEDIAN, TABLE, THEN, TIME, TRUE, TUMBLING, WATERMARK, WHEN, WHERE,
+WINDOW, WITHIN
 ```
 
 Function names (`LENGTH`, `UPPER`, `COALESCE`, etc.) are also reserved when followed by `(`. As bare identifiers they are treated as column references.

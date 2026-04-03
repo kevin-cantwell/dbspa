@@ -66,6 +66,9 @@ FROM 'kafka://broker/orders' o FORMAT DEBEZIUM
 JOIN 'kafka://broker/customers.cdc' c FORMAT DEBEZIUM ON o.customer_id = c.id
 ```
 
+!!! note
+    `FORMAT DEBEZIUM` uses JSON encoding by default. For Avro-encoded CDC sources, use `FORMAT AVRO DEBEZIUM` (with a schema registry configured via the `?registry=` URI parameter).
+
 If a customer's `tier` changes from "gold" to "platinum", every previously joined order for that customer is retracted (weight=-1) and re-emitted with the new tier (weight=+1).
 
 ### Stream-to-stream (WITHIN clause)
