@@ -79,7 +79,7 @@ dbspa --cpuprofile prof.out "SELECT status, COUNT(*) GROUP BY status"
 go tool pprof prof.out
 
 # Debezium Avro with schema registry
-dbspa "SELECT _op, customer_id, total
+dbspa "SELECT $op, customer_id, total
         FROM 'kafka://broker/orders.cdc?registry=http://schema-registry:8081'
         FORMAT AVRO CHANGELOG DEBEZIUM"
 ```
@@ -151,14 +151,14 @@ Inferred schema:
   after       JSON        {order_id: INT, status: TEXT, region: TEXT, total: FLOAT, ...}
   source      JSON        {db: TEXT, table: TEXT, ts_ms: BIGINT, lsn: TEXT, ...}
 
-With FORMAT DEBEZIUM, virtual columns:
-  _op         TEXT
-  _before     JSON
-  _after      JSON
-  _table      TEXT
-  _db         TEXT
-  _ts         TIMESTAMP
-  _source     JSON
+With CHANGELOG DEBEZIUM, virtual columns:
+  $op         TEXT
+  $before     JSON
+  $after      JSON
+  $table      TEXT
+  $db         TEXT
+  $ts         TIMESTAMP
+  $source     JSON
 ```
 
 ## state

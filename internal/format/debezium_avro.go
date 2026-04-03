@@ -156,29 +156,29 @@ func (d *DebeziumAvroDecoder) buildRecord(
 	}
 
 	// Virtual columns
-	cols["_op"] = engine.TextValue{V: op}
+	cols["$op"] = engine.TextValue{V: op}
 
 	if before == nil {
-		cols["_before"] = engine.NullValue{}
+		cols["$before"] = engine.NullValue{}
 	} else {
-		cols["_before"] = engine.JsonValue{V: before}
+		cols["$before"] = engine.JsonValue{V: before}
 	}
 
 	if after == nil {
-		cols["_after"] = engine.NullValue{}
+		cols["$after"] = engine.NullValue{}
 	} else {
-		cols["_after"] = engine.JsonValue{V: after}
+		cols["$after"] = engine.JsonValue{V: after}
 	}
 
-	cols["_table"] = engine.TextValue{V: sourceTable}
-	cols["_db"] = engine.TextValue{V: sourceDB}
+	cols["$table"] = engine.TextValue{V: sourceTable}
+	cols["$db"] = engine.TextValue{V: sourceDB}
 	if sourceTsMs > 0 {
-		cols["_ts"] = engine.TimestampValue{V: time.UnixMilli(sourceTsMs).UTC()}
+		cols["$ts"] = engine.TimestampValue{V: time.UnixMilli(sourceTsMs).UTC()}
 	} else {
-		cols["_ts"] = engine.NullValue{}
+		cols["$ts"] = engine.NullValue{}
 	}
 	// No _source in Avro envelope (fields are top-level), set to null
-	cols["_source"] = engine.NullValue{}
+	cols["$source"] = engine.NullValue{}
 
 	return engine.Record{
 		Columns:   cols,

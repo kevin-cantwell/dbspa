@@ -130,10 +130,10 @@ Debezium records have an `op` field and `before`/`after` payloads. DBSPA unwraps
 | `r` (snapshot read) | 1 record: `(after, weight=+1)` |
 | `t` (truncate) | Ignored (logged at warn level) |
 
-When a Debezium envelope is specified, [virtual columns](sql.md#debezium-virtual-columns) (`_op`, `_before`, `_after`, `_table`, `_db`, `_ts`, `_source`) are available.
+When a Debezium envelope is specified, [virtual columns](sql.md#debezium-virtual-columns) (`$op`, `$before`, `$after`, `$table`, `$db`, `$ts`, `$source`) are available.
 
 !!! note
-    If `_before` is NULL on an update (common without `REPLICA IDENTITY FULL`), the retraction is skipped. DBSPA logs a warning on the first occurrence. Accumulators may drift over time without full replica identity.
+    If `$before` is NULL on an update (common without `REPLICA IDENTITY FULL`), the retraction is skipped. DBSPA logs a warning on the first occurrence. Accumulators may drift over time without full replica identity.
 
 **Avro-encoded Debezium** (`FORMAT AVRO CHANGELOG DEBEZIUM`) combines the CDC semantics with the compact binary encoding of Avro. Debezium Avro messages use the Confluent wire format and require a schema registry:
 

@@ -141,31 +141,31 @@ func (d *DebeziumDecoder) buildRecord(payload json.RawMessage, env *debeziumEnve
 	}
 
 	// Add virtual columns directly (overwrite payload columns if name collision)
-	cols["_op"] = engine.TextValue{V: env.Op}
+	cols["$op"] = engine.TextValue{V: env.Op}
 
 	if isJSONNull(env.Before) {
-		cols["_before"] = engine.NullValue{}
+		cols["$before"] = engine.NullValue{}
 	} else {
-		cols["_before"] = &engine.LazyJsonValue{Raw: env.Before}
+		cols["$before"] = &engine.LazyJsonValue{Raw: env.Before}
 	}
 
 	if isJSONNull(env.After) {
-		cols["_after"] = engine.NullValue{}
+		cols["$after"] = engine.NullValue{}
 	} else {
-		cols["_after"] = &engine.LazyJsonValue{Raw: env.After}
+		cols["$after"] = &engine.LazyJsonValue{Raw: env.After}
 	}
 
-	cols["_table"] = engine.TextValue{V: src.Table}
-	cols["_db"] = engine.TextValue{V: src.DB}
+	cols["$table"] = engine.TextValue{V: src.Table}
+	cols["$db"] = engine.TextValue{V: src.DB}
 	if src.TsMs > 0 {
-		cols["_ts"] = engine.TimestampValue{V: time.UnixMilli(src.TsMs).UTC()}
+		cols["$ts"] = engine.TimestampValue{V: time.UnixMilli(src.TsMs).UTC()}
 	} else {
-		cols["_ts"] = engine.NullValue{}
+		cols["$ts"] = engine.NullValue{}
 	}
 	if env.Source != nil {
-		cols["_source"] = &engine.LazyJsonValue{Raw: env.Source}
+		cols["$source"] = &engine.LazyJsonValue{Raw: env.Source}
 	} else {
-		cols["_source"] = engine.NullValue{}
+		cols["$source"] = engine.NullValue{}
 	}
 
 	return engine.Record{

@@ -321,6 +321,18 @@ func TestNegativeSQL(t *testing.T) {
 			errContains: "unexpected token",
 		},
 
+		// ===== Metadata columns in GROUP BY =====
+		{
+			name:        "GROUP BY $op (metadata column)",
+			sql:         "SELECT $op, COUNT(*) FROM stdin CHANGELOG DEBEZIUM GROUP BY $op",
+			errContains: "metadata column",
+		},
+		{
+			name:        "GROUP BY $source.gtid (metadata column via dot)",
+			sql:         "SELECT $source FROM stdin CHANGELOG DEBEZIUM GROUP BY $source.gtid",
+			errContains: "metadata column",
+		},
+
 		// ===== Invalid WINDOW =====
 		{
 			name:        "WINDOW without type",

@@ -81,7 +81,7 @@ Error: unexpected token 'GRUP' at position 84
 ```
 Error: column 'regin' not found in source schema
 
-  Available columns: region, status, total, _op, _before, _after, ...
+  Available columns: region, status, total, $op, $before, $after, ...
   Did you mean: region?
 ```
 

@@ -541,6 +541,7 @@ func (l *Lexer) readNumber(line, col int) Token {
 
 func (l *Lexer) readIdentOrKeyword(line, col int) Token {
 	start := l.pos
+	l.advance() // consume the starting character (already confirmed isIdentStart)
 	for l.pos < len(l.input) && isIdentPart(l.peekChar()) {
 		l.advance()
 	}
@@ -559,7 +560,7 @@ func isDigit(ch rune) bool {
 }
 
 func isIdentStart(ch rune) bool {
-	return ch == '_' || unicode.IsLetter(ch)
+	return ch == '_' || ch == '$' || unicode.IsLetter(ch)
 }
 
 func isIdentPart(ch rune) bool {

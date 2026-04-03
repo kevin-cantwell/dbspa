@@ -58,7 +58,7 @@ SELECT c.tier, c.region,
 FROM stdin e
 JOIN '/path/to/customers.parquet' c ON e.customer_id = c.id
 CHANGELOG DEBEZIUM
-WHERE _op IN ('c', 'u')
+WHERE $op IN ('c', 'u')
 GROUP BY c.tier, c.region
 ```
 
@@ -134,7 +134,7 @@ The full complex query (CDC + JOIN + 7 aggregates) went through five rounds of o
 
 **Skip left arrangement.** For stream-to-file joins where the right side never changes, the left arrangement is skipped, eliminating `json.Marshal` fingerprinting on every record.
 
-**LazyJsonValue.** Debezium virtual columns (`_before`, `_after`, `_source`) are stored as raw JSON bytes and only parsed if the query accesses them.
+**LazyJsonValue.** Debezium virtual columns (`$before`, `$after`, `$source`) are stored as raw JSON bytes and only parsed if the query accesses them.
 
 **Typed int64 index.** The arrangement uses `map[int64][]Record` for integer join keys, eliminating `strconv.FormatInt` per lookup. Cross-type coercion means `TextValue{"42"}` matches `IntValue{42}`.
 

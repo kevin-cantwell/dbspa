@@ -319,6 +319,16 @@ func TestIdentifierWithUnderscore(t *testing.T) {
 	}
 }
 
+func TestIdentifierWithDollarPrefix(t *testing.T) {
+	l := New("$op $before $after $source")
+	for _, want := range []string{"$op", "$before", "$after", "$source"} {
+		tok := l.Next()
+		if tok.Type != TokenIdent || tok.Literal != want {
+			t.Errorf("got (%d, %q), want ident %q", tok.Type, tok.Literal, want)
+		}
+	}
+}
+
 func TestEmptyInput(t *testing.T) {
 	l := New("")
 	tok := l.Next()

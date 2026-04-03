@@ -29,14 +29,14 @@ func TestDebeziumCreate(t *testing.T) {
 		t.Errorf("expected name=alice, got %s", rec.Get("name").String())
 	}
 	// Check virtual columns
-	if rec.Get("_op").String() != "c" {
-		t.Errorf("expected _op=c, got %s", rec.Get("_op").String())
+	if rec.Get("$op").String() != "c" {
+		t.Errorf("expected _op=c, got %s", rec.Get("$op").String())
 	}
-	if rec.Get("_table").String() != "users" {
-		t.Errorf("expected _table=users, got %s", rec.Get("_table").String())
+	if rec.Get("$table").String() != "users" {
+		t.Errorf("expected _table=users, got %s", rec.Get("$table").String())
 	}
-	if rec.Get("_db").String() != "mydb" {
-		t.Errorf("expected _db=mydb, got %s", rec.Get("_db").String())
+	if rec.Get("$db").String() != "mydb" {
+		t.Errorf("expected _db=mydb, got %s", rec.Get("$db").String())
 	}
 }
 
@@ -206,9 +206,9 @@ func TestDebeziumVirtualColumns(t *testing.T) {
 	rec := recs[0]
 
 	checks := map[string]string{
-		"_op":    "c",
-		"_table": "items",
-		"_db":    "mydb",
+		"$op":    "c",
+		"$table": "items",
+		"$db":    "mydb",
 	}
 	for col, want := range checks {
 		got := rec.Get(col).String()
@@ -218,19 +218,19 @@ func TestDebeziumVirtualColumns(t *testing.T) {
 	}
 
 	// _before should be null
-	if !rec.Get("_before").IsNull() {
-		t.Errorf("_before should be null for create, got %v", rec.Get("_before"))
+	if !rec.Get("$before").IsNull() {
+		t.Errorf("_before should be null for create, got %v", rec.Get("$before"))
 	}
 	// _after should be JSON
-	if rec.Get("_after").Type() != "JSON" {
-		t.Errorf("_after should be JSON, got %s", rec.Get("_after").Type())
+	if rec.Get("$after").Type() != "JSON" {
+		t.Errorf("_after should be JSON, got %s", rec.Get("$after").Type())
 	}
 	// _ts should be a timestamp
-	if rec.Get("_ts").Type() != "TIMESTAMP" {
-		t.Errorf("_ts should be TIMESTAMP, got %s", rec.Get("_ts").Type())
+	if rec.Get("$ts").Type() != "TIMESTAMP" {
+		t.Errorf("_ts should be TIMESTAMP, got %s", rec.Get("$ts").Type())
 	}
 	// _source should be JSON
-	if rec.Get("_source").Type() != "JSON" {
-		t.Errorf("_source should be JSON, got %s", rec.Get("_source").Type())
+	if rec.Get("$source").Type() != "JSON" {
+		t.Errorf("_source should be JSON, got %s", rec.Get("$source").Type())
 	}
 }

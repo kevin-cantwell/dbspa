@@ -104,17 +104,17 @@ Every Kafka record exposes:
 
 ### Debezium virtual columns
 
-When `FORMAT DEBEZIUM` is specified:
+When `CHANGELOG DEBEZIUM` is specified:
 
 | Column | Type | Description |
 |---|---|---|
-| `_op` | TEXT | `c`, `u`, `d`, `r` |
-| `_before` | JSON | Row state before the change |
-| `_after` | JSON | Row state after the change |
-| `_table` | TEXT | Source table name |
-| `_db` | TEXT | Source database name |
-| `_ts` | TIMESTAMP | Source database transaction timestamp |
-| `_source` | JSON | Full Debezium source block |
+| `$op` | TEXT | `c`, `u`, `d`, `r` |
+| `$before` | JSON | Row state before the change |
+| `$after` | JSON | Row state after the change |
+| `$table` | TEXT | Source table name |
+| `$db` | TEXT | Source database name |
+| `$ts` | TIMESTAMP | Source database transaction timestamp |
+| `$source` | JSON | Full Debezium source block |
 
 ## EXEC
 

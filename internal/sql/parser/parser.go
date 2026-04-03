@@ -146,6 +146,11 @@ func (p *Parser) parseSelect() (*ast.SelectStatement, error) {
 		if err != nil {
 			return nil, err
 		}
+		for _, expr := range exprs {
+			if col := metadataRefIn(expr); col != "" {
+				return nil, p.errorf(p.lex.Peek(), "metadata column %q cannot be used in GROUP BY", col)
+			}
+		}
 		stmt.GroupBy = exprs
 	}
 
@@ -375,6 +380,39 @@ func (p *Parser) parseChangelogClause() (string, error) {
 		return name, nil
 	}
 	return "AUTO", nil
+}
+
+// metadataRefIn walks an expression and returns the first $-prefixed column name
+// found, or "" if none. Used to reject metadata columns in GROUP BY.
+func metadataRefIn(expr ast.Expr) string {
+	switch e := expr.(type) {
+	case *ast.ColumnRef:
+		if strings.HasPrefix(e.Name, "$") {
+			return e.Name
+		}
+	case *ast.QualifiedRef:
+		if strings.HasPrefix(e.Qualifier, "$") {
+			return e.Qualifier
+		}
+	case *ast.JsonAccessExpr:
+		return metadataRefIn(e.Left)
+	case *ast.BinaryExpr:
+		if c := metadataRefIn(e.Left); c != "" {
+			return c
+		}
+		return metadataRefIn(e.Right)
+	case *ast.UnaryExpr:
+		return metadataRefIn(e.Expr)
+	case *ast.CastExpr:
+		return metadataRefIn(e.Expr)
+	case *ast.FunctionCall:
+		for _, arg := range e.Args {
+			if c := metadataRefIn(arg); c != "" {
+				return c
+			}
+		}
+	}
+	return ""
 }
 
 // isChangelogFamily returns true if the name is a known changelog envelope family.

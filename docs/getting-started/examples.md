@@ -56,10 +56,10 @@ dbspa "SELECT region, SUM(total::float) AS revenue
 
 # Filter only updates — _before/_after virtuals let you compare old and new values
 dbspa "SELECT order_id,
-               _before.status AS old_status,
-               _after.status AS new_status
+               $before.status AS old_status,
+               $after.status AS new_status
         FROM 'kafka://broker:9092/orders.cdc' CHANGELOG DEBEZIUM
-        WHERE _op = 'u'"
+        WHERE $op = 'u'"
 ```
 
 ## Windowed aggregation

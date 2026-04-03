@@ -255,7 +255,7 @@ func TestConfluentDebeziumAvroDecoder(t *testing.T) {
 	if rec.Weight != 1 {
 		t.Errorf("Weight = %d, want 1", rec.Weight)
 	}
-	assertTextValue(t, rec.Get("_op"), "_op", "c")
+	assertTextValue(t, rec.Get("$op"), "$op", "c")
 }
 
 func TestConfluentDebeziumAvroDecoder_Update(t *testing.T) {

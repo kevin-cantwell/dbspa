@@ -114,20 +114,20 @@ func TestDebeziumAvroCreate(t *testing.T) {
 	}
 
 	// Check virtual columns
-	if rec.Get("_op").String() != "c" {
-		t.Errorf("_op: got %q, want %q", rec.Get("_op").String(), "c")
+	if rec.Get("$op").String() != "c" {
+		t.Errorf("_op: got %q, want %q", rec.Get("$op").String(), "c")
 	}
-	if rec.Get("_table").String() != "orders" {
-		t.Errorf("_table: got %q, want %q", rec.Get("_table").String(), "orders")
+	if rec.Get("$table").String() != "orders" {
+		t.Errorf("_table: got %q, want %q", rec.Get("$table").String(), "orders")
 	}
-	if rec.Get("_db").String() != "ecommerce" {
-		t.Errorf("_db: got %q, want %q", rec.Get("_db").String(), "ecommerce")
+	if rec.Get("$db").String() != "ecommerce" {
+		t.Errorf("_db: got %q, want %q", rec.Get("$db").String(), "ecommerce")
 	}
-	if rec.Get("_before").IsNull() != true {
+	if rec.Get("$before").IsNull() != true {
 		t.Errorf("_before should be null for create")
 	}
-	if rec.Get("_ts").Type() != "TIMESTAMP" {
-		t.Errorf("_ts should be TIMESTAMP, got %s", rec.Get("_ts").Type())
+	if rec.Get("$ts").Type() != "TIMESTAMP" {
+		t.Errorf("_ts should be TIMESTAMP, got %s", rec.Get("$ts").Type())
 	}
 }
 
@@ -324,9 +324,9 @@ func TestDebeziumAvroVirtualColumns(t *testing.T) {
 	rec := recs[0]
 
 	checks := map[string]string{
-		"_op":    "c",
-		"_table": "items",
-		"_db":    "mydb",
+		"$op":    "c",
+		"$table": "items",
+		"$db":    "mydb",
 	}
 	for col, want := range checks {
 		got := rec.Get(col).String()
@@ -336,19 +336,19 @@ func TestDebeziumAvroVirtualColumns(t *testing.T) {
 	}
 
 	// _before should be null for create
-	if !rec.Get("_before").IsNull() {
-		t.Errorf("_before should be null for create, got %v", rec.Get("_before"))
+	if !rec.Get("$before").IsNull() {
+		t.Errorf("_before should be null for create, got %v", rec.Get("$before"))
 	}
 	// _after should be JSON
-	if rec.Get("_after").Type() != "JSON" {
-		t.Errorf("_after should be JSON, got %s", rec.Get("_after").Type())
+	if rec.Get("$after").Type() != "JSON" {
+		t.Errorf("_after should be JSON, got %s", rec.Get("$after").Type())
 	}
 	// _ts should be a timestamp
-	if rec.Get("_ts").Type() != "TIMESTAMP" {
-		t.Errorf("_ts should be TIMESTAMP, got %s", rec.Get("_ts").Type())
+	if rec.Get("$ts").Type() != "TIMESTAMP" {
+		t.Errorf("_ts should be TIMESTAMP, got %s", rec.Get("$ts").Type())
 	}
 	// Verify _ts value
-	ts, ok := rec.Columns["_ts"].(engine.TimestampValue)
+	ts, ok := rec.Columns["$ts"].(engine.TimestampValue)
 	if !ok {
 		t.Fatalf("_ts is not TimestampValue")
 	}
