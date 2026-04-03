@@ -2,7 +2,13 @@
 
 **Database Stream Processing Accumulator.**
 
-DBSPA is a CLI tool that brings the power of [DBSP](https://github.com/feldera/dbsp) — normally reserved for heavyweight deployments like [Feldera](https://feldera.com) and [Materialize](https://materialize.com) — to your command line.
+DBSPA is a CLI tool that brings the power of [DBSP](https://arxiv.org/abs/2203.16684) — normally reserved for heavyweight deployments like [Feldera](https://feldera.com) and [Materialize](https://materialize.com) — to your command line.
+
+```bash
+dbspa "SELECT region, SUM(quantity) AS total_quantity
+        FROM 'kafka://brokers:9092/orders.cdc' CHANGELOG DEBEZIUM
+        GROUP BY region"
+```
 
 ## What is DBSP?
 
