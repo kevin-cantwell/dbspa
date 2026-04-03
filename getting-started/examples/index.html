@@ -1774,22 +1774,21 @@
 </code></pre></div>
 <h2 id="debezium-cdc">Debezium CDC<a class="headerlink" href="#debezium-cdc" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># Live order counts from a CDC stream</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>dbspa<span class="w"> </span><span class="s2">&quot;SELECT _after.status AS status, COUNT(*) AS orders</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>dbspa<span class="w"> </span><span class="s2">&quot;SELECT status, COUNT(*) AS orders</span>
 <a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="s2">        FROM &#39;kafka://broker:9092/orders.cdc&#39; CHANGELOG DEBEZIUM</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="s2">        GROUP BY _after.status&quot;</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="s2">        GROUP BY status&quot;</span>
 <a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>
 <a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="c1"># Revenue by region — updates correctly when orders change status</span>
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>dbspa<span class="w"> </span><span class="s2">&quot;SELECT _after.region AS region,</span>
-<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="s2">               SUM((_after.total)::float) AS revenue</span>
-<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="s2">        FROM &#39;kafka://broker:9092/orders.cdc&#39; CHANGELOG DEBEZIUM</span>
-<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="s2">        GROUP BY _after.region&quot;</span>
-<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a>
-<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="c1"># Filter only updates</span>
-<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a>dbspa<span class="w"> </span><span class="s2">&quot;SELECT _after.order_id AS id,</span>
-<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a><span class="s2">               _before.status AS old_status,</span>
-<a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a><span class="s2">               _after.status AS new_status</span>
-<a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a><span class="s2">        FROM &#39;kafka://broker:9092/orders.cdc&#39; CHANGELOG DEBEZIUM</span>
-<a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a><span class="s2">        WHERE _op = &#39;u&#39;&quot;</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>dbspa<span class="w"> </span><span class="s2">&quot;SELECT region, SUM(total::float) AS revenue</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="s2">        FROM &#39;kafka://broker:9092/orders.cdc&#39; CHANGELOG DEBEZIUM</span>
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="s2">        GROUP BY region&quot;</span>
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>
+<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="c1"># Filter only updates — _before/_after virtuals let you compare old and new values</span>
+<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a>dbspa<span class="w"> </span><span class="s2">&quot;SELECT order_id,</span>
+<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a><span class="s2">               _before.status AS old_status,</span>
+<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a><span class="s2">               _after.status AS new_status</span>
+<a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a><span class="s2">        FROM &#39;kafka://broker:9092/orders.cdc&#39; CHANGELOG DEBEZIUM</span>
+<a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a><span class="s2">        WHERE _op = &#39;u&#39;&quot;</span>
 </code></pre></div>
 <h2 id="windowed-aggregation">Windowed aggregation<a class="headerlink" href="#windowed-aggregation" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1"># Tumbling window: per-minute request counts</span>
@@ -1937,9 +1936,9 @@
 <p>Stream-stream joins auto-enable spill-to-disk to prevent OOM.</p>
 <h2 id="deduplication">Deduplication<a class="headerlink" href="#deduplication" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="c1"># Deduplicate by order_id within a 10-minute window</span>
-<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>dbspa<span class="w"> </span><span class="s2">&quot;SELECT _after.order_id AS id, _after.status AS status</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>dbspa<span class="w"> </span><span class="s2">&quot;SELECT order_id, status</span>
 <a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="s2">        FROM &#39;kafka://broker/orders.cdc&#39; CHANGELOG DEBEZIUM</span>
-<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="s2">        DEDUPLICATE BY _after.order_id WITHIN &#39;10 minutes&#39;&quot;</span>
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="s2">        DEDUPLICATE BY order_id WITHIN &#39;10 minutes&#39;&quot;</span>
 <a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a>
 <a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a><span class="c1"># With custom cache capacity</span>
 <a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a>dbspa<span class="w"> </span><span class="s2">&quot;SELECT *</span>

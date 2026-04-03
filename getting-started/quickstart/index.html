@@ -1557,9 +1557,9 @@
 <div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>dbspa<span class="w"> </span><span class="s2">&quot;SELECT * FROM &#39;kafka://localhost:9092/events&#39;&quot;</span>
 </code></pre></div>
 <p>With Debezium CDC:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>dbspa<span class="w"> </span><span class="s2">&quot;SELECT _after.status AS status, COUNT(*) AS orders</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>dbspa<span class="w"> </span><span class="s2">&quot;SELECT status, COUNT(*) AS orders</span>
 <a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="s2">        FROM &#39;kafka://broker:9092/orders.cdc&#39; CHANGELOG DEBEZIUM</span>
-<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="s2">        GROUP BY _after.status&quot;</span>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="s2">        GROUP BY status&quot;</span>
 </code></pre></div>
 <h2 id="save-state-to-sqlite">Save state to SQLite<a class="headerlink" href="#save-state-to-sqlite" title="Permanent link">&para;</a></h2>
 <p>Write the current aggregation result to a SQLite file that other processes can read concurrently:</p>
