@@ -1023,7 +1023,7 @@ func runJoinQuery(t *testing.T, sql string, inputLines []string, tableFile strin
 	// Build join operator
 	tableFormat := ""
 	if stmt.Join.Source != nil {
-		tableFormat = stmt.Join.Source.Format
+		tableFormat = stmt.Join.Source.Format()
 	}
 	tableRecords, err := loadTableFile(tableFile, tableFormat)
 	if err != nil {
@@ -1440,7 +1440,7 @@ func runJoinAggQuery(t *testing.T, sql string, inputLines []string, tableFile st
 	// Build DD join operator
 	tableFormat := ""
 	if stmt.Join.Source != nil {
-		tableFormat = stmt.Join.Source.Format
+		tableFormat = stmt.Join.Source.Format()
 	}
 	tableRecords, err := loadTableFile(tableFile, tableFormat)
 	if err != nil {
@@ -1576,7 +1576,7 @@ func runJoinAggQueryWithOrderBy(t *testing.T, sql string, inputLines []string, t
 	// Build DD join operator
 	tableFormat := ""
 	if stmt.Join.Source != nil {
-		tableFormat = stmt.Join.Source.Format
+		tableFormat = stmt.Join.Source.Format()
 	}
 	tableRecords, err := loadTableFile(tableFile, tableFormat)
 	if err != nil {
@@ -2610,7 +2610,7 @@ func TestIsStreamingSubquery(t *testing.T) {
 			name: "kafka source",
 			sq: &ast.SubquerySource{
 				Query: &ast.SelectStatement{
-					From: &ast.TableSource{URI: "kafka://broker/orders.cdc", Format: "DEBEZIUM"},
+					From: &ast.TableSource{URI: "kafka://broker/orders.cdc", Encoding: "JSON", Envelope: "DEBEZIUM"},
 				},
 				Alias: "r",
 			},
@@ -2710,7 +2710,7 @@ func TestExecuteStreamingSubquery_RequiresGroupBy(t *testing.T) {
 	// This mirrors the validation in executeStreamingSubquery.
 	stmt := &ast.SelectStatement{
 		Columns: []ast.Column{{Expr: &ast.ColumnRef{Name: "order_id"}, Alias: ""}},
-		From:    &ast.TableSource{URI: "kafka://broker/orders.cdc", Format: "DEBEZIUM"},
+		From:    &ast.TableSource{URI: "kafka://broker/orders.cdc", Encoding: "JSON", Envelope: "DEBEZIUM"},
 		// No GroupBy, no aggregates
 	}
 
@@ -3825,6 +3825,240 @@ func TestE2E_StateNonAccumulatingWithWhere(t *testing.T) {
 	}
 	if count != 3 {
 		t.Errorf("expected 3 rows (x=3,4,5), got %d", count)
+	}
+}
+
+// =====================================================================
+// FORMAT encoding + envelope E2E tests
+// =====================================================================
+
+// TestE2E_FormatJSON_PlainRecords: FORMAT JSON without envelope, weight always +1
+func TestE2E_FormatJSON_PlainRecords(t *testing.T) {
+	stdin := "{\"x\":1}\n{\"x\":2}\n"
+	stdout, stderr, err := runFolddb(t, "SELECT x FROM stdin FORMAT JSON", stdin)
+	if err != nil {
+		t.Fatalf("folddb failed: %v\nstderr: %s", err, stderr)
+	}
+	results := parseFolddbOutput(t, stdout)
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(results))
+	}
+	if results[0]["x"] != float64(1) {
+		t.Errorf("result[0] x: got %v, want 1", results[0]["x"])
+	}
+	if results[1]["x"] != float64(2) {
+		t.Errorf("result[1] x: got %v, want 2", results[1]["x"])
+	}
+}
+
+// TestE2E_FormatCSV_PlainRecords: FORMAT CSV(header=true) without envelope
+func TestE2E_FormatCSV_PlainRecords(t *testing.T) {
+	stdin := "x\n1\n2\n"
+	stdout, stderr, err := runFolddb(t, "SELECT x FROM stdin FORMAT CSV(header=true)", stdin)
+	if err != nil {
+		t.Fatalf("folddb failed: %v\nstderr: %s", err, stderr)
+	}
+	results := parseFolddbOutput(t, stdout)
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(results))
+	}
+	if results[0]["x"] != "1" {
+		t.Errorf("result[0] x: got %v, want \"1\"", results[0]["x"])
+	}
+	if results[1]["x"] != "2" {
+		t.Errorf("result[1] x: got %v, want \"2\"", results[1]["x"])
+	}
+}
+
+// TestE2E_FormatJSON_WeightIsRegularColumn: _weight without FOLDDB envelope is just a column
+func TestE2E_FormatJSON_WeightIsRegularColumn(t *testing.T) {
+	stdin := "{\"_weight\":-1,\"x\":1}\n"
+	stdout, stderr, err := runFolddb(t, "SELECT _weight, x FROM stdin FORMAT JSON", stdin)
+	if err != nil {
+		t.Fatalf("folddb failed: %v\nstderr: %s", err, stderr)
+	}
+	results := parseFolddbOutput(t, stdout)
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+	// _weight should appear as a regular column with value -1
+	if results[0]["_weight"] != float64(-1) {
+		t.Errorf("_weight: got %v, want -1 (should be a regular column, not consumed)", results[0]["_weight"])
+	}
+	if results[0]["x"] != float64(1) {
+		t.Errorf("x: got %v, want 1", results[0]["x"])
+	}
+}
+
+// TestE2E_FormatDebezium_Create: FORMAT DEBEZIUM with op=c
+func TestE2E_FormatDebezium_Create(t *testing.T) {
+	stdin := "{\"op\":\"c\",\"after\":{\"id\":1,\"name\":\"alice\"}}\n"
+	stdout, stderr, err := runFolddb(t, "SELECT id, name FROM stdin FORMAT DEBEZIUM", stdin)
+	if err != nil {
+		t.Fatalf("folddb failed: %v\nstderr: %s", err, stderr)
+	}
+	results := parseFolddbOutput(t, stdout)
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+	if results[0]["id"] != float64(1) {
+		t.Errorf("id: got %v, want 1", results[0]["id"])
+	}
+	if results[0]["name"] != "alice" {
+		t.Errorf("name: got %v, want alice", results[0]["name"])
+	}
+}
+
+// TestE2E_FormatJSONDebezium_Explicit: FORMAT JSON DEBEZIUM (explicit encoding)
+func TestE2E_FormatJSONDebezium_Explicit(t *testing.T) {
+	stdin := "{\"op\":\"c\",\"after\":{\"id\":1,\"name\":\"bob\"}}\n"
+	stdout, stderr, err := runFolddb(t, "SELECT id, name FROM stdin FORMAT JSON DEBEZIUM", stdin)
+	if err != nil {
+		t.Fatalf("folddb failed: %v\nstderr: %s", err, stderr)
+	}
+	results := parseFolddbOutput(t, stdout)
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+	if results[0]["id"] != float64(1) {
+		t.Errorf("id: got %v, want 1", results[0]["id"])
+	}
+	if results[0]["name"] != "bob" {
+		t.Errorf("name: got %v, want bob", results[0]["name"])
+	}
+}
+
+// TestE2E_FormatDebezium_UpdateRetraction: Debezium update emits retraction + insertion
+func TestE2E_FormatDebezium_UpdateRetraction(t *testing.T) {
+	stdin := "{\"op\":\"u\",\"before\":{\"id\":1,\"status\":\"pending\"},\"after\":{\"id\":1,\"status\":\"shipped\"}}\n"
+	stdout, stderr, err := runFolddb(t, "SELECT status FROM stdin FORMAT DEBEZIUM", stdin)
+	if err != nil {
+		t.Fatalf("folddb failed: %v\nstderr: %s", err, stderr)
+	}
+	results := parseFolddbOutput(t, stdout)
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results (retraction + insertion), got %d: %v", len(results), results)
+	}
+	// First record: retraction of old value (before)
+	if results[0]["status"] != "pending" {
+		t.Errorf("result[0] status: got %v, want pending", results[0]["status"])
+	}
+	// Second record: insertion of new value (after)
+	if results[1]["status"] != "shipped" {
+		t.Errorf("result[1] status: got %v, want shipped", results[1]["status"])
+	}
+}
+
+// TestE2E_FormatFoldDB_WeightConsumed: FORMAT FOLDDB consumes _weight as z-set weight
+func TestE2E_FormatFoldDB_WeightConsumed(t *testing.T) {
+	stdin := "{\"_weight\":1,\"x\":10}\n{\"_weight\":-1,\"x\":10}\n"
+	stdout, stderr, err := runFolddb(t, "SELECT x, COUNT(*) AS cnt FROM stdin FORMAT FOLDDB GROUP BY x", stdin)
+	if err != nil {
+		t.Fatalf("folddb failed: %v\nstderr: %s", err, stderr)
+	}
+	results := parseFolddbOutput(t, stdout)
+	// Insert (weight=1) produces cnt=1, then retraction (weight=-1) removes the group.
+	// The changelog should show: insert cnt=1, then retract cnt=1 (group removed).
+	if len(results) < 2 {
+		t.Fatalf("expected at least 2 changelog entries, got %d: %v", len(results), results)
+	}
+	// First entry: insertion with cnt=1
+	if results[0]["_weight"] != float64(1) {
+		t.Errorf("result[0] _weight: got %v, want 1", results[0]["_weight"])
+	}
+	if results[0]["cnt"] != float64(1) {
+		t.Errorf("result[0] cnt: got %v, want 1", results[0]["cnt"])
+	}
+	// Second entry: retraction (group removed)
+	if results[1]["_weight"] != float64(-1) {
+		t.Errorf("result[1] _weight: got %v, want -1", results[1]["_weight"])
+	}
+}
+
+// TestE2E_FormatJSONFoldDB_Explicit: FORMAT JSON FOLDDB (explicit encoding)
+func TestE2E_FormatJSONFoldDB_Explicit(t *testing.T) {
+	stdin := "{\"_weight\":1,\"x\":10}\n{\"_weight\":-1,\"x\":10}\n"
+	stdout, stderr, err := runFolddb(t, "SELECT x, COUNT(*) AS cnt FROM stdin FORMAT JSON FOLDDB GROUP BY x", stdin)
+	if err != nil {
+		t.Fatalf("folddb failed: %v\nstderr: %s", err, stderr)
+	}
+	results := parseFolddbOutput(t, stdout)
+	if len(results) < 2 {
+		t.Fatalf("expected at least 2 changelog entries, got %d: %v", len(results), results)
+	}
+	if results[0]["_weight"] != float64(1) {
+		t.Errorf("result[0] _weight: got %v, want 1", results[0]["_weight"])
+	}
+	if results[1]["_weight"] != float64(-1) {
+		t.Errorf("result[1] _weight: got %v, want -1", results[1]["_weight"])
+	}
+}
+
+// TestE2E_FormatFoldDB_DefaultWeight: FORMAT FOLDDB without _weight defaults to +1
+func TestE2E_FormatFoldDB_DefaultWeight(t *testing.T) {
+	stdin := "{\"x\":1}\n"
+	stdout, stderr, err := runFolddb(t, "SELECT x FROM stdin FORMAT FOLDDB", stdin)
+	if err != nil {
+		t.Fatalf("folddb failed: %v\nstderr: %s", err, stderr)
+	}
+	results := parseFolddbOutput(t, stdout)
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+	if results[0]["x"] != float64(1) {
+		t.Errorf("x: got %v, want 1", results[0]["x"])
+	}
+}
+
+// TestE2E_FormatFoldDB_MultisetWeight: FORMAT FOLDDB with weight > 1 (multiset)
+func TestE2E_FormatFoldDB_MultisetWeight(t *testing.T) {
+	stdin := "{\"_weight\":3,\"x\":1}\n"
+	stdout, stderr, err := runFolddb(t, "SELECT x, COUNT(*) AS cnt FROM stdin FORMAT FOLDDB GROUP BY x", stdin)
+	if err != nil {
+		t.Fatalf("folddb failed: %v\nstderr: %s", err, stderr)
+	}
+	results := parseFolddbOutput(t, stdout)
+	// With weight=3, COUNT should be 3
+	found := false
+	for _, r := range results {
+		if r["_weight"] == float64(1) && r["cnt"] == float64(3) {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected final insertion with cnt=3, got results: %v", results)
+	}
+}
+
+// TestE2E_FormatFoldDB_PipedComposition: output of GROUP BY piped as FOLDDB input
+func TestE2E_FormatFoldDB_PipedComposition(t *testing.T) {
+	// First query: GROUP BY s, producing changelog with _weight
+	// Second query: consume as FOLDDB envelope, filter cnt > 1
+	stdin := "{\"s\":\"a\"}\n{\"s\":\"b\"}\n{\"s\":\"a\"}\n"
+
+	// Run first query, capture its output
+	stdout1, stderr1, err := runFolddb(t, "SELECT s, COUNT(*) AS cnt GROUP BY s", stdin)
+	if err != nil {
+		t.Fatalf("first folddb failed: %v\nstderr: %s", err, stderr1)
+	}
+
+	// Pipe that output to second query with FORMAT FOLDDB
+	stdout2, stderr2, err := runFolddb(t, "SELECT s, cnt FROM stdin FORMAT FOLDDB WHERE cnt::int > 1", stdout1)
+	if err != nil {
+		t.Fatalf("second folddb failed: %v\nstderr: %s", err, stderr2)
+	}
+
+	results := parseFolddbOutput(t, stdout2)
+	// Only s="a" with cnt=2 should pass the filter
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d: %v", len(results), results)
+	}
+	if results[0]["s"] != "a" {
+		t.Errorf("s: got %v, want a", results[0]["s"])
+	}
+	if results[0]["cnt"] != float64(2) {
+		t.Errorf("cnt: got %v, want 2", results[0]["cnt"])
 	}
 }
 
