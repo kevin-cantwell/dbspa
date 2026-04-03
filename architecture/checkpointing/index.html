@@ -939,6 +939,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Delivery semantics">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#exactly-once-processing-with-deduplicate-by" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Exactly-once processing with DEDUPLICATE BY
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1448,6 +1465,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Delivery semantics">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#exactly-once-processing-with-deduplicate-by" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Exactly-once processing with DEDUPLICATE BY
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1591,7 +1625,7 @@
 <p>If you change the SQL query, the fingerprint changes and the old checkpoint is ignored. Use <code>dbspa state reset &lt;hash&gt;</code> to explicitly delete old checkpoints.</p>
 </div>
 <h2 id="delivery-semantics">Delivery semantics<a class="headerlink" href="#delivery-semantics" title="Permanent link">&para;</a></h2>
-<p>DBSPA provides <strong>at-least-once</strong> processing, not exactly-once.</p>
+<p>DBSPA is <strong>at-least-once</strong> by default. Use <code>DEDUPLICATE BY</code> for exactly-once processing semantics.</p>
 <p>The failure window:</p>
 <ol>
 <li>Records are processed and the in-memory accumulator is updated.</li>
@@ -1601,30 +1635,38 @@
 </ol>
 <p><strong>Crash between step 2 and 3:</strong> Output was emitted but checkpoint was not saved. On restart, records are replayed, producing duplicate output. For changelog consumers that maintain a key-value map, the duplicates are idempotent — the map converges to the correct state.</p>
 <p><strong>Crash between step 3 and 4:</strong> Checkpoint is saved but Kafka offsets are not committed. DBSPA resumes from the locally checkpointed offsets, not the Kafka-committed ones.</p>
+<h3 id="exactly-once-processing-with-deduplicate-by">Exactly-once processing with DEDUPLICATE BY<a class="headerlink" href="#exactly-once-processing-with-deduplicate-by" title="Permanent link">&para;</a></h3>
+<p><code>DEDUPLICATE BY</code> eliminates duplicate input records within a time window, giving exactly-once processing semantics for the query computation itself:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="k">SELECT</span><span class="w"> </span><span class="n">status</span><span class="p">,</span><span class="w"> </span><span class="k">COUNT</span><span class="p">(</span><span class="o">*</span><span class="p">)</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">orders</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="k">FROM</span><span class="w"> </span><span class="s1">&#39;kafka://broker/orders.cdc&#39;</span><span class="w"> </span><span class="n">CHANGELOG</span><span class="w"> </span><span class="n">DEBEZIUM</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="k">GROUP</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">status</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="n">DEDUPLICATE</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="err">$</span><span class="k">source</span><span class="p">.</span><span class="n">gtid</span><span class="w"> </span><span class="n">WITHIN</span><span class="w"> </span><span class="s1">&#39;10 minutes&#39;</span>
+</code></pre></div>
+<p>If Kafka redelivers a message (e.g. after a consumer rebalance), DBSPA recognises the <code>$source.gtid</code> and drops the duplicate before it reaches the accumulator. Note that this is exactly-once <em>processing</em> — end-to-end delivery to the sink remains at-least-once because the output is not written transactionally.</p>
 <h2 id="disk-full-handling">Disk full handling<a class="headerlink" href="#disk-full-handling" title="Permanent link">&para;</a></h2>
 <p>If the disk is full during checkpoint write, the write fails and the previous checkpoint remains intact. DBSPA logs an error and retries on the next interval. If the disk remains full for 3 consecutive intervals, DBSPA exits with:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>Error: disk full — unable to write checkpoint for 3 consecutive intervals.
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>Error: disk full — unable to write checkpoint for 3 consecutive intervals.
 </code></pre></div>
 <h2 id="state-directory">State directory<a class="headerlink" href="#state-directory" title="Permanent link">&para;</a></h2>
 <p>Default: <code>~/.dbspa/state/&lt;query-hash&gt;/</code></p>
 <p>Override: <code>--state-dir /path/to/dir</code></p>
 <h2 id="inspection-commands">Inspection commands<a class="headerlink" href="#inspection-commands" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># List all checkpointed queries</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>dbspa<span class="w"> </span>state<span class="w"> </span>list
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="c1"># Inspect a specific checkpoint</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>dbspa<span class="w"> </span>state<span class="w"> </span>inspect<span class="w"> </span>a1b2c3d4
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="c1"># Delete a checkpoint (next run replays from scratch)</span>
-<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>dbspa<span class="w"> </span>state<span class="w"> </span>reset<span class="w"> </span>a1b2c3d4
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1"># List all checkpointed queries</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>dbspa<span class="w"> </span>state<span class="w"> </span>list
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="c1"># Inspect a specific checkpoint</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>dbspa<span class="w"> </span>state<span class="w"> </span>inspect<span class="w"> </span>a1b2c3d4
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="c1"># Delete a checkpoint (next run replays from scratch)</span>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>dbspa<span class="w"> </span>state<span class="w"> </span>reset<span class="w"> </span>a1b2c3d4
 </code></pre></div>
 <p>Example <code>inspect</code> output:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>Query:       SELECT region, COUNT(*) FROM &#39;kafka://broker/orders.cdc&#39; ...
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>Hash:        a1b2c3d4
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>Offsets:     partition 0 = 48291042, partition 1 = 47103821
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>Keys:        48
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>State size:  12 KB
-<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>Last flush:  2026-03-28T14:02:31Z
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>Query:       SELECT region, COUNT(*) FROM &#39;kafka://broker/orders.cdc&#39; ...
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>Hash:        a1b2c3d4
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>Offsets:     partition 0 = 48291042, partition 1 = 47103821
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>Keys:        48
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>State size:  12 KB
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>Last flush:  2026-03-28T14:02:31Z
 </code></pre></div>
 <h2 id="interaction-with-sqlite-state">Interaction with SQLite state<a class="headerlink" href="#interaction-with-sqlite-state" title="Permanent link">&para;</a></h2>
 <p>When both <code>--stateful</code> and <code>--state file.db</code> are used, the SQLite UPSERT and the checkpoint flush are <strong>not</strong> in the same transaction. A crash between them can produce a SQLite state slightly ahead of or behind the checkpoint. On restart, replayed records re-UPSERT into SQLite, converging to the correct state (UPSERT is idempotent for accumulating queries).</p>

@@ -1840,10 +1840,11 @@
 <a id="__codelineno-2-29" name="__codelineno-2-29" href="#__codelineno-2-29"></a>dbspa<span class="w"> </span>--cpuprofile<span class="w"> </span>prof.out<span class="w"> </span><span class="s2">&quot;SELECT status, COUNT(*) GROUP BY status&quot;</span>
 <a id="__codelineno-2-30" name="__codelineno-2-30" href="#__codelineno-2-30"></a>go<span class="w"> </span>tool<span class="w"> </span>pprof<span class="w"> </span>prof.out
 <a id="__codelineno-2-31" name="__codelineno-2-31" href="#__codelineno-2-31"></a>
-<a id="__codelineno-2-32" name="__codelineno-2-32" href="#__codelineno-2-32"></a><span class="c1"># Debezium Avro with schema registry</span>
+<a id="__codelineno-2-32" name="__codelineno-2-32" href="#__codelineno-2-32"></a><span class="c1"># Debezium Avro with schema registry, exactly-once via GTID deduplication</span>
 <a id="__codelineno-2-33" name="__codelineno-2-33" href="#__codelineno-2-33"></a>dbspa<span class="w"> </span><span class="s2">&quot;SELECT </span><span class="nv">$op</span><span class="s2">, customer_id, total</span>
 <a id="__codelineno-2-34" name="__codelineno-2-34" href="#__codelineno-2-34"></a><span class="s2">        FROM &#39;kafka://broker/orders.cdc?registry=http://schema-registry:8081&#39;</span>
-<a id="__codelineno-2-35" name="__codelineno-2-35" href="#__codelineno-2-35"></a><span class="s2">        FORMAT AVRO CHANGELOG DEBEZIUM&quot;</span>
+<a id="__codelineno-2-35" name="__codelineno-2-35" href="#__codelineno-2-35"></a><span class="s2">        FORMAT AVRO CHANGELOG DEBEZIUM</span>
+<a id="__codelineno-2-36" name="__codelineno-2-36" href="#__codelineno-2-36"></a><span class="s2">        DEDUPLICATE BY </span><span class="nv">$source</span><span class="s2">.gtid WITHIN &#39;10 minutes&#39;&quot;</span>
 </code></pre></div>
 <div class="admonition note">
 <p class="admonition-title">Note</p>

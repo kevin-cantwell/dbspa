@@ -1308,10 +1308,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#8-at-least-once-delivery" class="md-nav__link">
+  <a href="#8-at-least-once-delivery-by-default-exactly-once-processing-via-deduplicate-by" class="md-nav__link">
     <span class="md-ellipsis">
       
-        8. At-least-once delivery
+        8. At-least-once delivery by default; exactly-once processing via DEDUPLICATE BY
       
     </span>
   </a>
@@ -1471,10 +1471,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#8-at-least-once-delivery" class="md-nav__link">
+  <a href="#8-at-least-once-delivery-by-default-exactly-once-processing-via-deduplicate-by" class="md-nav__link">
     <span class="md-ellipsis">
       
-        8. At-least-once delivery
+        8. At-least-once delivery by default; exactly-once processing via DEDUPLICATE BY
       
     </span>
   </a>
@@ -1646,10 +1646,10 @@
 <p><strong>Reference:</strong> Budiu et al., "DBSP: Automatic Incremental View Maintenance" (VLDB 2023). Z-sets = multisets with integer weights. Every relational operator has a provably correct incremental version over Z-set deltas.</p>
 <p><strong>Result:</strong> Phase 1 and Phase 2 implemented. ~40% improvement for filter/project queries, ~11% for aggregation. Phases 3-4 planned.</p>
 <hr />
-<h2 id="8-at-least-once-delivery">8. At-least-once delivery<a class="headerlink" href="#8-at-least-once-delivery" title="Permanent link">&para;</a></h2>
+<h2 id="8-at-least-once-delivery-by-default-exactly-once-processing-via-deduplicate-by">8. At-least-once delivery by default; exactly-once processing via DEDUPLICATE BY<a class="headerlink" href="#8-at-least-once-delivery-by-default-exactly-once-processing-via-deduplicate-by" title="Permanent link">&para;</a></h2>
 <p><strong>Problem:</strong> Should DBSPA provide exactly-once output semantics?</p>
-<p><strong>Decision:</strong> No. v0 is at-least-once.</p>
-<p>The failure window:</p>
+<p><strong>Decision:</strong> At-least-once by default. Exactly-once <em>processing</em> is available via <code>DEDUPLICATE BY $source.gtid WITHIN '...'</code>, which drops duplicate input records before they reach the accumulator. End-to-end exactly-once (including the output sink) is not guaranteed — the sink is not written transactionally.</p>
+<p>The failure window without deduplication:</p>
 <ol>
 <li>Records processed, accumulator updated.</li>
 <li>Output emitted to sink.</li>
@@ -1657,7 +1657,7 @@
 <li>Kafka offsets committed.</li>
 </ol>
 <p>A crash between steps 2 and 3 means output was emitted but checkpoint wasn't saved. On restart, records are replayed, producing duplicate output. For changelog consumers maintaining a key-value map, the duplicates are idempotent.</p>
-<p>Exactly-once would require transactional coordination between the output sink and the checkpoint store. This is a v1 consideration for the <code>--state</code> SQLite mode specifically.</p>
+<p>With <code>DEDUPLICATE BY $source.gtid WITHIN '10 minutes'</code>, replayed records are dropped before step 1, giving exactly-once processing within the deduplication window. Full end-to-end exactly-once would require transactional coordination between the output sink and the checkpoint store.</p>
 <hr />
 <h2 id="9-single-goroutine-accumulator">9. Single-goroutine accumulator<a class="headerlink" href="#9-single-goroutine-accumulator" title="Permanent link">&para;</a></h2>
 <p><strong>Problem:</strong> Should the accumulator be sharded across goroutines for parallelism?</p>
