@@ -290,6 +290,17 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#what-is-dbsp" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What is DBSP?
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#why-dbspa" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1295,6 +1306,17 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#what-is-dbsp" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What is DBSP?
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#why-dbspa" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1337,8 +1359,12 @@
 
 
 <h1 id="dbspa">DBSPA<a class="headerlink" href="#dbspa" title="Permanent link">&para;</a></h1>
-<p><strong>Streaming SQL with incremental aggregation.</strong></p>
-<p>DBSPA is a CLI tool that executes SQL queries against streaming data sources — Kafka topics, stdin pipes, and files — with correct incremental aggregation using differential dataflow principles.</p>
+<p><strong>Database Stream Processing Accumulator.</strong></p>
+<p>DBSPA is a CLI tool that brings the power of <a href="https://github.com/feldera/dbsp">DBSP</a> — normally reserved for heavyweight deployments like <a href="https://feldera.com">Feldera</a> and <a href="https://materialize.com">Materialize</a> — to your command line.</p>
+<h2 id="what-is-dbsp">What is DBSP?<a class="headerlink" href="#what-is-dbsp" title="Permanent link">&para;</a></h2>
+<p>DBSP (Database Stream Processors) is a mathematical framework for incremental computation over streams, rooted in the theory of <a href="https://github.com/TimelyDataflow/differential-dataflow">Differential Dataflow</a>. The key insight is that instead of recomputing query results from scratch on every new event, you can express any relational operator — filters, joins, aggregations, even recursive queries — as an <em>incremental</em> operator that processes only the <em>changes</em> (deltas) to its inputs.</p>
+<p>Changes are represented as <strong>Z-sets</strong>: multisets of records with integer weights, where <code>+1</code> means an insertion and <code>-1</code> means a retraction. Operators compose over Z-sets the same way they compose over ordinary tables, which means you get correct, consistent query results as streams evolve — including accurate retractions when upstream data is corrected or deleted.</p>
+<p>DBSPA implements this model for the command line: you write a SQL query, point it at a Kafka topic or a stdin pipe, and get a live, incrementally-maintained result set — the same guarantee that Feldera and Materialize provide at cluster scale, available as a single binary with no infrastructure required.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># Count orders by status from a Kafka CDC stream, updating in real time</span>
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>dbspa<span class="w"> </span><span class="s2">&quot;SELECT _after-&gt;&gt;&#39;status&#39; AS status, COUNT(*) AS orders</span>
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="s2">        FROM &#39;kafka://broker:9092/orders.cdc&#39; FORMAT DEBEZIUM</span>
