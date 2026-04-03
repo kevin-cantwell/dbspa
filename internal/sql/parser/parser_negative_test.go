@@ -284,6 +284,16 @@ func TestNegativeSQL(t *testing.T) {
 			sql:         "SELECT * FROM 'kafka://b/t' FORMAT CSV(delimiter=','",
 			errContains: "')'",
 		},
+		{
+			name:        "FORMAT two envelopes (DEBEZIUM FOLDDB)",
+			sql:         "SELECT * FROM stdin FORMAT DEBEZIUM FOLDDB",
+			errContains: "unexpected token",
+		},
+		{
+			name:        "FORMAT two encodings (JSON AVRO)",
+			sql:         "SELECT * FROM stdin FORMAT JSON AVRO",
+			errContains: "unexpected token",
+		},
 
 		// ===== Invalid WINDOW =====
 		{
