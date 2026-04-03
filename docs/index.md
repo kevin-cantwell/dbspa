@@ -20,9 +20,9 @@ DBSPA implements this model for the command line: you write a SQL query, point i
 
 ```bash
 # Count orders by status from a Kafka CDC stream, updating in real time
-dbspa "SELECT _after.status AS status, COUNT(*) AS orders
+dbspa "SELECT status, COUNT(*) AS orders
         FROM 'kafka://broker:9092/orders.cdc' CHANGELOG DEBEZIUM
-        GROUP BY _after.status"
+        GROUP BY status"
 ```
 
 ```

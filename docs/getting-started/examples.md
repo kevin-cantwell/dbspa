@@ -45,18 +45,17 @@ cat orders.ndjson | dbspa "SELECT status, COUNT(*) AS cnt
 
 ```bash
 # Live order counts from a CDC stream
-dbspa "SELECT _after.status AS status, COUNT(*) AS orders
+dbspa "SELECT status, COUNT(*) AS orders
         FROM 'kafka://broker:9092/orders.cdc' CHANGELOG DEBEZIUM
-        GROUP BY _after.status"
+        GROUP BY status"
 
 # Revenue by region — updates correctly when orders change status
-dbspa "SELECT _after.region AS region,
-               SUM((_after.total)::float) AS revenue
+dbspa "SELECT region, SUM(total::float) AS revenue
         FROM 'kafka://broker:9092/orders.cdc' CHANGELOG DEBEZIUM
-        GROUP BY _after.region"
+        GROUP BY region"
 
-# Filter only updates
-dbspa "SELECT _after.order_id AS id,
+# Filter only updates — _before/_after virtuals let you compare old and new values
+dbspa "SELECT order_id,
                _before.status AS old_status,
                _after.status AS new_status
         FROM 'kafka://broker:9092/orders.cdc' CHANGELOG DEBEZIUM
@@ -245,9 +244,9 @@ Stream-stream joins auto-enable spill-to-disk to prevent OOM.
 
 ```bash
 # Deduplicate by order_id within a 10-minute window
-dbspa "SELECT _after.order_id AS id, _after.status AS status
+dbspa "SELECT order_id, status
         FROM 'kafka://broker/orders.cdc' CHANGELOG DEBEZIUM
-        DEDUPLICATE BY _after.order_id WITHIN '10 minutes'"
+        DEDUPLICATE BY order_id WITHIN '10 minutes'"
 
 # With custom cache capacity
 dbspa "SELECT *

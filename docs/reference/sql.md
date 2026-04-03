@@ -227,7 +227,7 @@ WHERE x IS DISTINCT FROM y        -- NULL-safe inequality
 GROUP BY status
 GROUP BY region, status
 GROUP BY 1, 2                     -- ordinal references to SELECT list
-GROUP BY _after.region            -- expressions
+GROUP BY region                   -- expressions
 ```
 
 Column aliases from SELECT are **not** valid in GROUP BY. Use the original expression or an ordinal.

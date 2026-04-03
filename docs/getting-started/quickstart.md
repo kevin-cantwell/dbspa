@@ -74,9 +74,9 @@ dbspa "SELECT * FROM 'kafka://localhost:9092/events'"
 With Debezium CDC:
 
 ```bash
-dbspa "SELECT _after.status AS status, COUNT(*) AS orders
+dbspa "SELECT status, COUNT(*) AS orders
         FROM 'kafka://broker:9092/orders.cdc' CHANGELOG DEBEZIUM
-        GROUP BY _after.status"
+        GROUP BY status"
 ```
 
 ## Save state to SQLite
