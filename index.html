@@ -1360,22 +1360,26 @@
 
 <h1 id="dbspa">DBSPA<a class="headerlink" href="#dbspa" title="Permanent link">&para;</a></h1>
 <p><strong>Database Stream Processing Accumulator.</strong></p>
-<p>DBSPA is a CLI tool that brings the power of <a href="https://github.com/feldera/dbsp">DBSP</a> — normally reserved for heavyweight deployments like <a href="https://feldera.com">Feldera</a> and <a href="https://materialize.com">Materialize</a> — to your command line.</p>
+<p>DBSPA is a CLI tool that brings the power of <a href="https://arxiv.org/abs/2203.16684">DBSP</a> — normally reserved for heavyweight deployments like <a href="https://feldera.com">Feldera</a> and <a href="https://materialize.com">Materialize</a> — to your command line.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>dbspa<span class="w"> </span><span class="s2">&quot;SELECT region, SUM(quantity) AS total_quantity</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="s2">        FROM &#39;kafka://brokers:9092/orders.cdc&#39; CHANGELOG DEBEZIUM</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="s2">        GROUP BY region&quot;</span>
+</code></pre></div>
 <h2 id="what-is-dbsp">What is DBSP?<a class="headerlink" href="#what-is-dbsp" title="Permanent link">&para;</a></h2>
 <p>DBSP (Database Stream Processors) is a mathematical framework for incremental computation over streams, introduced in the <a href="https://arxiv.org/abs/2203.16684">VLDB 2023 paper</a> <em>"DBSP: Automatic Incremental View Maintenance for Rich Query Languages"</em> (Budiu, McSherry, Ryzhyk, Tannen — Best Paper Award). It is rooted in the theory of <a href="https://github.com/TimelyDataflow/differential-dataflow">Differential Dataflow</a>. The key insight is that instead of recomputing query results from scratch on every new event, you can express any relational operator — filters, joins, aggregations, even recursive queries — as an <em>incremental</em> operator that processes only the <em>changes</em> (deltas) to its inputs.</p>
 <p>Changes are represented as <strong>Z-sets</strong>: multisets of records with integer weights, where <code>+1</code> means an insertion and <code>-1</code> means a retraction. Operators compose over Z-sets the same way they compose over ordinary tables, which means you get correct, consistent query results as streams evolve — including accurate retractions when upstream data is corrected or deleted.</p>
 <p>DBSPA implements this model for the command line: you write a SQL query, point it at a Kafka topic or a stdin pipe, and get a live, incrementally-maintained result set — the same guarantee that <a href="https://feldera.com">Feldera</a> and <a href="https://materialize.com">Materialize</a> provide at cluster scale, available as a single binary with no infrastructure required.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># Count orders by status from a Kafka CDC stream, updating in real time</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>dbspa<span class="w"> </span><span class="s2">&quot;SELECT _after-&gt;&gt;&#39;status&#39; AS status, COUNT(*) AS orders</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="s2">        FROM &#39;kafka://broker:9092/orders.cdc&#39; FORMAT DEBEZIUM</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="s2">        GROUP BY _after-&gt;&gt;&#39;status&#39;&quot;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># Count orders by status from a Kafka CDC stream, updating in real time</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>dbspa<span class="w"> </span><span class="s2">&quot;SELECT _after-&gt;&gt;&#39;status&#39; AS status, COUNT(*) AS orders</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="s2">        FROM &#39;kafka://broker:9092/orders.cdc&#39; FORMAT DEBEZIUM</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="s2">        GROUP BY _after-&gt;&gt;&#39;status&#39;&quot;</span>
 </code></pre></div>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>STATUS    | ORDERS
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>----------+-------
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>pending   | 1,204
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>shipped   | 8,821
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>delivered | 12,048
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>(3 groups | 22,073 matched | 45,102 input)
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>STATUS    | ORDERS
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>----------+-------
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>pending   | 1,204
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>shipped   | 8,821
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>delivered | 12,048
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>(3 groups | 22,073 matched | 45,102 input)
 </code></pre></div>
 <h2 id="why-dbspa">Why DBSPA?<a class="headerlink" href="#why-dbspa" title="Permanent link">&para;</a></h2>
 <ul>
@@ -1386,26 +1390,26 @@
 <li><strong>Fast.</strong> 275K records/sec for NDJSON, 850K records/sec for Parquet filters.</li>
 </ul>
 <h2 id="quick-taste">Quick taste<a class="headerlink" href="#quick-taste" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># Filter API errors from a log stream</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>tail<span class="w"> </span>-f<span class="w"> </span>/var/log/api.json<span class="w"> </span><span class="p">|</span><span class="w"> </span>dbspa<span class="w"> </span><span class="s2">&quot;SELECT endpoint, status_code, latency_ms</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="s2">                                     WHERE status_code &gt;= 400&quot;</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="c1"># Aggregate with windowing</span>
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>dbspa<span class="w"> </span><span class="s2">&quot;SELECT window_start, endpoint, COUNT(*) AS reqs, AVG(latency_ms) AS avg_lat</span>
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="s2">        FROM &#39;kafka://broker/api_requests&#39;</span>
-<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="s2">        GROUP BY endpoint</span>
-<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="s2">        WINDOW TUMBLING &#39;1 minute&#39;</span>
-<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="s2">        EVENT TIME BY timestamp&quot;</span>
-<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a>
-<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="c1"># Enrich stream with reference table</span>
-<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a>cat<span class="w"> </span>events.ndjson<span class="w"> </span><span class="p">|</span><span class="w"> </span>dbspa<span class="w"> </span><span class="s2">&quot;SELECT e.user_id, u.name, e.action</span>
-<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a><span class="s2">                             FROM stdin e</span>
-<a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a><span class="s2">                             JOIN &#39;/data/users.parquet&#39; u ON e.user_id = u.id&quot;</span>
-<a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a>
-<a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a><span class="c1"># Serve results via HTTP (sidecar mode)</span>
-<a id="__codelineno-2-18" name="__codelineno-2-18" href="#__codelineno-2-18"></a>dbspa<span class="w"> </span>serve<span class="w"> </span>--port<span class="w"> </span><span class="m">8080</span><span class="w"> </span><span class="s2">&quot;SELECT region, COUNT(*)</span>
-<a id="__codelineno-2-19" name="__codelineno-2-19" href="#__codelineno-2-19"></a><span class="s2">                           FROM &#39;kafka://broker/orders.cdc&#39; FORMAT DEBEZIUM</span>
-<a id="__codelineno-2-20" name="__codelineno-2-20" href="#__codelineno-2-20"></a><span class="s2">                           GROUP BY region&quot;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1"># Filter API errors from a log stream</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>tail<span class="w"> </span>-f<span class="w"> </span>/var/log/api.json<span class="w"> </span><span class="p">|</span><span class="w"> </span>dbspa<span class="w"> </span><span class="s2">&quot;SELECT endpoint, status_code, latency_ms</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="s2">                                     WHERE status_code &gt;= 400&quot;</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="c1"># Aggregate with windowing</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>dbspa<span class="w"> </span><span class="s2">&quot;SELECT window_start, endpoint, COUNT(*) AS reqs, AVG(latency_ms) AS avg_lat</span>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="s2">        FROM &#39;kafka://broker/api_requests&#39;</span>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="s2">        GROUP BY endpoint</span>
+<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="s2">        WINDOW TUMBLING &#39;1 minute&#39;</span>
+<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a><span class="s2">        EVENT TIME BY timestamp&quot;</span>
+<a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a>
+<a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a><span class="c1"># Enrich stream with reference table</span>
+<a id="__codelineno-3-13" name="__codelineno-3-13" href="#__codelineno-3-13"></a>cat<span class="w"> </span>events.ndjson<span class="w"> </span><span class="p">|</span><span class="w"> </span>dbspa<span class="w"> </span><span class="s2">&quot;SELECT e.user_id, u.name, e.action</span>
+<a id="__codelineno-3-14" name="__codelineno-3-14" href="#__codelineno-3-14"></a><span class="s2">                             FROM stdin e</span>
+<a id="__codelineno-3-15" name="__codelineno-3-15" href="#__codelineno-3-15"></a><span class="s2">                             JOIN &#39;/data/users.parquet&#39; u ON e.user_id = u.id&quot;</span>
+<a id="__codelineno-3-16" name="__codelineno-3-16" href="#__codelineno-3-16"></a>
+<a id="__codelineno-3-17" name="__codelineno-3-17" href="#__codelineno-3-17"></a><span class="c1"># Serve results via HTTP (sidecar mode)</span>
+<a id="__codelineno-3-18" name="__codelineno-3-18" href="#__codelineno-3-18"></a>dbspa<span class="w"> </span>serve<span class="w"> </span>--port<span class="w"> </span><span class="m">8080</span><span class="w"> </span><span class="s2">&quot;SELECT region, COUNT(*)</span>
+<a id="__codelineno-3-19" name="__codelineno-3-19" href="#__codelineno-3-19"></a><span class="s2">                           FROM &#39;kafka://broker/orders.cdc&#39; FORMAT DEBEZIUM</span>
+<a id="__codelineno-3-20" name="__codelineno-3-20" href="#__codelineno-3-20"></a><span class="s2">                           GROUP BY region&quot;</span>
 </code></pre></div>
 
 
