@@ -56,8 +56,10 @@ func inferValue(v any) engine.Value {
 		}
 		return engine.TextValue{V: val.String()}
 	case float64:
-		// Recover integer type: if the value is a whole number within int64 range, use IntValue
-		if val == math.Trunc(val) && val >= math.MinInt64 && val <= math.MaxInt64 {
+		// Recover integer type: if the value is a whole number that fits in int64 exactly.
+		// float64 can only represent integers exactly up to 2^53. Beyond that,
+		// float64→int64 conversion may overflow or lose precision.
+		if val == math.Trunc(val) && val >= -1<<53 && val <= 1<<53 {
 			return engine.IntValue{V: int64(val)}
 		}
 		return engine.FloatValue{V: val}

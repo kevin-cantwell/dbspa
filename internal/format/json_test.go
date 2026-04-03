@@ -166,16 +166,34 @@ func TestJSONDecodeDiffAlwaysPositive(t *testing.T) {
 
 func TestJSONDecodeLargeNumber(t *testing.T) {
 	d := &JSONDecoder{}
-	rec, err := d.Decode([]byte(`{"big":9223372036854775807}`))
+
+	// Numbers within float64 safe integer range (2^53) round-trip as IntValue
+	rec, err := d.Decode([]byte(`{"safe":9007199254740992}`))
 	if err != nil {
 		t.Fatalf("error: %v", err)
 	}
-	iv, ok := rec.Columns["big"].(engine.IntValue)
+	iv, ok := rec.Columns["safe"].(engine.IntValue)
 	if !ok {
-		t.Fatalf("expected IntValue, got %T", rec.Columns["big"])
+		t.Fatalf("expected IntValue for 2^53, got %T", rec.Columns["safe"])
 	}
-	if iv.V != 9223372036854775807 {
-		t.Errorf("got %d, want max int64", iv.V)
+	if iv.V != 9007199254740992 {
+		t.Errorf("got %d, want 2^53", iv.V)
+	}
+
+	// Numbers beyond 2^53 can't be represented exactly in float64,
+	// so they come back as FloatValue (json.Unmarshal without UseNumber
+	// decodes all numbers as float64)
+	rec2, err := d.Decode([]byte(`{"big":9223372036854775807}`))
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	fv, ok := rec2.Columns["big"].(engine.FloatValue)
+	if !ok {
+		t.Fatalf("expected FloatValue for max int64, got %T", rec2.Columns["big"])
+	}
+	// float64 can't represent max int64 exactly, so we just check it's close
+	if fv.V < 9.2e18 || fv.V > 9.3e18 {
+		t.Errorf("got %v, want ~9.22e18", fv.V)
 	}
 }
 
