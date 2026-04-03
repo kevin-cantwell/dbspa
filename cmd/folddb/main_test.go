@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -17,6 +18,8 @@ import (
 	"github.com/kevin-cantwell/folddb/internal/sink"
 	"github.com/kevin-cantwell/folddb/internal/sql/ast"
 	"github.com/kevin-cantwell/folddb/internal/sql/parser"
+
+	_ "modernc.org/sqlite"
 )
 
 // folddbBin holds the path to the compiled folddb binary for E2E exec tests.
@@ -3748,6 +3751,80 @@ func TestE2E_ExecFormatCSV(t *testing.T) {
 	}
 	if results[0]["name"] != "Alice" {
 		t.Errorf("expected name=Alice, got %v", results[0]["name"])
+	}
+}
+
+// ---------- --state Tests ----------
+
+// TestE2E_StateNonAccumulating: --state on a non-accumulating stdin query creates SQLite file.
+func TestE2E_StateNonAccumulating(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+	stdinData := "{\"x\":1}\n{\"x\":2}\n{\"x\":3}\n"
+
+	stdout, stderr, err := runFolddbWithArgs(t, []string{"--state", dbPath, "SELECT x"}, stdinData)
+	if err != nil {
+		t.Fatalf("folddb failed: %v\nstderr: %s\nstdout: %s", err, stderr, stdout)
+	}
+
+	// Verify the SQLite file was created and has 3 rows
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("cannot open SQLite: %v", err)
+	}
+	defer db.Close()
+
+	var count int
+	if err := db.QueryRow("SELECT COUNT(*) FROM result").Scan(&count); err != nil {
+		t.Fatalf("query error: %v", err)
+	}
+	if count != 3 {
+		t.Errorf("expected 3 rows in result, got %d", count)
+	}
+
+	// Verify actual values
+	rows, err := db.Query("SELECT x FROM result ORDER BY _rowid")
+	if err != nil {
+		t.Fatalf("query error: %v", err)
+	}
+	defer rows.Close()
+
+	var values []int
+	for rows.Next() {
+		var x int
+		if err := rows.Scan(&x); err != nil {
+			t.Fatalf("scan error: %v", err)
+		}
+		values = append(values, x)
+	}
+	if len(values) != 3 || values[0] != 1 || values[1] != 2 || values[2] != 3 {
+		t.Errorf("expected [1 2 3], got %v", values)
+	}
+}
+
+// TestE2E_StateNonAccumulatingWithWhere: --state with WHERE filter on non-accumulating query.
+func TestE2E_StateNonAccumulatingWithWhere(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+	stdinData := "{\"x\":1}\n{\"x\":2}\n{\"x\":3}\n{\"x\":4}\n{\"x\":5}\n"
+
+	_, stderr, err := runFolddbWithArgs(t, []string{"--state", dbPath, "SELECT x WHERE x > 2"}, stdinData)
+	if err != nil {
+		t.Fatalf("folddb failed: %v\nstderr: %s", err, stderr)
+	}
+
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("cannot open SQLite: %v", err)
+	}
+	defer db.Close()
+
+	var count int
+	if err := db.QueryRow("SELECT COUNT(*) FROM result").Scan(&count); err != nil {
+		t.Fatalf("query error: %v", err)
+	}
+	if count != 3 {
+		t.Errorf("expected 3 rows (x=3,4,5), got %d", count)
 	}
 }
 

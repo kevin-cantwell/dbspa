@@ -406,7 +406,7 @@ func run() error {
 			if isAccumulating {
 				return runAccumulatingFromRecords(runCtx, stmt, finalCh, flags)
 			}
-			return runNonAccumulatingFromRecords(runCtx, stmt, finalCh)
+			return runNonAccumulatingFromRecords(runCtx, stmt, finalCh, flags)
 		}
 
 		// Materialized FROM subquery: run to completion, return records
@@ -434,7 +434,7 @@ func run() error {
 		if isAccumulating {
 			return runAccumulatingFromRecords(runCtx, stmt, finalCh, flags)
 		}
-		return runNonAccumulatingFromRecords(runCtx, stmt, finalCh)
+		return runNonAccumulatingFromRecords(runCtx, stmt, finalCh, flags)
 	}
 
 	// FROM EXEC: run shell command, use stdout as record source
@@ -494,7 +494,7 @@ func run() error {
 		if isAccumulating {
 			return runAccumulatingFromRecords(runCtx, stmt, finalCh, flags)
 		}
-		return runNonAccumulatingFromRecords(runCtx, stmt, finalCh)
+		return runNonAccumulatingFromRecords(runCtx, stmt, finalCh, flags)
 	}
 
 	// Determine source and build record channel
@@ -555,7 +555,7 @@ func run() error {
 		if isAccumulating {
 			return runAccumulatingFromRecords(runCtx, stmt, finalCh, flags)
 		}
-		return runNonAccumulatingFromRecords(runCtx, stmt, finalCh)
+		return runNonAccumulatingFromRecords(runCtx, stmt, finalCh, flags)
 	}
 
 	// Reject unknown URI schemes
@@ -621,7 +621,7 @@ func run() error {
 		if isAccumulating {
 			return runAccumulatingFromRecords(runCtx, stmt, finalCh, flags)
 		}
-		return runNonAccumulatingFromRecords(runCtx, stmt, finalCh)
+		return runNonAccumulatingFromRecords(runCtx, stmt, finalCh, flags)
 	}
 
 	if isWindowed {
@@ -630,7 +630,7 @@ func run() error {
 	if isAccumulating {
 		return runAccumulating(runCtx, stmt, inputSrc, dec, flags, dlWriter, joinOp)
 	}
-	return runNonAccumulating(runCtx, stmt, inputSrc, dec, dlWriter, joinOp)
+	return runNonAccumulating(runCtx, stmt, inputSrc, dec, flags, dlWriter, joinOp)
 }
 
 func getSQL(q *QueryCmd) (string, error) {
@@ -783,7 +783,7 @@ func runKafka(ctx context.Context, stmt *ast.SelectStatement, dec format.Decoder
 	if isAccumulating {
 		return runAccumulatingFromRecords(ctx, stmt, finalCh, flags)
 	}
-	return runNonAccumulatingFromRecords(ctx, stmt, finalCh)
+	return runNonAccumulatingFromRecords(ctx, stmt, finalCh, flags)
 }
 
 func runStreamStreamKafka(ctx context.Context, stmt *ast.SelectStatement, dec format.Decoder, isAccumulating, isWindowed bool, flags cliFlags, dl *deadLetterWriter, arrangementMemLimit int) error {
@@ -907,10 +907,10 @@ func runStreamStreamKafka(ctx context.Context, stmt *ast.SelectStatement, dec fo
 	if isAccumulating {
 		return runAccumulatingFromRecords(ctx, stmt, outCh, flags)
 	}
-	return runNonAccumulatingFromRecords(ctx, stmt, outCh)
+	return runNonAccumulatingFromRecords(ctx, stmt, outCh, flags)
 }
 
-func runNonAccumulating(ctx context.Context, stmt *ast.SelectStatement, src *source.Stdin, dec format.Decoder, dl *deadLetterWriter, joinOp *engine.DDJoinOp) error {
+func runNonAccumulating(ctx context.Context, stmt *ast.SelectStatement, src *source.Stdin, dec format.Decoder, flags cliFlags, dl *deadLetterWriter, joinOp *engine.DDJoinOp) error {
 	recordCh := make(chan engine.Record)
 
 	// Stream decoders handle their own framing — bypass line-based reading.
@@ -925,7 +925,7 @@ func runNonAccumulating(ctx context.Context, stmt *ast.SelectStatement, src *sou
 		if joinOp != nil {
 			joinedCh = applyJoin(ctx, joinOp, recordCh)
 		}
-		return runNonAccumulatingFromRecords(ctx, stmt, joinedCh)
+		return runNonAccumulatingFromRecords(ctx, stmt, joinedCh, flags)
 	}
 
 	rawCh := src.Read()
@@ -956,10 +956,10 @@ func runNonAccumulating(ctx context.Context, stmt *ast.SelectStatement, src *sou
 		finalCh = applyJoin(ctx, joinOp, recordCh)
 	}
 
-	return runNonAccumulatingFromRecords(ctx, stmt, finalCh)
+	return runNonAccumulatingFromRecords(ctx, stmt, finalCh, flags)
 }
 
-func runNonAccumulatingFromRecords(ctx context.Context, stmt *ast.SelectStatement, recordCh <-chan engine.Record) error {
+func runNonAccumulatingFromRecords(ctx context.Context, stmt *ast.SelectStatement, recordCh <-chan engine.Record, flags cliFlags) error {
 	// Schema drift detection
 	recordCh = withSchemaTracking(ctx, recordCh)
 
@@ -973,7 +973,16 @@ func runNonAccumulatingFromRecords(ctx context.Context, stmt *ast.SelectStatemen
 		Where:   stmt.Where,
 	}
 
-	snk := &sink.JSONSink{Writer: os.Stdout}
+	var snk sink.Sink
+	if flags.stateDB != "" {
+		sqliteSink, err := sink.NewSQLiteSink(flags.stateDB, nil, nil, false)
+		if err != nil {
+			return fmt.Errorf("SQLite state output error: %w", err)
+		}
+		snk = sqliteSink
+	} else {
+		snk = &sink.JSONSink{Writer: os.Stdout}
+	}
 
 	// Batch records before filter+projection to amortize channel overhead.
 	batchedCh := engine.BatchChannel(recordCh, engine.DefaultBatchSize)
