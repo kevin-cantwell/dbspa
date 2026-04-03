@@ -3,6 +3,7 @@ package engine
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"strings"
 	"sync"
 	"time"
@@ -97,6 +98,78 @@ func (op *AggregateOp) ProcessBatches(in <-chan Batch, out chan<- Record) error 
 		op.ProcessBatch(batch, out)
 	}
 	return nil
+}
+
+// ImportInitialState loads pre-computed group states from seed records.
+// Each record's columns must match the GROUP BY keys + aggregate output aliases.
+// For example, seed row {"region":"us-east","sum_amount":1000000} sets the
+// SUM accumulator for group "us-east" to 1000000.
+//
+// Seed records are NOT processed through the Add/Retract pipeline — they set
+// accumulator state directly via SetInitial. This avoids double-counting when
+// the seed comes from a pre-aggregated source (e.g., BigQuery GROUP BY).
+//
+// Each seeded group's initial state is emitted to out so downstream sinks
+// (TUI, changelog) show the data immediately.
+func (op *AggregateOp) ImportInitialState(records []Record, out chan<- Record) {
+	op.mu.Lock()
+	defer op.mu.Unlock()
+
+	for _, rec := range records {
+		// Extract GROUP BY key values from the seed record by alias name
+		keyVals := make([]Value, len(op.GroupByExprs))
+		for _, col := range op.Columns {
+			if col.IsAggregate {
+				continue
+			}
+			// This is a GROUP BY key column — look it up by alias in the seed record
+			if val, ok := rec.Columns[col.Alias]; ok {
+				if col.GroupByIdx >= 0 && col.GroupByIdx < len(keyVals) {
+					keyVals[col.GroupByIdx] = val
+				}
+			}
+		}
+
+		keyStr := compositeKey(keyVals)
+
+		// Create the group (seed should not overlap with existing groups)
+		gs := &groupState{
+			accumulators: op.newAccumulators(),
+			keyValues:    keyVals,
+		}
+
+		// Set each aggregate accumulator's initial value from the seed record
+		for i, col := range op.Columns {
+			if !col.IsAggregate {
+				continue
+			}
+			seedVal, ok := rec.Columns[col.Alias]
+			if !ok || seedVal == nil || seedVal.IsNull() {
+				log.Printf("Warning: seed record missing column %q for group %s, accumulator starts at zero", col.Alias, keyStr)
+				continue
+			}
+			gs.accumulators[i].SetInitial(seedVal)
+			gs.accumulators[i].ResetChanged()
+		}
+
+		op.groups[keyStr] = gs
+		op.keyOrder = append(op.keyOrder, keyStr)
+
+		// Build and emit the initial result so TUI shows seeded data immediately
+		resultCols := op.buildResult(gs)
+		resultVals := make([]Value, len(op.Columns))
+		for i, col := range op.Columns {
+			resultVals[i] = resultCols[col.Alias]
+		}
+		gs.lastEmitted = resultVals
+		gs.hasEmitted = true
+
+		out <- Record{
+			Columns:   resultCols,
+			Timestamp: rec.Timestamp,
+			Weight:    1,
+		}
+	}
 }
 
 func (op *AggregateOp) processRecord(rec Record, out chan<- Record) {
@@ -625,6 +698,7 @@ func (a *noopAccumulator) HasChanged() bool          { return false }
 func (a *noopAccumulator) ResetChanged()             {}
 func (a *noopAccumulator) CanMerge() bool            { return false }
 func (a *noopAccumulator) Merge(_ Accumulator)       {}
+func (a *noopAccumulator) SetInitial(_ Value)        {}
 func (a *noopAccumulator) Marshal() ([]byte, error)  { return nil, nil }
 func (a *noopAccumulator) Unmarshal(_ []byte) error  { return nil }
 

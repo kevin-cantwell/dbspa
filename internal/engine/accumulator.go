@@ -29,6 +29,13 @@ type Accumulator interface {
 	Marshal() ([]byte, error)
 	// Unmarshal restores accumulator state.
 	Unmarshal([]byte) error
+	// SetInitial sets the accumulator to a pre-computed initial value.
+	// Used by SEED FROM to inject pre-accumulated state (e.g., from BigQuery).
+	// This replaces whatever state the accumulator had.
+	// Supported for COUNT, COUNT(*), SUM, MIN, MAX.
+	// Not supported for AVG (needs both SUM and COUNT), MEDIAN, FIRST, LAST —
+	// those accumulators log a warning and ignore the call.
+	SetInitial(value Value)
 }
 
 // --- CountStarAccumulator ---
@@ -68,6 +75,16 @@ func (a *CountStarAccumulator) Merge(other Accumulator) {
 		a.count += o.count
 		a.changed = a.count != a.prev
 	}
+}
+
+func (a *CountStarAccumulator) SetInitial(value Value) {
+	f, ok := valueToFloat(value)
+	if !ok {
+		log.Printf("Warning: COUNT(*) SetInitial received non-numeric value %v, ignoring", value)
+		return
+	}
+	a.count = int64(f)
+	a.changed = true
 }
 
 func (a *CountStarAccumulator) Marshal() ([]byte, error) {
@@ -121,6 +138,16 @@ func (a *CountAccumulator) Merge(other Accumulator) {
 		a.count += o.count
 		a.changed = a.count != a.prev
 	}
+}
+
+func (a *CountAccumulator) SetInitial(value Value) {
+	f, ok := valueToFloat(value)
+	if !ok {
+		log.Printf("Warning: COUNT SetInitial received non-numeric value %v, ignoring", value)
+		return
+	}
+	a.count = int64(f)
+	a.changed = true
 }
 
 func (a *CountAccumulator) Marshal() ([]byte, error) {
@@ -199,6 +226,18 @@ func (a *SumAccumulator) Merge(other Accumulator) {
 		a.count += o.count
 		a.changed = true
 	}
+}
+
+func (a *SumAccumulator) SetInitial(value Value) {
+	f, ok := valueToFloat(value)
+	if !ok {
+		log.Printf("Warning: SUM SetInitial received non-numeric value %v, ignoring", value)
+		return
+	}
+	a.sum = f
+	a.count = 1 // mark as having at least one value
+	a.hasValue = true
+	a.changed = true
 }
 
 func (a *SumAccumulator) Marshal() ([]byte, error) {
@@ -281,6 +320,10 @@ func (a *AvgAccumulator) Merge(other Accumulator) {
 	}
 }
 
+func (a *AvgAccumulator) SetInitial(value Value) {
+	log.Printf("Warning: AVG cannot be seeded from pre-accumulated state (need both SUM and COUNT). Use SUM + COUNT separately in the seed query.")
+}
+
 func (a *AvgAccumulator) Marshal() ([]byte, error) {
 	return json.Marshal([]float64{a.sum, float64(a.count)})
 }
@@ -361,6 +404,16 @@ func (a *MinAccumulator) Merge(other Accumulator) {
 	}
 }
 
+func (a *MinAccumulator) SetInitial(value Value) {
+	f, ok := valueToFloat(value)
+	if !ok {
+		log.Printf("Warning: MIN SetInitial received non-numeric value %v, ignoring", value)
+		return
+	}
+	a.values = []float64{f}
+	a.changed = true
+}
+
 func (a *MinAccumulator) Marshal() ([]byte, error) {
 	return json.Marshal(a.values)
 }
@@ -433,6 +486,16 @@ func (a *MaxAccumulator) Merge(other Accumulator) {
 	}
 }
 
+func (a *MaxAccumulator) SetInitial(value Value) {
+	f, ok := valueToFloat(value)
+	if !ok {
+		log.Printf("Warning: MAX SetInitial received non-numeric value %v, ignoring", value)
+		return
+	}
+	a.values = []float64{f}
+	a.changed = true
+}
+
 func (a *MaxAccumulator) Marshal() ([]byte, error) {
 	return json.Marshal(a.values)
 }
@@ -477,6 +540,10 @@ func (a *FirstAccumulator) HasChanged() bool { return a.changed }
 func (a *FirstAccumulator) ResetChanged()    { a.changed = false }
 func (a *FirstAccumulator) CanMerge() bool    { return false }
 func (a *FirstAccumulator) Merge(_ Accumulator) {}
+
+func (a *FirstAccumulator) SetInitial(value Value) {
+	log.Printf("Warning: FIRST cannot be seeded from pre-accumulated state.")
+}
 
 func (a *FirstAccumulator) Marshal() ([]byte, error) {
 	if !a.set {
@@ -533,6 +600,10 @@ func (a *LastAccumulator) HasChanged() bool { return a.changed }
 func (a *LastAccumulator) ResetChanged()    { a.changed = false }
 func (a *LastAccumulator) CanMerge() bool    { return false }
 func (a *LastAccumulator) Merge(_ Accumulator) {}
+
+func (a *LastAccumulator) SetInitial(value Value) {
+	log.Printf("Warning: LAST cannot be seeded from pre-accumulated state.")
+}
 
 func (a *LastAccumulator) Marshal() ([]byte, error) {
 	if !a.set {
