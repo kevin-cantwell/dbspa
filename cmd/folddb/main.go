@@ -471,14 +471,11 @@ func run() error {
 					}
 				}
 			}
-			// Wait for command to finish
+			// Wait for command to finish — non-zero exit is always an error
 			if err := execSrc.Wait(); err != nil {
-				if stmt.FromExec.Mode == "STREAM" {
-					// STREAM mode: exit is normal (Ctrl+C, SIGPIPE)
-					fmt.Fprintf(os.Stderr, "Warning: EXEC stream ended: %v\n", err)
-				} else {
-					// TABLE mode: non-zero exit means data may be incomplete
+				if runCtx.Err() == nil { // only error if not cancelled by user (Ctrl+C)
 					fmt.Fprintf(os.Stderr, "Error: EXEC %v\n", err)
+					os.Exit(1)
 				}
 			}
 		}()
@@ -2319,7 +2316,10 @@ func buildStreamingExecJoinOp(ctx context.Context, stmt *ast.SelectStatement, ar
 			}
 		}
 		if err := execSrc.Wait(); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: EXEC command exited with error: %v\n", err)
+			if ctx.Err() == nil { // only error if not cancelled by user
+				fmt.Fprintf(os.Stderr, "Error: EXEC %v\n", err)
+				os.Exit(1)
+			}
 		}
 	}()
 
