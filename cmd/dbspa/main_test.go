@@ -1767,7 +1767,7 @@ func TestE2E_JoinWithDebeziumCDC(t *testing.T) {
 
 	// The CDC file decodes with Debezium decoder; the after payload columns are extracted.
 	// The join key on the CDC side is the "id" column (extracted from the after payload).
-	sql := "SELECT e.action, u.name FROM stdin e JOIN '" + cdcFile + "' FORMAT DEBEZIUM u ON e.user_id = u.id"
+	sql := "SELECT e.action, u.name FROM stdin e JOIN '" + cdcFile + "' FORMAT JSON CHANGELOG DEBEZIUM u ON e.user_id = u.id"
 	results := runJoinQuery(t, sql, input, cdcFile)
 
 	if len(results) != 2 {
@@ -3856,10 +3856,10 @@ func TestE2E_FormatJSON_WeightIsRegularColumn(t *testing.T) {
 	}
 }
 
-// TestE2E_FormatDebezium_Create: FORMAT DEBEZIUM with op=c
+// TestE2E_FormatDebezium_Create: CHANGELOG DEBEZIUM with op=c
 func TestE2E_FormatDebezium_Create(t *testing.T) {
 	stdin := "{\"op\":\"c\",\"after\":{\"id\":1,\"name\":\"alice\"}}\n"
-	stdout, stderr, err := runDBSPA(t, "SELECT id, name FROM stdin FORMAT DEBEZIUM", stdin)
+	stdout, stderr, err := runDBSPA(t, "SELECT id, name FROM stdin CHANGELOG DEBEZIUM", stdin)
 	if err != nil {
 		t.Fatalf("dbspa failed: %v\nstderr: %s", err, stderr)
 	}
@@ -3875,10 +3875,10 @@ func TestE2E_FormatDebezium_Create(t *testing.T) {
 	}
 }
 
-// TestE2E_FormatJSONDebezium_Explicit: FORMAT JSON DEBEZIUM (explicit encoding)
+// TestE2E_FormatJSONDebezium_Explicit: FORMAT JSON CHANGELOG DEBEZIUM (explicit encoding)
 func TestE2E_FormatJSONDebezium_Explicit(t *testing.T) {
 	stdin := "{\"op\":\"c\",\"after\":{\"id\":1,\"name\":\"bob\"}}\n"
-	stdout, stderr, err := runDBSPA(t, "SELECT id, name FROM stdin FORMAT JSON DEBEZIUM", stdin)
+	stdout, stderr, err := runDBSPA(t, "SELECT id, name FROM stdin FORMAT JSON CHANGELOG DEBEZIUM", stdin)
 	if err != nil {
 		t.Fatalf("dbspa failed: %v\nstderr: %s", err, stderr)
 	}
@@ -3897,7 +3897,7 @@ func TestE2E_FormatJSONDebezium_Explicit(t *testing.T) {
 // TestE2E_FormatDebezium_UpdateRetraction: Debezium update emits retraction + insertion
 func TestE2E_FormatDebezium_UpdateRetraction(t *testing.T) {
 	stdin := "{\"op\":\"u\",\"before\":{\"id\":1,\"status\":\"pending\"},\"after\":{\"id\":1,\"status\":\"shipped\"}}\n"
-	stdout, stderr, err := runDBSPA(t, "SELECT status FROM stdin FORMAT DEBEZIUM", stdin)
+	stdout, stderr, err := runDBSPA(t, "SELECT status FROM stdin CHANGELOG DEBEZIUM", stdin)
 	if err != nil {
 		t.Fatalf("dbspa failed: %v\nstderr: %s", err, stderr)
 	}
@@ -3915,10 +3915,10 @@ func TestE2E_FormatDebezium_UpdateRetraction(t *testing.T) {
 	}
 }
 
-// TestE2E_FormatDBSPA_WeightConsumed: FORMAT DBSPA consumes weight as z-set weight
+// TestE2E_FormatDBSPA_WeightConsumed: CHANGELOG DBSPA consumes weight as z-set weight
 func TestE2E_FormatDBSPA_WeightConsumed(t *testing.T) {
 	stdin := "{\"weight\":1,\"data\":{\"x\":10}}\n{\"weight\":-1,\"data\":{\"x\":10}}\n"
-	stdout, stderr, err := runDBSPA(t, "SELECT x, COUNT(*) AS cnt FROM stdin FORMAT DBSPA GROUP BY x", stdin)
+	stdout, stderr, err := runDBSPA(t, "SELECT x, COUNT(*) AS cnt FROM stdin CHANGELOG DBSPA GROUP BY x", stdin)
 	if err != nil {
 		t.Fatalf("dbspa failed: %v\nstderr: %s", err, stderr)
 	}
@@ -3941,10 +3941,10 @@ func TestE2E_FormatDBSPA_WeightConsumed(t *testing.T) {
 	}
 }
 
-// TestE2E_FormatJSONDBSPA_Explicit: FORMAT JSON DBSPA (explicit encoding)
+// TestE2E_FormatJSONDBSPA_Explicit: FORMAT JSON CHANGELOG DBSPA (explicit encoding)
 func TestE2E_FormatJSONDBSPA_Explicit(t *testing.T) {
 	stdin := "{\"weight\":1,\"data\":{\"x\":10}}\n{\"weight\":-1,\"data\":{\"x\":10}}\n"
-	stdout, stderr, err := runDBSPA(t, "SELECT x, COUNT(*) AS cnt FROM stdin FORMAT JSON DBSPA GROUP BY x", stdin)
+	stdout, stderr, err := runDBSPA(t, "SELECT x, COUNT(*) AS cnt FROM stdin FORMAT JSON CHANGELOG DBSPA GROUP BY x", stdin)
 	if err != nil {
 		t.Fatalf("dbspa failed: %v\nstderr: %s", err, stderr)
 	}
@@ -3960,10 +3960,10 @@ func TestE2E_FormatJSONDBSPA_Explicit(t *testing.T) {
 	}
 }
 
-// TestE2E_FormatDBSPA_DefaultWeight: FORMAT DBSPA without weight envelope defaults to +1
+// TestE2E_FormatDBSPA_DefaultWeight: CHANGELOG DBSPA without weight envelope defaults to +1
 func TestE2E_FormatDBSPA_DefaultWeight(t *testing.T) {
 	stdin := "{\"x\":1}\n"
-	stdout, stderr, err := runDBSPA(t, "SELECT x FROM stdin FORMAT DBSPA", stdin)
+	stdout, stderr, err := runDBSPA(t, "SELECT x FROM stdin CHANGELOG DBSPA", stdin)
 	if err != nil {
 		t.Fatalf("dbspa failed: %v\nstderr: %s", err, stderr)
 	}
@@ -3976,10 +3976,10 @@ func TestE2E_FormatDBSPA_DefaultWeight(t *testing.T) {
 	}
 }
 
-// TestE2E_FormatDBSPA_MultisetWeight: FORMAT DBSPA with weight > 1 (multiset)
+// TestE2E_FormatDBSPA_MultisetWeight: CHANGELOG DBSPA with weight > 1 (multiset)
 func TestE2E_FormatDBSPA_MultisetWeight(t *testing.T) {
 	stdin := "{\"weight\":3,\"data\":{\"x\":1}}\n"
-	stdout, stderr, err := runDBSPA(t, "SELECT x, COUNT(*) AS cnt FROM stdin FORMAT DBSPA GROUP BY x", stdin)
+	stdout, stderr, err := runDBSPA(t, "SELECT x, COUNT(*) AS cnt FROM stdin CHANGELOG DBSPA GROUP BY x", stdin)
 	if err != nil {
 		t.Fatalf("dbspa failed: %v\nstderr: %s", err, stderr)
 	}
@@ -4009,8 +4009,8 @@ func TestE2E_FormatDBSPA_PipedComposition(t *testing.T) {
 		t.Fatalf("first dbspa failed: %v\nstderr: %s", err, stderr1)
 	}
 
-	// Pipe that output to second query with FORMAT DBSPA
-	stdout2, stderr2, err := runDBSPA(t, "SELECT s, cnt FROM stdin FORMAT DBSPA WHERE cnt::int > 1", stdout1)
+	// Pipe that output to second query with CHANGELOG DBSPA
+	stdout2, stderr2, err := runDBSPA(t, "SELECT s, cnt FROM stdin CHANGELOG DBSPA WHERE cnt::int > 1", stdout1)
 	if err != nil {
 		t.Fatalf("second dbspa failed: %v\nstderr: %s", err, stderr2)
 	}

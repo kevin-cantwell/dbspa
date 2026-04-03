@@ -100,14 +100,10 @@ func TestFromOmittedMeansStdin(t *testing.T) {
 }
 
 func TestFormatClause(t *testing.T) {
-	p := New("SELECT * FROM 'kafka://b/t' FORMAT DEBEZIUM")
+	p := New("SELECT * FROM 'kafka://b/t' CHANGELOG DEBEZIUM")
 	stmt, err := p.Parse()
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
-	}
-	// FORMAT DEBEZIUM is deprecated, maps to FORMAT JSON + CHANGELOG DEBEZIUM
-	if stmt.From.Format != "JSON" {
-		t.Errorf("format: got %q, want %q", stmt.From.Format, "JSON")
 	}
 	if stmt.Changelog != "DEBEZIUM" {
 		t.Errorf("changelog: got %q, want %q", stmt.Changelog, "DEBEZIUM")
@@ -913,7 +909,7 @@ func TestJoinWithFormat(t *testing.T) {
 }
 
 func TestSeedFromClause(t *testing.T) {
-	p := New("SELECT region, COUNT(*) AS orders FROM 'kafka://broker/orders.cdc' FORMAT DEBEZIUM SEED FROM '/path/to/snapshot.parquet' GROUP BY region")
+	p := New("SELECT region, COUNT(*) AS orders FROM 'kafka://broker/orders.cdc' CHANGELOG DEBEZIUM SEED FROM '/path/to/snapshot.parquet' GROUP BY region")
 	stmt, err := p.Parse()
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

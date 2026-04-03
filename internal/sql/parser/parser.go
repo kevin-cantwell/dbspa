@@ -3,7 +3,6 @@ package parser
 
 import (
 	"fmt"
-	"log"
 	"strconv"
 	"strings"
 
@@ -344,14 +343,12 @@ func (p *Parser) parseFormatClause() (format string, opts map[string]string, cha
 
 	// Handle deprecated DEBEZIUM_AVRO as a single token
 	if firstName == "DEBEZIUM_AVRO" {
-		log.Println("Warning: FORMAT DEBEZIUM_AVRO is deprecated, use FORMAT AVRO CHANGELOG DEBEZIUM instead")
-		return "AVRO", opts, "DEBEZIUM", nil
+		return "", nil, "", p.errorf(fmtTok, "FORMAT DEBEZIUM_AVRO is not valid, use FORMAT AVRO CHANGELOG DEBEZIUM instead")
 	}
 
 	// Handle deprecated envelope-as-format: FORMAT DEBEZIUM, FORMAT DBSPA
 	if isChangelogFamily(firstName) {
-		log.Printf("Warning: FORMAT %s is deprecated, use FORMAT JSON CHANGELOG %s instead\n", firstName, firstName)
-		return "JSON", opts, firstName, nil
+		return "", nil, "", p.errorf(fmtTok, "FORMAT %s is not valid, use CHANGELOG %s instead", firstName, firstName)
 	}
 
 	format = firstName
@@ -361,8 +358,7 @@ func (p *Parser) parseFormatClause() (format string, opts map[string]string, cha
 	envName := strings.ToUpper(nextTok.Literal)
 	if (nextTok.Type == lexer.TokenIdent || lexer.IsKeyword(nextTok.Type)) && isChangelogFamily(envName) {
 		p.lex.Next() // consume envelope token
-		log.Printf("Warning: FORMAT %s %s is deprecated, use FORMAT %s CHANGELOG %s instead\n", format, envName, format, envName)
-		changelog = envName
+		return "", nil, "", p.errorf(nextTok, "FORMAT %s %s is not valid, use FORMAT %s CHANGELOG %s instead", format, envName, format, envName)
 	}
 
 	return format, opts, changelog, nil
@@ -616,7 +612,7 @@ func (p *Parser) parseJoinClause() (*ast.JoinClause, error) {
 		}
 	}
 
-	// Parse optional FORMAT for join source (before or after alias)
+	// Parse optional FORMAT and CHANGELOG for join source (before or after alias)
 	if p.lex.Peek().Type == lexer.TokenFormat {
 		format, opts, changelog, err := p.parseFormatClause()
 		if err != nil {
@@ -633,6 +629,18 @@ func (p *Parser) parseJoinClause() (*ast.JoinClause, error) {
 			execSrc.FormatOpts = opts
 			if changelog != "" {
 				execSrc.Changelog = changelog
+			}
+		}
+		// Parse optional CHANGELOG clause after FORMAT for join source
+		if p.lex.Peek().Type == lexer.TokenChangelog {
+			cl, err := p.parseChangelogClause()
+			if err != nil {
+				return nil, err
+			}
+			if src != nil {
+				src.Changelog = cl
+			} else if execSrc != nil {
+				execSrc.Changelog = cl
 			}
 		}
 	}

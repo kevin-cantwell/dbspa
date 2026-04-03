@@ -284,10 +284,36 @@ func TestNegativeSQL(t *testing.T) {
 			sql:         "SELECT * FROM 'kafka://b/t' FORMAT CSV(delimiter=','",
 			errContains: "')'",
 		},
+		// Deprecated FORMAT syntax — now errors
+		{
+			name:        "FORMAT DEBEZIUM (not valid, use CHANGELOG DEBEZIUM)",
+			sql:         "SELECT * FROM 'kafka://b/t' FORMAT DEBEZIUM",
+			errContains: "not valid",
+		},
+		{
+			name:        "FORMAT DEBEZIUM_AVRO (not valid)",
+			sql:         "SELECT * FROM 'kafka://b/t' FORMAT DEBEZIUM_AVRO",
+			errContains: "not valid",
+		},
+		{
+			name:        "FORMAT AVRO DEBEZIUM (not valid, use FORMAT AVRO CHANGELOG DEBEZIUM)",
+			sql:         "SELECT * FROM 'kafka://b/t' FORMAT AVRO DEBEZIUM",
+			errContains: "not valid",
+		},
+		{
+			name:        "FORMAT JSON DEBEZIUM (not valid)",
+			sql:         "SELECT * FROM 'kafka://b/t' FORMAT JSON DEBEZIUM",
+			errContains: "not valid",
+		},
+		{
+			name:        "FORMAT DBSPA (not valid, use CHANGELOG DBSPA)",
+			sql:         "SELECT * FROM stdin FORMAT DBSPA",
+			errContains: "not valid",
+		},
 		{
 			name:        "FORMAT two envelopes (DEBEZIUM DBSPA)",
 			sql:         "SELECT * FROM stdin FORMAT DEBEZIUM DBSPA",
-			errContains: "unexpected token",
+			errContains: "not valid",
 		},
 		{
 			name:        "FORMAT two encodings (JSON AVRO)",

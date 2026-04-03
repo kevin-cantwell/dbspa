@@ -770,94 +770,6 @@ func TestPositiveSQL(t *testing.T) {
 				}
 			},
 		},
-		// Deprecated FORMAT syntax (backwards compat)
-		{
-			name: "FORMAT DEBEZIUM (deprecated, maps to FORMAT JSON + CHANGELOG DEBEZIUM)",
-			sql:  "SELECT * FROM 'kafka://b/t' FORMAT DEBEZIUM",
-			check: func(t *testing.T, stmt *ast.SelectStatement) {
-				if stmt.From.Format != "JSON" {
-					t.Errorf("format: got %q, want JSON", stmt.From.Format)
-				}
-				if stmt.Changelog != "DEBEZIUM" {
-					t.Errorf("changelog: got %q, want DEBEZIUM", stmt.Changelog)
-				}
-			},
-		},
-		{
-			name: "FORMAT DEBEZIUM_AVRO (deprecated, maps to FORMAT AVRO + CHANGELOG DEBEZIUM)",
-			sql:  "SELECT * FROM 'kafka://b/t' FORMAT DEBEZIUM_AVRO",
-			check: func(t *testing.T, stmt *ast.SelectStatement) {
-				if stmt.From.Format != "AVRO" {
-					t.Errorf("format: got %q, want AVRO", stmt.From.Format)
-				}
-				if stmt.Changelog != "DEBEZIUM" {
-					t.Errorf("changelog: got %q, want DEBEZIUM", stmt.Changelog)
-				}
-			},
-		},
-		{
-			name: "FORMAT AVRO DEBEZIUM (deprecated two-token, maps to FORMAT AVRO + CHANGELOG DEBEZIUM)",
-			sql:  "SELECT * FROM 'kafka://b/t' FORMAT AVRO DEBEZIUM",
-			check: func(t *testing.T, stmt *ast.SelectStatement) {
-				if stmt.From.Format != "AVRO" {
-					t.Errorf("format: got %q, want AVRO", stmt.From.Format)
-				}
-				if stmt.Changelog != "DEBEZIUM" {
-					t.Errorf("changelog: got %q, want DEBEZIUM", stmt.Changelog)
-				}
-			},
-		},
-		{
-			name: "FORMAT JSON DEBEZIUM (deprecated two-token)",
-			sql:  "SELECT * FROM 'kafka://b/t' FORMAT JSON DEBEZIUM",
-			check: func(t *testing.T, stmt *ast.SelectStatement) {
-				if stmt.From.Format != "JSON" {
-					t.Errorf("format: got %q, want JSON", stmt.From.Format)
-				}
-				if stmt.Changelog != "DEBEZIUM" {
-					t.Errorf("changelog: got %q, want DEBEZIUM", stmt.Changelog)
-				}
-			},
-		},
-		{
-			name: "FORMAT DBSPA (deprecated shorthand)",
-			sql:  "SELECT * FROM stdin FORMAT DBSPA",
-			check: func(t *testing.T, stmt *ast.SelectStatement) {
-				if stmt.From.Format != "JSON" {
-					t.Errorf("format: got %q, want JSON", stmt.From.Format)
-				}
-				if stmt.Changelog != "DBSPA" {
-					t.Errorf("changelog: got %q, want DBSPA", stmt.Changelog)
-				}
-			},
-		},
-		{
-			name: "FORMAT JSON DBSPA (deprecated two-token)",
-			sql:  "SELECT * FROM stdin FORMAT JSON DBSPA",
-			check: func(t *testing.T, stmt *ast.SelectStatement) {
-				if stmt.From.Format != "JSON" {
-					t.Errorf("format: got %q, want JSON", stmt.From.Format)
-				}
-				if stmt.Changelog != "DBSPA" {
-					t.Errorf("changelog: got %q, want DBSPA", stmt.Changelog)
-				}
-			},
-		},
-		{
-			name: "FORMAT AVRO(registry=...) DEBEZIUM (deprecated, options + envelope)",
-			sql:  "SELECT * FROM 'kafka://b/t' FORMAT AVRO(registry='http://reg:8081') DEBEZIUM",
-			check: func(t *testing.T, stmt *ast.SelectStatement) {
-				if stmt.From.Format != "AVRO" {
-					t.Errorf("format: got %q, want AVRO", stmt.From.Format)
-				}
-				if stmt.Changelog != "DEBEZIUM" {
-					t.Errorf("changelog: got %q, want DEBEZIUM", stmt.Changelog)
-				}
-				if stmt.From.FormatOpts["registry"] != "http://reg:8081" {
-					t.Errorf("registry opt: got %q", stmt.From.FormatOpts["registry"])
-				}
-			},
-		},
 		{
 			name: "FORMAT CSV(header=true) (options, no changelog)",
 			sql:  "SELECT * FROM 'file.csv' FORMAT CSV(header=true)",
@@ -894,33 +806,6 @@ func TestPositiveSQL(t *testing.T) {
 				}
 				if stmt.Changelog != "" {
 					t.Errorf("changelog: got %q, want empty", stmt.Changelog)
-				}
-			},
-		},
-		{
-			name: "FORMAT CSV DEBEZIUM (deprecated encoding + envelope)",
-			sql:  "SELECT * FROM 'kafka://b/t' FORMAT CSV DEBEZIUM",
-			check: func(t *testing.T, stmt *ast.SelectStatement) {
-				if stmt.From.Format != "CSV" {
-					t.Errorf("format: got %q, want CSV", stmt.From.Format)
-				}
-				if stmt.Changelog != "DEBEZIUM" {
-					t.Errorf("changelog: got %q, want DEBEZIUM", stmt.Changelog)
-				}
-			},
-		},
-		{
-			name: "FORMAT CSV(header=true) DEBEZIUM (deprecated options + envelope)",
-			sql:  "SELECT * FROM 'kafka://b/t' FORMAT CSV(header=true) DEBEZIUM",
-			check: func(t *testing.T, stmt *ast.SelectStatement) {
-				if stmt.From.Format != "CSV" {
-					t.Errorf("format: got %q, want CSV", stmt.From.Format)
-				}
-				if stmt.Changelog != "DEBEZIUM" {
-					t.Errorf("changelog: got %q, want DEBEZIUM", stmt.Changelog)
-				}
-				if stmt.From.FormatOpts["header"] != "true" {
-					t.Errorf("header opt: got %q", stmt.From.FormatOpts["header"])
 				}
 			},
 		},
@@ -1022,21 +907,6 @@ func TestPositiveSQL(t *testing.T) {
 				}
 			},
 		},
-		{
-			name: "from stdin with FORMAT DEBEZIUM (deprecated)",
-			sql:  "SELECT * FROM stdin FORMAT DEBEZIUM",
-			check: func(t *testing.T, stmt *ast.SelectStatement) {
-				if stmt.From.URI != "stdin://" {
-					t.Errorf("URI: got %q, want stdin://", stmt.From.URI)
-				}
-				if stmt.From.Format != "JSON" {
-					t.Errorf("format: got %q, want JSON", stmt.From.Format)
-				}
-				if stmt.Changelog != "DEBEZIUM" {
-					t.Errorf("changelog: got %q, want DEBEZIUM", stmt.Changelog)
-				}
-			},
-		},
 
 		// =====================================================================
 		// JOIN clause
@@ -1127,7 +997,7 @@ func TestPositiveSQL(t *testing.T) {
 		// =====================================================================
 		{
 			name: "seed from with file path",
-			sql:  "SELECT region, COUNT(*) FROM 'kafka://b/t' FORMAT DEBEZIUM SEED FROM '/path/to/snapshot.parquet' GROUP BY region",
+			sql:  "SELECT region, COUNT(*) FROM 'kafka://b/t' CHANGELOG DEBEZIUM SEED FROM '/path/to/snapshot.parquet' GROUP BY region",
 			check: func(t *testing.T, stmt *ast.SelectStatement) {
 				if stmt.Seed == nil {
 					t.Fatal("expected SEED clause")
@@ -1454,7 +1324,7 @@ func TestPositiveSQL(t *testing.T) {
 		},
 		{
 			name: "group by expression json access",
-			sql:  "SELECT _after->>'region', COUNT(*) FROM 'kafka://b/t' FORMAT DEBEZIUM GROUP BY _after->>'region'",
+			sql:  "SELECT _after->>'region', COUNT(*) FROM 'kafka://b/t' CHANGELOG DEBEZIUM GROUP BY _after->>'region'",
 			check: func(t *testing.T, stmt *ast.SelectStatement) {
 				if len(stmt.GroupBy) != 1 {
 					t.Fatalf("expected 1 GROUP BY, got %d", len(stmt.GroupBy))
@@ -1813,12 +1683,9 @@ func TestPositiveSQL(t *testing.T) {
 			},
 		},
 		{
-			name: "format debezium with group_by having (deprecated)",
-			sql:  "SELECT _after->>'region', COUNT(*) AS cnt FROM 'kafka://b/t' FORMAT DEBEZIUM GROUP BY _after->>'region' HAVING COUNT(*) > 10",
+			name: "changelog debezium with group_by having",
+			sql:  "SELECT _after->>'region', COUNT(*) AS cnt FROM 'kafka://b/t' CHANGELOG DEBEZIUM GROUP BY _after->>'region' HAVING COUNT(*) > 10",
 			check: func(t *testing.T, stmt *ast.SelectStatement) {
-				if stmt.From.Format != "JSON" {
-					t.Errorf("format: got %q, want JSON", stmt.From.Format)
-				}
 				if stmt.Changelog != "DEBEZIUM" {
 					t.Errorf("changelog: got %q, want DEBEZIUM", stmt.Changelog)
 				}
@@ -1961,21 +1828,6 @@ func TestPositiveSQL(t *testing.T) {
 				}
 				if stmt.GroupBy != nil {
 					t.Error("expected nil GROUP BY for implicit single group")
-				}
-			},
-		},
-		{
-			name: "from with alias and trailing format (deprecated)",
-			sql:  "SELECT * FROM stdin e FORMAT DEBEZIUM",
-			check: func(t *testing.T, stmt *ast.SelectStatement) {
-				if stmt.FromAlias != "e" {
-					t.Errorf("alias: got %q, want e", stmt.FromAlias)
-				}
-				if stmt.From.Format != "JSON" {
-					t.Errorf("format: got %q, want JSON", stmt.From.Format)
-				}
-				if stmt.Changelog != "DEBEZIUM" {
-					t.Errorf("changelog: got %q, want DEBEZIUM", stmt.Changelog)
 				}
 			},
 		},
