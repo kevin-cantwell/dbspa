@@ -26,5 +26,13 @@ jobs:
       - name: Install mkdocs
         run: pip install mkdocs-material
 
-      - name: Build and deploy
-        run: mkdocs gh-deploy --force --remote-branch gh-pages --dest-dir docs/latest
+      - name: Build
+        run: mkdocs build --site-dir site
+
+      - name: Deploy to docs/latest
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./site
+          destination_dir: docs/latest
+          keep_files: true
