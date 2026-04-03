@@ -332,26 +332,35 @@ The inner accumulator emits retraction+insertion pairs (Z-set deltas) to a chann
 
 ### 15. SEED FROM as Pre-Accumulated State
 
-**Status:** In progress
+**Status:** Implemented
 
-**Problem:** SEED FROM currently feeds raw records through the full pipeline (filter → accumulate). For a 1B-row seed source, this means processing 1B records to build starting state. The seed should instead provide pre-computed accumulator values — the batch system (BigQuery, DuckDB, Postgres) does the heavy aggregation, FoldDB loads the result as starting state.
+**Problem:** SEED FROM previously fed raw records through the full pipeline (filter → accumulate). For a 1B-row seed source, this meant processing 1B records to build starting state. The seed should instead provide pre-computed accumulator values — the batch system (BigQuery, DuckDB, Postgres) does the heavy aggregation, FoldDB loads the result as starting state. Feeding pre-aggregated values through Add/Retract would double-count (e.g., SUM of already-summed values).
 
 **Design:**
 
-The seed query's output must match the outer query's GROUP BY keys + aggregate columns. Each seed row becomes the initial state for that group key:
+The seed query's output must match the outer query's GROUP BY keys + aggregate aliases. Each seed row becomes the initial state for that group key:
 
 ```sql
-SELECT region, SUM(amount)
+SELECT region, SUM(amount) AS total
 FROM 'kafka://broker/orders.cdc?offset=2026-04-01' FORMAT DEBEZIUM
-SEED FROM EXEC('bq query "SELECT region, SUM(amount) FROM orders WHERE ts < 2026-04-01 GROUP BY region"')
+SEED FROM EXEC('bq query "SELECT region, SUM(amount) AS total FROM orders WHERE ts < 2026-04-01 GROUP BY region"')
 GROUP BY region
 ```
 
-Seed row `{"region":"us-east","sum":1000000}` → accumulator for "us-east" starts at SUM=1000000.
+Seed row `{"region":"us-east","total":1000000}` → accumulator for "us-east" starts at SUM=1000000.
 
 **Bridge responsibility:** The user ensures no overlap/gap between seed cutoff and stream start. No automatic dedup — pre-accumulated state can't be deduplicated against raw stream records since they're different shapes.
 
-**Implementation:** New `ImportInitialState(records []Record)` method on AggregateOp that maps seed row values to accumulator initial states, then emits the initial state to the sink.
+**Implementation:**
+
+- `Accumulator.SetInitial(Value)` — new interface method that sets an accumulator to a pre-computed initial value, replacing any existing state.
+- `AggregateOp.ImportInitialState(records, out)` — maps seed record columns to GROUP BY keys and aggregate aliases, calls SetInitial on each accumulator, and emits initial state to out for immediate display.
+- Pipeline wiring changed: seed records go through `ImportInitialState` instead of `ProcessBatch`. Seed records are NOT filtered through WHERE (they are pre-computed state, not raw input).
+- `loadSeedRecords` (which applied WHERE to seeds) removed — no longer needed.
+
+**Seedable accumulators:** COUNT, COUNT(*), SUM, MIN, MAX. AVG cannot be directly seeded because it needs both SUM and COUNT — users should seed SUM and COUNT separately and derive AVG in the outer query. FIRST and LAST cannot be seeded (order-dependent). Missing seed columns log a warning and leave the accumulator at zero.
+
+**Result:** Implemented in 3 commits. SetInitial on all accumulators, ImportInitialState on AggregateOp, pipeline wiring updated. 4 new unit tests (COUNT+SUM, MIN+MAX, missing column, multiple groups). Existing integration tests updated for pre-accumulated seed format.
 
 ---
 
