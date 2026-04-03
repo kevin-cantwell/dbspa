@@ -2,18 +2,23 @@ package source
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"fmt"
 	"io"
-	"os"
 	"os/exec"
+	"sync"
 )
 
 // ExecSource runs a shell command and provides its stdout as a record source.
+// Stderr is buffered silently and only surfaced if the command exits non-zero.
 type ExecSource struct {
 	cmd    *exec.Cmd
 	stdout io.ReadCloser
-	stderr io.ReadCloser
+
+	stderrBuf bytes.Buffer // buffered stderr (last N bytes)
+	stderrMu  sync.Mutex
+	stderrMax int // max bytes to retain (default 4KB)
 }
 
 // NewExecSource creates an ExecSource. The command runs through /bin/sh -c.
@@ -35,13 +40,27 @@ func NewExecSource(ctx context.Context, command string) (*ExecSource, error) {
 		return nil, fmt.Errorf("exec start: %w", err)
 	}
 
-	// Forward subprocess stderr to FoldDB's stderr with prefix
+	es := &ExecSource{
+		cmd:       cmd,
+		stdout:    stdout,
+		stderrMax: 4096,
+	}
+
+	// Buffer subprocess stderr silently — only surfaced on non-zero exit
 	go func() {
-		buf := make([]byte, 4096)
+		buf := make([]byte, 1024)
 		for {
 			n, err := stderr.Read(buf)
 			if n > 0 {
-				fmt.Fprintf(os.Stderr, "[exec] %s", buf[:n])
+				es.stderrMu.Lock()
+				es.stderrBuf.Write(buf[:n])
+				// Trim to last stderrMax bytes if over limit
+				if es.stderrBuf.Len() > es.stderrMax {
+					b := es.stderrBuf.Bytes()
+					es.stderrBuf.Reset()
+					es.stderrBuf.Write(b[len(b)-es.stderrMax:])
+				}
+				es.stderrMu.Unlock()
 			}
 			if err != nil {
 				return
@@ -49,7 +68,7 @@ func NewExecSource(ctx context.Context, command string) (*ExecSource, error) {
 		}
 	}()
 
-	return &ExecSource{cmd: cmd, stdout: stdout, stderr: stderr}, nil
+	return es, nil
 }
 
 // ReadRaw returns the stdout reader for binary stream decoders.
@@ -63,14 +82,12 @@ func (e *ExecSource) Read() <-chan []byte {
 	go func() {
 		defer close(ch)
 		scanner := bufio.NewScanner(e.stdout)
-		// Allow large lines (up to 10MB)
 		scanner.Buffer(make([]byte, 64*1024), 10*1024*1024)
 		for scanner.Scan() {
 			line := scanner.Bytes()
 			if len(line) == 0 {
 				continue
 			}
-			// Copy the bytes since scanner reuses the buffer
 			cp := make([]byte, len(line))
 			copy(cp, line)
 			ch <- cp
@@ -79,9 +96,25 @@ func (e *ExecSource) Read() <-chan []byte {
 	return ch
 }
 
-// Wait waits for the command to finish and returns any exit error.
-// A non-zero exit is returned as an error but callers may treat it as a warning
-// since partial output from the command may still be valid.
+// Wait waits for the command to finish. Returns nil on success (exit 0).
+// On non-zero exit, returns an error including the tail of stderr.
 func (e *ExecSource) Wait() error {
-	return e.cmd.Wait()
+	err := e.cmd.Wait()
+	if err != nil {
+		e.stderrMu.Lock()
+		stderrTail := e.stderrBuf.String()
+		e.stderrMu.Unlock()
+		if stderrTail != "" {
+			return fmt.Errorf("command failed (%w):\n%s", err, stderrTail)
+		}
+		return fmt.Errorf("command failed: %w", err)
+	}
+	return nil
+}
+
+// Stderr returns the buffered stderr output (up to 4KB of the most recent output).
+func (e *ExecSource) Stderr() string {
+	e.stderrMu.Lock()
+	defer e.stderrMu.Unlock()
+	return e.stderrBuf.String()
 }

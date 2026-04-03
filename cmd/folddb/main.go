@@ -471,9 +471,15 @@ func run() error {
 					}
 				}
 			}
-			// Wait for command to finish; non-zero exit is a warning, not an error
+			// Wait for command to finish
 			if err := execSrc.Wait(); err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: EXEC command exited with error: %v\n", err)
+				if stmt.FromExec.Mode == "STREAM" {
+					// STREAM mode: exit is normal (Ctrl+C, SIGPIPE)
+					fmt.Fprintf(os.Stderr, "Warning: EXEC stream ended: %v\n", err)
+				} else {
+					// TABLE mode: non-zero exit means data may be incomplete
+					fmt.Fprintf(os.Stderr, "Error: EXEC %v\n", err)
+				}
 			}
 		}()
 
@@ -2262,9 +2268,9 @@ func materializeExecSource(exec *ast.ExecSource) ([]engine.Record, error) {
 		}
 	}
 
-	// Wait for command to finish; non-zero exit is a warning
+	// Wait for command to finish; non-zero exit is an error (data may be incomplete)
 	if err := execSrc.Wait(); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: EXEC command exited with error: %v\n", err)
+		return nil, fmt.Errorf("EXEC %w", err)
 	}
 
 
