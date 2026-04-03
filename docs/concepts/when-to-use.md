@@ -128,6 +128,8 @@ Capability
 
 5. **Lightweight production serving.** `folddb serve` as a Kubernetes sidecar for simple streaming aggregations that don't justify a Flink cluster.
 
+6. **Universal SQL layer over CLI tools.** With `EXEC()`, FoldDB can query the output of any command-line tool -- `kubectl`, `psql`, `bq`, `aws`, `curl`, `jq` -- using SQL. Any tool that can produce JSON, CSV, or structured output becomes a queryable data source. This makes FoldDB a composable SQL layer for the entire Unix toolchain.
+
 ## What FoldDB is not designed for
 
 - **Large state** (multi-GB sliding windows) — use Flink with RocksDB

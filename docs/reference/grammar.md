@@ -59,20 +59,27 @@ select_item
     ::= expression [ AS identifier ]
 
 from_clause
-    ::= FROM ( source [ format_clause ] [ identifier ] | subquery_source )
+    ::= FROM ( source [ format_clause ] [ identifier ]
+             | exec_source [ format_clause ] [ identifier ]
+             | subquery_source )
 
 source
     ::= string_literal                (* URI: 'kafka://...', '/path/to/file' *)
       | identifier                    (* bare identifier: stdin *)
 
+exec_source
+    ::= EXEC '(' string_literal ')' [ AS ( STREAM | TABLE ) ]
+
 subquery_source
     ::= '(' select_statement ')' identifier    (* alias is mandatory *)
 
 seed_clause
-    ::= SEED FROM string_literal [ format_clause ]
+    ::= SEED FROM ( string_literal | exec_source ) [ format_clause ]
 
 join_clause
-    ::= [ LEFT ] JOIN ( source [ format_clause ] | subquery_source ) identifier ON expression
+    ::= [ LEFT ] JOIN ( source [ format_clause ]
+                       | exec_source [ format_clause ]
+                       | subquery_source ) identifier ON expression
         [ WITHIN INTERVAL string_literal ]
 
 format_clause
@@ -305,11 +312,11 @@ The following words are reserved as SQL keywords and cannot be used as unquoted 
 
 ```
 AND, AS, ASC, BETWEEN, BY, CAPACITY, CASE, CAST, COUNT, CSV, DEBEZIUM,
-DEDUPLICATE, DESC, DISTINCT, EARLY, ELSE, EMIT, END, EVENT, EXTRACT,
+DEDUPLICATE, DESC, DISTINCT, EARLY, ELSE, EMIT, END, EVENT, EXEC, EXTRACT,
 FALSE, FINAL, FIRST, FORMAT, FROM, GROUP, HAVING, ILIKE, IN, INTERVAL,
 IS, JOIN, LAST, LEFT, LIKE, LIMIT, NOT, NULL, ON, OR, ORDER, SEED,
-SELECT, SESSION, SLIDING, SUM, AVG, MIN, MAX, MEDIAN, THEN, TIME,
-TRUE, TUMBLING, WATERMARK, WHEN, WHERE, WINDOW, WITHIN
+SELECT, SESSION, SLIDING, STREAM, SUM, AVG, MIN, MAX, MEDIAN, TABLE,
+THEN, TIME, TRUE, TUMBLING, WATERMARK, WHEN, WHERE, WINDOW, WITHIN
 ```
 
 Function names (`LENGTH`, `UPPER`, `COALESCE`, etc.) are also reserved when followed by `(`. As bare identifiers they are treated as column references.

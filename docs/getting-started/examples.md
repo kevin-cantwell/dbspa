@@ -144,6 +144,39 @@ folddb -i data.ndjson \
    WHERE total > 1000"
 ```
 
+## EXEC: shell commands as data sources
+
+Use `EXEC()` to run any CLI tool and query its output with SQL:
+
+```bash
+# Query kubectl logs with SQL
+folddb "SELECT level, message FROM EXEC('kubectl logs my-pod --output=json') AS STREAM
+        WHERE level = 'ERROR'"
+
+# Join stream against a Postgres table via psql
+cat events.json | folddb \
+  "SELECT e.*, u.name
+   FROM stdin e
+   JOIN EXEC('psql -c \"COPY users TO STDOUT WITH (FORMAT csv, HEADER)\"') u FORMAT CSV(header=true)
+     ON e.user_id = u.id"
+
+# Seed accumulator from BigQuery, then stream from Kafka
+folddb "SELECT region, SUM(amount) AS total
+        FROM 'kafka://broker/orders.cdc' FORMAT DEBEZIUM
+        SEED FROM EXEC('bq query --format=json \"SELECT * FROM orders_snapshot\"')
+        GROUP BY region"
+
+# Pipe shell commands together
+folddb "SELECT status, COUNT(*) AS cnt
+        FROM EXEC('cat access.log | grep POST')
+        GROUP BY status"
+```
+
+EXEC runs the command through `/bin/sh -c`, so pipes, redirects, and shell features work. For commands that run indefinitely (like `tail -f` or `kubectl logs -f`), use `AS STREAM` to process output concurrently instead of waiting for the command to exit.
+
+!!! note
+    EXEC is disabled in `folddb serve` mode for security.
+
 ## Streaming subqueries
 
 Join a live event stream against a concurrently-running CDC aggregation:

@@ -116,6 +116,50 @@ When `FORMAT DEBEZIUM` is specified:
 | `_ts` | TIMESTAMP | Source database transaction timestamp |
 | `_source` | JSON | Full Debezium source block |
 
+## EXEC
+
+Execute a shell command and use its stdout as a data source. EXEC can appear in FROM, JOIN, and SEED FROM positions.
+
+```sql
+-- Read records from a command
+FROM EXEC('cat /data/snapshot.json')
+
+-- With format and mode
+FROM EXEC('cat data.csv') AS TABLE FORMAT CSV(header=true)
+FROM EXEC('kubectl logs my-pod --output=json') AS STREAM
+
+-- As a JOIN source
+JOIN EXEC('cat /data/users.json') u ON e.user_id = u.id
+
+-- As a SEED source
+SEED FROM EXEC('bq query --format=json "SELECT * FROM orders_snapshot"')
+```
+
+### Mode: AS TABLE vs AS STREAM
+
+| Mode | Behavior |
+|---|---|
+| `AS TABLE` (default) | Materializes the command's full output before processing. Waits for the command to exit. |
+| `AS STREAM` | Runs the command concurrently with the query. Suitable for continuous sources like `tail -f` or `kubectl logs -f`. |
+
+!!! warning
+    `AS TABLE` on a command that never exits (e.g., `tail -f`) will wait indefinitely. Use `AS STREAM` for continuous sources.
+
+### Shell execution
+
+The command runs through `/bin/sh -c`, so pipes, redirects, and shell expansions work:
+
+```sql
+FROM EXEC('cat file.json | grep error')
+FROM EXEC('psql -c "COPY users TO STDOUT WITH (FORMAT csv, HEADER)"') FORMAT CSV(header=true)
+```
+
+Subprocess stderr is forwarded to FoldDB's stderr with an `[exec]` prefix for debugging.
+
+### Security
+
+EXEC is disabled in serve mode (`folddb serve`). Any query containing EXEC in FROM, JOIN, or SEED FROM positions is rejected with an error. This prevents HTTP clients from triggering arbitrary shell commands.
+
 ## FORMAT
 
 Declares the input format. Placed after the `FROM` clause.
@@ -219,11 +263,17 @@ EMIT EARLY '10 seconds' -- periodic partial results
 
 ## SEED FROM
 
-Bootstraps accumulator state from a file before streaming.
+Bootstraps accumulator state from a file or command before streaming.
 
 ```sql
+-- From a file
 FROM 'kafka://broker/topic' FORMAT DEBEZIUM
 SEED FROM '/path/to/snapshot.parquet'
+GROUP BY region
+
+-- From a shell command
+FROM 'kafka://broker/topic' FORMAT DEBEZIUM
+SEED FROM EXEC('bq query --format=json "SELECT * FROM orders_snapshot"')
 GROUP BY region
 ```
 
@@ -260,12 +310,16 @@ Terminates after N output records. For non-accumulating queries, this is straigh
 
 ## JOIN
 
-Equi-join between a stream and a table, a stream and a CDC source, two streams, or a stream and a subquery.
+Equi-join between a stream and a table, a stream and a CDC source, two streams, a stream and a subquery, or a stream and an EXEC command.
 
 ```sql
 -- Stream-to-file
 JOIN '/data/users.parquet' u ON e.user_id = u.id
 LEFT JOIN '/data/users.csv' u FORMAT CSV(header=true) ON e.user_id = u.id
+
+-- Stream-to-EXEC (shell command as table source)
+JOIN EXEC('cat /data/users.json') u ON e.user_id = u.id
+JOIN EXEC('psql -c "COPY users TO STDOUT WITH (FORMAT csv, HEADER)"') u FORMAT CSV(header=true) ON e.user_id = u.id
 
 -- Stream-to-subquery (pre-aggregate a file, then join)
 JOIN (SELECT customer_id, COUNT(*) AS cnt FROM '/data/orders.parquet' GROUP BY customer_id) r
