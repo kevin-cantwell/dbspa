@@ -26,6 +26,13 @@ jobs:
       - name: Unit tests
         run: go test -race -count=1 ./...
 
+      - name: Install DuckDB
+        run: |
+          curl -fsSL https://github.com/duckdb/duckdb/releases/download/v1.3.0/duckdb_cli-linux-amd64.zip -o duckdb.zip
+          unzip -o duckdb.zip
+          sudo mv duckdb /usr/local/bin/
+          duckdb --version
+
       - name: Verify (DuckDB comparison)
         run: make verify
 
