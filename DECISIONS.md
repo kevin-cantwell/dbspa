@@ -364,6 +364,38 @@ Seed row `{"region":"us-east","total":1000000}` → accumulator for "us-east" st
 
 ---
 
+### 16. FORMAT syntax refactor: encoding + envelope
+
+**Status:** In progress
+
+**Problem:** `FORMAT DEBEZIUM` and `FORMAT DEBEZIUM_AVRO` conflate two concepts: the wire encoding (JSON, Avro) and the envelope schema (Debezium CDC). This makes it hard to add new envelopes (FoldDB changelog, Maxwell, etc.) without a combinatorial explosion of format names.
+
+**Design:**
+
+Two-tier syntax: `FORMAT <encoding> [<envelope>]`
+
+```sql
+FORMAT AVRO DEBEZIUM      -- Avro encoding, Debezium envelope
+FORMAT JSON DEBEZIUM      -- JSON encoding, Debezium envelope
+FORMAT DEBEZIUM           -- shorthand: JSON + Debezium (default encoding)
+FORMAT AVRO               -- plain Avro, no envelope
+FORMAT FOLDDB             -- FoldDB changelog (_weight), default JSON encoding
+FORMAT CSV(header=true)   -- plain CSV with options
+```
+
+Rules:
+1. First token is encoding OR envelope (disambiguated by known name lists)
+2. If first token is an envelope, encoding defaults to JSON
+3. Options in parens attach to the encoding
+4. No envelope = plain records (weight=+1)
+
+Backwards compatibility: `FORMAT DEBEZIUM` still works. `FORMAT DEBEZIUM_AVRO` deprecated in favor of `FORMAT AVRO DEBEZIUM`.
+
+Known encodings: JSON, AVRO, CSV, PROTOBUF, PARQUET
+Known envelopes: DEBEZIUM, FOLDDB (future: MAXWELL, CANAL, UPSERT)
+
+---
+
 ### 14. EXEC() Universal Source Adapter
 
 **Status:** In progress
