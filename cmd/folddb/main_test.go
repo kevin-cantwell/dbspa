@@ -103,6 +103,34 @@ func parseFolddbOutput(t *testing.T, output string) []map[string]any {
 	return results
 }
 
+// parseChangelogOutput parses Feldera weighted NDJSON output into flat maps.
+// Each line is expected to be {"weight":N,"data":{...columns...}}.
+// The returned maps have "_weight" (from the envelope) merged with the data columns
+// for backward compatibility with test assertions.
+func parseChangelogOutput(t *testing.T, output string) []map[string]any {
+	t.Helper()
+	var results []map[string]any
+	for _, line := range strings.Split(strings.TrimSpace(output), "\n") {
+		if line == "" {
+			continue
+		}
+		var envelope struct {
+			Weight float64        `json:"weight"`
+			Data   map[string]any `json:"data"`
+		}
+		if err := json.Unmarshal([]byte(line), &envelope); err != nil {
+			t.Fatalf("changelog parse error: %v\nline: %s", err, line)
+		}
+		m := envelope.Data
+		if m == nil {
+			m = make(map[string]any)
+		}
+		m["_weight"] = envelope.Weight
+		results = append(results, m)
+	}
+	return results
+}
+
 // runQuery is a test helper that simulates the main pipeline:
 // parse SQL, decode JSON input lines, run pipeline, collect output.
 func runQuery(t *testing.T, sql string, inputLines []string) []map[string]any {
@@ -247,19 +275,8 @@ func runAggQuery(t *testing.T, sql string, inputLines []string) []map[string]any
 	}
 	snk.Close()
 
-	// Parse output
-	var results []map[string]any
-	for _, line := range strings.Split(strings.TrimSpace(outBuf.String()), "\n") {
-		if line == "" {
-			continue
-		}
-		var m map[string]any
-		if err := json.Unmarshal([]byte(line), &m); err != nil {
-			t.Fatalf("output parse error: %v\nline: %s", err, line)
-		}
-		results = append(results, m)
-	}
-	return results
+	// Parse changelog output (Feldera weighted envelope format)
+	return parseChangelogOutput(t, outBuf.String())
 }
 
 func TestE2EGroupByBasic(t *testing.T) {
@@ -754,7 +771,7 @@ func TestE2EChangelogFormat(t *testing.T) {
 		`SELECT g, SUM(v) AS total GROUP BY g`,
 		input)
 
-	// Verify changelog format: all records have "_weight" field
+	// Verify changelog format: all records have "weight" in envelope (extracted as "_weight")
 	for i, r := range results {
 		w, ok := r["_weight"]
 		if !ok {
@@ -1299,19 +1316,8 @@ func runSeedAggQuery(t *testing.T, sql string, inputLines []string) []map[string
 	}
 	snk.Close()
 
-	// Parse output
-	var results []map[string]any
-	for _, line := range strings.Split(strings.TrimSpace(outBuf.String()), "\n") {
-		if line == "" {
-			continue
-		}
-		var m map[string]any
-		if err := json.Unmarshal([]byte(line), &m); err != nil {
-			t.Fatalf("output parse error: %v\nline: %s", err, line)
-		}
-		results = append(results, m)
-	}
-	return results
+	// Parse changelog output (Feldera weighted envelope format)
+	return parseChangelogOutput(t, outBuf.String())
 }
 
 func TestSeedFromIntegration(t *testing.T) {
@@ -1541,19 +1547,8 @@ func runJoinAggQuery(t *testing.T, sql string, inputLines []string, tableFile st
 	}
 	snk.Close()
 
-	// Parse output
-	var results []map[string]any
-	for _, line := range strings.Split(strings.TrimSpace(outBuf.String()), "\n") {
-		if line == "" {
-			continue
-		}
-		var m map[string]any
-		if err := json.Unmarshal([]byte(line), &m); err != nil {
-			t.Fatalf("output parse error: %v\nline: %s", err, line)
-		}
-		results = append(results, m)
-	}
-	return results
+	// Parse changelog output (Feldera weighted envelope format)
+	return parseChangelogOutput(t, outBuf.String())
 }
 
 // runJoinAggQueryWithOrderBy is like runJoinAggQuery but also applies ORDER BY
@@ -1674,18 +1669,8 @@ func runJoinAggQueryWithOrderBy(t *testing.T, sql string, inputLines []string, t
 	}
 	snk.Close()
 
-	var results []map[string]any
-	for _, line := range strings.Split(strings.TrimSpace(outBuf.String()), "\n") {
-		if line == "" {
-			continue
-		}
-		var m map[string]any
-		if err := json.Unmarshal([]byte(line), &m); err != nil {
-			t.Fatalf("output parse error: %v\nline: %s", err, line)
-		}
-		results = append(results, m)
-	}
-	return results
+	// Parse changelog output (Feldera weighted envelope format)
+	return parseChangelogOutput(t, outBuf.String())
 }
 
 // =====================================================================
@@ -1858,7 +1843,7 @@ func TestE2E_JoinWithOrderBy(t *testing.T) {
 	results := runJoinAggQueryWithOrderBy(t, sql, input, tableFile)
 
 	// The ORDER BY final snapshot should appear after changelog entries.
-	// Find the final snapshot rows (the last rows with _weight:1 that appear
+	// Find the final snapshot rows (the last rows with weight:1 that appear
 	// after all changelog entries — these come from the sorted snapshot at Close()).
 	// The ChangelogSink emits changelog diffs, then a sorted snapshot at close.
 	// We look for the last N rows which should be the sorted snapshot.
@@ -1880,7 +1865,7 @@ func TestE2E_JoinWithOrderBy(t *testing.T) {
 // Z-set output tests
 // =====================================================================
 
-// TestE2E_ChangelogWeightFormat: verify _weight field in changelog output
+// TestE2E_ChangelogWeightFormat: verify Feldera weighted envelope in changelog output
 func TestE2E_ChangelogWeightFormat(t *testing.T) {
 	input := []string{
 		`{"g":"a","v":100}`,
@@ -1888,7 +1873,7 @@ func TestE2E_ChangelogWeightFormat(t *testing.T) {
 	}
 	results := runAggQuery(t, `SELECT g, SUM(v) AS total GROUP BY g`, input)
 
-	// All results should have _weight (not "op" or any other field)
+	// All results should have _weight (extracted from envelope by parseChangelogOutput)
 	for i, r := range results {
 		w, ok := r["_weight"]
 		if !ok {
@@ -1919,7 +1904,7 @@ func TestE2E_ChangelogWeightFormat(t *testing.T) {
 	}
 }
 
-// TestE2E_WeightInFinalSnapshot: ORDER BY produces sorted final snapshot with _weight:1
+// TestE2E_WeightInFinalSnapshot: ORDER BY produces sorted final snapshot with weight:1
 func TestE2E_WeightInFinalSnapshot(t *testing.T) {
 	input := []string{
 		`{"g":"b","v":20}`,
@@ -1976,19 +1961,10 @@ func TestE2E_WeightInFinalSnapshot(t *testing.T) {
 	}
 	snk.Close()
 
-	var results []map[string]any
-	for _, line := range strings.Split(strings.TrimSpace(outBuf.String()), "\n") {
-		if line == "" {
-			continue
-		}
-		var m map[string]any
-		if err := json.Unmarshal([]byte(line), &m); err != nil {
-			t.Fatalf("output parse error: %v\nline: %s", err, line)
-		}
-		results = append(results, m)
-	}
+	// Parse changelog output (Feldera weighted envelope format)
+	results := parseChangelogOutput(t, outBuf.String())
 
-	// The final snapshot should be the last 3 rows, all with _weight:1, sorted by g ASC
+	// The final snapshot should be the last 3 rows, all with weight:1, sorted by g ASC
 	if len(results) < 3 {
 		t.Fatalf("expected at least 3 results, got %d", len(results))
 	}
@@ -2424,19 +2400,8 @@ func runJoinSubqueryAgg(t *testing.T, sql string, inputLines []string) []map[str
 	}
 	snk.Close()
 
-	// Parse output
-	var results []map[string]any
-	for _, line := range strings.Split(strings.TrimSpace(outBuf.String()), "\n") {
-		if line == "" {
-			continue
-		}
-		var m map[string]any
-		if err := json.Unmarshal([]byte(line), &m); err != nil {
-			t.Fatalf("output parse error: %v\nline: %s", err, line)
-		}
-		results = append(results, m)
-	}
-	return results
+	// Parse changelog output (Feldera weighted envelope format)
+	return parseChangelogOutput(t, outBuf.String())
 }
 
 // TestE2E_FromSubquery_DerivedTable: inner GROUP BY, outer WHERE filters on aggregate
@@ -3321,7 +3286,7 @@ func TestE2E_ExecFrom_GroupBy(t *testing.T) {
 		t.Fatalf("folddb failed: %v\nstderr: %s", err, stderr)
 	}
 
-	results := parseFolddbOutput(t, stdout)
+	results := parseChangelogOutput(t, stdout)
 	if len(results) == 0 {
 		t.Fatal("expected changelog output, got none")
 	}
@@ -3506,7 +3471,7 @@ func TestE2E_SeedFromExec(t *testing.T) {
 		t.Fatalf("folddb failed: %v\nstderr: %s", err, stderr)
 	}
 
-	results := parseFolddbOutput(t, stdout)
+	results := parseChangelogOutput(t, stdout)
 	if len(results) == 0 {
 		t.Fatal("expected changelog output, got none")
 	}
@@ -3551,7 +3516,7 @@ func TestE2E_ExecLargeOutput(t *testing.T) {
 		t.Fatalf("folddb failed: %v\nstderr: %s", err, errBuf.String())
 	}
 
-	results := parseFolddbOutput(t, outBuf.String())
+	results := parseChangelogOutput(t, outBuf.String())
 	if len(results) == 0 {
 		t.Fatal("expected output, got none")
 	}
@@ -3684,7 +3649,7 @@ func TestE2E_ExecGroupByLarge(t *testing.T) {
 		t.Fatalf("folddb failed: %v\nstderr: %s", err, errBuf.String())
 	}
 
-	results := parseFolddbOutput(t, outBuf.String())
+	results := parseChangelogOutput(t, outBuf.String())
 	if len(results) == 0 {
 		t.Fatal("expected output, got none")
 	}
@@ -3950,14 +3915,14 @@ func TestE2E_FormatDebezium_UpdateRetraction(t *testing.T) {
 	}
 }
 
-// TestE2E_FormatFoldDB_WeightConsumed: FORMAT FOLDDB consumes _weight as z-set weight
+// TestE2E_FormatFoldDB_WeightConsumed: FORMAT FOLDDB consumes weight as z-set weight
 func TestE2E_FormatFoldDB_WeightConsumed(t *testing.T) {
-	stdin := "{\"_weight\":1,\"x\":10}\n{\"_weight\":-1,\"x\":10}\n"
+	stdin := "{\"weight\":1,\"data\":{\"x\":10}}\n{\"weight\":-1,\"data\":{\"x\":10}}\n"
 	stdout, stderr, err := runFolddb(t, "SELECT x, COUNT(*) AS cnt FROM stdin FORMAT FOLDDB GROUP BY x", stdin)
 	if err != nil {
 		t.Fatalf("folddb failed: %v\nstderr: %s", err, stderr)
 	}
-	results := parseFolddbOutput(t, stdout)
+	results := parseChangelogOutput(t, stdout)
 	// Insert (weight=1) produces cnt=1, then retraction (weight=-1) removes the group.
 	// The changelog should show: insert cnt=1, then retract cnt=1 (group removed).
 	if len(results) < 2 {
@@ -3978,12 +3943,12 @@ func TestE2E_FormatFoldDB_WeightConsumed(t *testing.T) {
 
 // TestE2E_FormatJSONFoldDB_Explicit: FORMAT JSON FOLDDB (explicit encoding)
 func TestE2E_FormatJSONFoldDB_Explicit(t *testing.T) {
-	stdin := "{\"_weight\":1,\"x\":10}\n{\"_weight\":-1,\"x\":10}\n"
+	stdin := "{\"weight\":1,\"data\":{\"x\":10}}\n{\"weight\":-1,\"data\":{\"x\":10}}\n"
 	stdout, stderr, err := runFolddb(t, "SELECT x, COUNT(*) AS cnt FROM stdin FORMAT JSON FOLDDB GROUP BY x", stdin)
 	if err != nil {
 		t.Fatalf("folddb failed: %v\nstderr: %s", err, stderr)
 	}
-	results := parseFolddbOutput(t, stdout)
+	results := parseChangelogOutput(t, stdout)
 	if len(results) < 2 {
 		t.Fatalf("expected at least 2 changelog entries, got %d: %v", len(results), results)
 	}
@@ -3995,7 +3960,7 @@ func TestE2E_FormatJSONFoldDB_Explicit(t *testing.T) {
 	}
 }
 
-// TestE2E_FormatFoldDB_DefaultWeight: FORMAT FOLDDB without _weight defaults to +1
+// TestE2E_FormatFoldDB_DefaultWeight: FORMAT FOLDDB without weight envelope defaults to +1
 func TestE2E_FormatFoldDB_DefaultWeight(t *testing.T) {
 	stdin := "{\"x\":1}\n"
 	stdout, stderr, err := runFolddb(t, "SELECT x FROM stdin FORMAT FOLDDB", stdin)
@@ -4013,12 +3978,12 @@ func TestE2E_FormatFoldDB_DefaultWeight(t *testing.T) {
 
 // TestE2E_FormatFoldDB_MultisetWeight: FORMAT FOLDDB with weight > 1 (multiset)
 func TestE2E_FormatFoldDB_MultisetWeight(t *testing.T) {
-	stdin := "{\"_weight\":3,\"x\":1}\n"
+	stdin := "{\"weight\":3,\"data\":{\"x\":1}}\n"
 	stdout, stderr, err := runFolddb(t, "SELECT x, COUNT(*) AS cnt FROM stdin FORMAT FOLDDB GROUP BY x", stdin)
 	if err != nil {
 		t.Fatalf("folddb failed: %v\nstderr: %s", err, stderr)
 	}
-	results := parseFolddbOutput(t, stdout)
+	results := parseChangelogOutput(t, stdout)
 	// With weight=3, COUNT should be 3
 	found := false
 	for _, r := range results {
@@ -4034,7 +3999,7 @@ func TestE2E_FormatFoldDB_MultisetWeight(t *testing.T) {
 
 // TestE2E_FormatFoldDB_PipedComposition: output of GROUP BY piped as FOLDDB input
 func TestE2E_FormatFoldDB_PipedComposition(t *testing.T) {
-	// First query: GROUP BY s, producing changelog with _weight
+	// First query: GROUP BY s, producing changelog in Feldera weighted format
 	// Second query: consume as FOLDDB envelope, filter cnt > 1
 	stdin := "{\"s\":\"a\"}\n{\"s\":\"b\"}\n{\"s\":\"a\"}\n"
 
