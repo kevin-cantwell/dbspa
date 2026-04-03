@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -16,6 +18,61 @@ import (
 	"github.com/kevin-cantwell/folddb/internal/sql/ast"
 	"github.com/kevin-cantwell/folddb/internal/sql/parser"
 )
+
+// folddbBin holds the path to the compiled folddb binary for E2E exec tests.
+var folddbBin string
+
+func TestMain(m *testing.M) {
+	// Build the folddb binary once for all tests that need it.
+	tmp, err := os.MkdirTemp("", "folddb-test-*")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "TestMain: cannot create temp dir: %v\n", err)
+		os.Exit(1)
+	}
+	defer os.RemoveAll(tmp)
+
+	folddbBin = filepath.Join(tmp, "folddb")
+	cmd := exec.Command("go", "build", "-o", folddbBin, ".")
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "TestMain: go build failed: %v\n", err)
+		os.Exit(1)
+	}
+
+	os.Exit(m.Run())
+}
+
+// runFolddb runs the compiled folddb binary with the given SQL query and
+// optional stdin input. Returns stdout, stderr, and any error.
+func runFolddb(t *testing.T, sql string, stdin string) (stdout, stderr string, err error) {
+	t.Helper()
+	cmd := exec.Command(folddbBin, sql)
+	if stdin != "" {
+		cmd.Stdin = strings.NewReader(stdin)
+	}
+	var outBuf, errBuf bytes.Buffer
+	cmd.Stdout = &outBuf
+	cmd.Stderr = &errBuf
+	err = cmd.Run()
+	return outBuf.String(), errBuf.String(), err
+}
+
+// parseFolddbOutput parses NDJSON output lines into maps.
+func parseFolddbOutput(t *testing.T, output string) []map[string]any {
+	t.Helper()
+	var results []map[string]any
+	for _, line := range strings.Split(strings.TrimSpace(output), "\n") {
+		if line == "" {
+			continue
+		}
+		var m map[string]any
+		if err := json.Unmarshal([]byte(line), &m); err != nil {
+			t.Fatalf("output parse error: %v\nline: %s", err, line)
+		}
+		results = append(results, m)
+	}
+	return results
+}
 
 // runQuery is a test helper that simulates the main pipeline:
 // parse SQL, decode JSON input lines, run pipeline, collect output.
@@ -3163,6 +3220,273 @@ func TestE2E_SubqueryAliasMandatory(t *testing.T) {
 	}
 	if !strings.Contains(err2.Error(), "subquery requires an alias") {
 		t.Errorf("expected 'subquery requires an alias' in error, got: %v", err2)
+	}
+}
+
+// =====================================================================
+// EXEC() E2E tests
+// =====================================================================
+
+// TestE2E_ExecFrom_CatFile: FROM EXEC('cat file.json') reads records from a file
+func TestE2E_ExecFrom_CatFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	dataFile := filepath.Join(tmpDir, "data.json")
+	data := `{"name":"alice","age":30}
+{"name":"bob","age":25}
+{"name":"carol","age":35}
+`
+	if err := os.WriteFile(dataFile, []byte(data), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	sql := fmt.Sprintf("SELECT name, age FROM EXEC('cat %s') WHERE age > 28", dataFile)
+	stdout, stderr, err := runFolddb(t, sql, "")
+	if err != nil {
+		t.Fatalf("folddb failed: %v\nstderr: %s", err, stderr)
+	}
+
+	results := parseFolddbOutput(t, stdout)
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d: %v", len(results), results)
+	}
+
+	names := map[string]bool{}
+	for _, r := range results {
+		names[r["name"].(string)] = true
+	}
+	if !names["alice"] {
+		t.Error("expected alice in results")
+	}
+	if !names["carol"] {
+		t.Error("expected carol in results")
+	}
+}
+
+// TestE2E_ExecFrom_GroupBy: FROM EXEC('cat file') GROUP BY accumulates correctly
+func TestE2E_ExecFrom_GroupBy(t *testing.T) {
+	tmpDir := t.TempDir()
+	dataFile := filepath.Join(tmpDir, "orders.json")
+	data := `{"status":"pending","amount":100}
+{"status":"complete","amount":200}
+{"status":"pending","amount":50}
+{"status":"complete","amount":300}
+`
+	if err := os.WriteFile(dataFile, []byte(data), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	sql := fmt.Sprintf("SELECT status, COUNT(*) AS cnt, SUM(amount) AS total FROM EXEC('cat %s') GROUP BY status", dataFile)
+	stdout, stderr, err := runFolddb(t, sql, "")
+	if err != nil {
+		t.Fatalf("folddb failed: %v\nstderr: %s", err, stderr)
+	}
+
+	results := parseFolddbOutput(t, stdout)
+	if len(results) == 0 {
+		t.Fatal("expected changelog output, got none")
+	}
+
+	// Find final inserts (last _weight=1 per status)
+	finalState := make(map[string]map[string]any)
+	for _, r := range results {
+		if r["_weight"] == float64(1) {
+			finalState[r["status"].(string)] = r
+		}
+	}
+
+	if finalState["pending"]["cnt"] != float64(2) {
+		t.Errorf("pending cnt: got %v, want 2", finalState["pending"]["cnt"])
+	}
+	if finalState["pending"]["total"] != float64(150) {
+		t.Errorf("pending total: got %v, want 150", finalState["pending"]["total"])
+	}
+	if finalState["complete"]["cnt"] != float64(2) {
+		t.Errorf("complete cnt: got %v, want 2", finalState["complete"]["cnt"])
+	}
+	if finalState["complete"]["total"] != float64(500) {
+		t.Errorf("complete total: got %v, want 500", finalState["complete"]["total"])
+	}
+}
+
+// TestE2E_ExecJoin: JOIN EXEC('cat users.json') loads table and joins against stdin
+func TestE2E_ExecJoin(t *testing.T) {
+	tmpDir := t.TempDir()
+	usersFile := filepath.Join(tmpDir, "users.json")
+	usersData := `{"id":1,"name":"Alice"}
+{"id":2,"name":"Bob"}
+{"id":3,"name":"Carol"}
+`
+	if err := os.WriteFile(usersFile, []byte(usersData), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	stdinData := `{"user_id":1,"action":"login"}
+{"user_id":2,"action":"purchase"}
+{"user_id":1,"action":"click"}
+`
+
+	sql := fmt.Sprintf("SELECT e.user_id, u.name, e.action FROM stdin e JOIN EXEC('cat %s') u ON e.user_id = u.id", usersFile)
+	stdout, stderr, err := runFolddb(t, sql, stdinData)
+	if err != nil {
+		t.Fatalf("folddb failed: %v\nstderr: %s", err, stderr)
+	}
+
+	results := parseFolddbOutput(t, stdout)
+	if len(results) != 3 {
+		t.Fatalf("expected 3 results, got %d: %v", len(results), results)
+	}
+
+	// Verify join enrichment
+	for _, r := range results {
+		uid := r["user_id"].(float64)
+		name := r["name"].(string)
+		switch uid {
+		case 1:
+			if name != "Alice" {
+				t.Errorf("user_id=1 should have name=Alice, got %s", name)
+			}
+		case 2:
+			if name != "Bob" {
+				t.Errorf("user_id=2 should have name=Bob, got %s", name)
+			}
+		default:
+			t.Errorf("unexpected user_id: %v", uid)
+		}
+	}
+}
+
+// TestE2E_ExecFrom_WithFormatCSV: FROM EXEC('cat file.csv') FORMAT CSV
+func TestE2E_ExecFrom_WithFormatCSV(t *testing.T) {
+	tmpDir := t.TempDir()
+	csvFile := filepath.Join(tmpDir, "data.csv")
+	csvData := `name,age,city
+alice,30,nyc
+bob,25,sf
+carol,35,la
+`
+	if err := os.WriteFile(csvFile, []byte(csvData), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	sql := fmt.Sprintf("SELECT name, city FROM EXEC('cat %s') FORMAT CSV(header=true) WHERE age::int > 28", csvFile)
+	stdout, stderr, err := runFolddb(t, sql, "")
+	if err != nil {
+		t.Fatalf("folddb failed: %v\nstderr: %s", err, stderr)
+	}
+
+	results := parseFolddbOutput(t, stdout)
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d: %v\nstdout: %s", len(results), results, stdout)
+	}
+
+	names := map[string]bool{}
+	for _, r := range results {
+		names[r["name"].(string)] = true
+	}
+	if !names["alice"] || !names["carol"] {
+		t.Errorf("expected alice and carol, got %v", names)
+	}
+}
+
+// TestE2E_ExecFrom_AsStream: FROM EXEC('cat file') AS STREAM works the same as TABLE for bounded input
+func TestE2E_ExecFrom_AsStream(t *testing.T) {
+	tmpDir := t.TempDir()
+	dataFile := filepath.Join(tmpDir, "data.json")
+	data := `{"x":1}
+{"x":2}
+{"x":3}
+`
+	if err := os.WriteFile(dataFile, []byte(data), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// AS STREAM should produce the same results as default (AS TABLE) for bounded input
+	sql := fmt.Sprintf("SELECT x FROM EXEC('cat %s') AS STREAM WHERE x > 1", dataFile)
+	stdout, stderr, err := runFolddb(t, sql, "")
+	if err != nil {
+		t.Fatalf("folddb failed: %v\nstderr: %s", err, stderr)
+	}
+
+	results := parseFolddbOutput(t, stdout)
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d: %v", len(results), results)
+	}
+
+	for _, r := range results {
+		x := r["x"].(float64)
+		if x <= 1 {
+			t.Errorf("expected x > 1, got %v", x)
+		}
+	}
+}
+
+// TestE2E_ExecServeBlocked: serve mode rejects EXEC() with a security error
+func TestE2E_ExecServeBlocked(t *testing.T) {
+	tmpDir := t.TempDir()
+	dataFile := filepath.Join(tmpDir, "data.json")
+	if err := os.WriteFile(dataFile, []byte(`{"x":1}`+"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	sql := fmt.Sprintf("SELECT * FROM EXEC('cat %s')", dataFile)
+	cmd := exec.Command(folddbBin, "serve", sql)
+	var errBuf bytes.Buffer
+	cmd.Stderr = &errBuf
+	err := cmd.Run()
+	if err == nil {
+		t.Fatal("expected serve mode to reject EXEC, but it succeeded")
+	}
+
+	combined := errBuf.String()
+	if !strings.Contains(combined, "EXEC()") || !strings.Contains(combined, "serve mode") {
+		t.Errorf("expected security error about EXEC in serve mode, got: %s", combined)
+	}
+}
+
+// TestE2E_SeedFromExec: SEED FROM EXEC('cat snapshot.json') seeds the accumulator
+func TestE2E_SeedFromExec(t *testing.T) {
+	tmpDir := t.TempDir()
+	snapshotFile := filepath.Join(tmpDir, "snapshot.json")
+	snapshotData := `{"region":"east","amount":100}
+{"region":"west","amount":200}
+{"region":"east","amount":50}
+`
+	if err := os.WriteFile(snapshotFile, []byte(snapshotData), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Stream additional records via stdin after seeding
+	stdinData := `{"region":"east","amount":25}
+{"region":"west","amount":75}
+`
+
+	sql := fmt.Sprintf("SELECT region, SUM(amount) AS total SEED FROM EXEC('cat %s') GROUP BY region", snapshotFile)
+	stdout, stderr, err := runFolddb(t, sql, stdinData)
+	if err != nil {
+		t.Fatalf("folddb failed: %v\nstderr: %s", err, stderr)
+	}
+
+	results := parseFolddbOutput(t, stdout)
+	if len(results) == 0 {
+		t.Fatal("expected changelog output, got none")
+	}
+
+	// Find final inserts per region
+	finalState := make(map[string]float64)
+	for _, r := range results {
+		if r["_weight"] == float64(1) {
+			region := r["region"].(string)
+			finalState[region] = r["total"].(float64)
+		}
+	}
+
+	// east: 100 + 50 (seed) + 25 (stream) = 175
+	if finalState["east"] != float64(175) {
+		t.Errorf("east total: got %v, want 175", finalState["east"])
+	}
+	// west: 200 (seed) + 75 (stream) = 275
+	if finalState["west"] != float64(275) {
+		t.Errorf("west total: got %v, want 275", finalState["west"])
 	}
 }
 
