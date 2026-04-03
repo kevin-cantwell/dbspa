@@ -449,19 +449,6 @@ func run() error {
 		go func() {
 			defer close(recordCh)
 
-			// In TABLE mode, warn if the command hasn't exited after 30s
-			// (it may be a long-running command that should use AS STREAM).
-			var done chan struct{}
-			if stmt.FromExec.Mode == "TABLE" {
-				done = make(chan struct{})
-				go func() {
-					select {
-					case <-time.After(30 * time.Second):
-						fmt.Fprintf(os.Stderr, "Warning: EXEC command running for 30s. If it produces continuous output, use AS STREAM.\n")
-					case <-done:
-					}
-				}()
-			}
 
 			if sd, ok := dec.(format.StreamDecoder); ok {
 				if err := sd.DecodeStream(execSrc.ReadRaw(), recordCh); err != nil {
@@ -479,9 +466,6 @@ func run() error {
 						select {
 						case recordCh <- rec:
 						case <-runCtx.Done():
-							if done != nil {
-								close(done)
-							}
 							return
 						}
 					}
@@ -490,9 +474,6 @@ func run() error {
 			// Wait for command to finish; non-zero exit is a warning, not an error
 			if err := execSrc.Wait(); err != nil {
 				fmt.Fprintf(os.Stderr, "Warning: EXEC command exited with error: %v\n", err)
-			}
-			if done != nil {
-				close(done)
 			}
 		}()
 
@@ -2250,19 +2231,10 @@ func materializeExecSource(exec *ast.ExecSource) ([]engine.Record, error) {
 		return nil, fmt.Errorf("EXEC start error: %w", err)
 	}
 
-	// TABLE mode: warn if the command hasn't exited after 30s
-	done := make(chan struct{})
-	go func() {
-		select {
-		case <-time.After(30 * time.Second):
-			fmt.Fprintf(os.Stderr, "Warning: EXEC command running for 30s. If it produces continuous output, use AS STREAM.\n")
-		case <-done:
-		}
-	}()
 
 	dec, err := format.NewDecoderWithOptions(exec.Format, exec.FormatOptions)
 	if err != nil {
-		close(done)
+
 		return nil, fmt.Errorf("EXEC decoder error: %w", err)
 	}
 
@@ -2294,7 +2266,7 @@ func materializeExecSource(exec *ast.ExecSource) ([]engine.Record, error) {
 	if err := execSrc.Wait(); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: EXEC command exited with error: %v\n", err)
 	}
-	close(done)
+
 
 	return records, nil
 }
