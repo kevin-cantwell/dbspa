@@ -22,6 +22,9 @@ import (
 // folddbBin holds the path to the compiled folddb binary for E2E exec tests.
 var folddbBin string
 
+// folddbGenBin holds the path to the compiled folddb-gen binary for data generation tests.
+var folddbGenBin string
+
 func TestMain(m *testing.M) {
 	// Build the folddb binary once for all tests that need it.
 	tmp, err := os.MkdirTemp("", "folddb-test-*")
@@ -39,6 +42,14 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 
+	folddbGenBin = filepath.Join(tmp, "folddb-gen")
+	cmd = exec.Command("go", "build", "-o", folddbGenBin, "../folddb-gen")
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "TestMain: go build folddb-gen failed: %v\n", err)
+		os.Exit(1)
+	}
+
 	os.Exit(m.Run())
 }
 
@@ -47,6 +58,21 @@ func TestMain(m *testing.M) {
 func runFolddb(t *testing.T, sql string, stdin string) (stdout, stderr string, err error) {
 	t.Helper()
 	cmd := exec.Command(folddbBin, sql)
+	if stdin != "" {
+		cmd.Stdin = strings.NewReader(stdin)
+	}
+	var outBuf, errBuf bytes.Buffer
+	cmd.Stdout = &outBuf
+	cmd.Stderr = &errBuf
+	err = cmd.Run()
+	return outBuf.String(), errBuf.String(), err
+}
+
+// runFolddbWithArgs runs the compiled folddb binary with extra CLI flags before the SQL query.
+// Returns stdout, stderr, and any error.
+func runFolddbWithArgs(t *testing.T, args []string, stdin string) (stdout, stderr string, err error) {
+	t.Helper()
+	cmd := exec.Command(folddbBin, args...)
 	if stdin != "" {
 		cmd.Stdin = strings.NewReader(stdin)
 	}
@@ -3497,6 +3523,231 @@ func TestE2E_SeedFromExec(t *testing.T) {
 	// west: 200 (seed) + 75 (stream) = 275
 	if finalState["west"] != float64(275) {
 		t.Errorf("west total: got %v, want 275", finalState["west"])
+	}
+}
+
+// ---------- EXEC Stress Tests ----------
+
+// TestE2E_ExecLargeOutput: EXEC producing 100K NDJSON records, verify all are processed.
+func TestE2E_ExecLargeOutput(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping large output test in short mode")
+	}
+
+	sql := fmt.Sprintf("SELECT COUNT(*) AS cnt FROM EXEC('%s orders --count 100000 --seed 42') GROUP BY 1", folddbGenBin)
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, folddbBin, sql)
+	var outBuf, errBuf bytes.Buffer
+	cmd.Stdout = &outBuf
+	cmd.Stderr = &errBuf
+
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("folddb failed: %v\nstderr: %s", err, errBuf.String())
+	}
+
+	results := parseFolddbOutput(t, outBuf.String())
+	if len(results) == 0 {
+		t.Fatal("expected output, got none")
+	}
+
+	// Find the final insert (last _weight=1 row)
+	var finalCnt float64
+	for _, r := range results {
+		if r["_weight"] == float64(1) {
+			finalCnt = r["cnt"].(float64)
+		}
+	}
+	if finalCnt != 100000 {
+		t.Errorf("expected count=100000, got %v", finalCnt)
+	}
+}
+
+// TestE2E_ExecNonZeroExit: EXEC command that fails with non-zero exit code.
+func TestE2E_ExecNonZeroExit(t *testing.T) {
+	tmpDir := t.TempDir()
+	script := filepath.Join(tmpDir, "fail.sh")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nexit 1\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	sql := fmt.Sprintf("SELECT * FROM EXEC('%s')", script)
+	_, stderr, err := runFolddb(t, sql, "")
+	if err == nil {
+		t.Fatal("expected error from non-zero exit command, got success")
+	}
+	if !strings.Contains(stderr, "command failed") {
+		t.Errorf("expected stderr to contain 'command failed', got: %s", stderr)
+	}
+}
+
+// TestE2E_ExecStderrSilentOnSuccess: EXEC command writes to stderr then succeeds.
+// Verify stderr is NOT printed (buffered silently).
+func TestE2E_ExecStderrSilentOnSuccess(t *testing.T) {
+	tmpDir := t.TempDir()
+	script := filepath.Join(tmpDir, "warn.sh")
+	scriptContent := `#!/bin/sh
+echo '{"x":1}'
+echo 'warning: something happened' >&2
+`
+	if err := os.WriteFile(script, []byte(scriptContent), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	sql := fmt.Sprintf("SELECT x FROM EXEC('%s')", script)
+	stdout, stderr, err := runFolddb(t, sql, "")
+	if err != nil {
+		t.Fatalf("folddb failed: %v\nstderr: %s", err, stderr)
+	}
+
+	// Verify stdout has the record
+	results := parseFolddbOutput(t, stdout)
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d: %v", len(results), results)
+	}
+	if results[0]["x"] != float64(1) {
+		t.Errorf("expected x=1, got %v", results[0]["x"])
+	}
+
+	// Verify stderr does NOT contain the warning (it is buffered silently)
+	if strings.Contains(stderr, "warning") {
+		t.Errorf("expected stderr to be silent on success, got: %s", stderr)
+	}
+}
+
+// TestE2E_ExecStderrShownOnFailure: Command writes stderr then exits non-zero.
+// Verify stderr IS shown in the error output.
+func TestE2E_ExecStderrShownOnFailure(t *testing.T) {
+	tmpDir := t.TempDir()
+	script := filepath.Join(tmpDir, "fail_with_stderr.sh")
+	scriptContent := `#!/bin/sh
+echo '{"x":1}'
+echo "ERROR: connection refused" >&2
+exit 1
+`
+	if err := os.WriteFile(script, []byte(scriptContent), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	sql := fmt.Sprintf("SELECT * FROM EXEC('%s')", script)
+	_, stderr, err := runFolddb(t, sql, "")
+	if err == nil {
+		t.Fatal("expected error from failing command, got success")
+	}
+	if !strings.Contains(stderr, "connection refused") {
+		t.Errorf("expected stderr to contain 'connection refused', got: %s", stderr)
+	}
+}
+
+// TestE2E_ExecEmptyOutput: EXEC command that produces no stdout.
+// Verify FoldDB handles gracefully (no crash, no output).
+func TestE2E_ExecEmptyOutput(t *testing.T) {
+	tmpDir := t.TempDir()
+	script := filepath.Join(tmpDir, "empty.sh")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\ntrue\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	sql := fmt.Sprintf("SELECT * FROM EXEC('%s')", script)
+	stdout, stderr, err := runFolddb(t, sql, "")
+	if err != nil {
+		t.Fatalf("folddb failed: %v\nstderr: %s", err, stderr)
+	}
+	if strings.TrimSpace(stdout) != "" {
+		t.Errorf("expected empty output, got: %s", stdout)
+	}
+}
+
+// TestE2E_ExecGroupByLarge: Large EXEC output aggregated with GROUP BY.
+// Verify counts sum correctly.
+func TestE2E_ExecGroupByLarge(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping large GROUP BY test in short mode")
+	}
+
+	const totalRecords = 50000
+	sql := fmt.Sprintf("SELECT status, COUNT(*) AS cnt FROM EXEC('%s orders --count %d --seed 42') GROUP BY status", folddbGenBin, totalRecords)
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, folddbBin, sql)
+	var outBuf, errBuf bytes.Buffer
+	cmd.Stdout = &outBuf
+	cmd.Stderr = &errBuf
+
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("folddb failed: %v\nstderr: %s", err, errBuf.String())
+	}
+
+	results := parseFolddbOutput(t, outBuf.String())
+	if len(results) == 0 {
+		t.Fatal("expected output, got none")
+	}
+
+	// Sum up final insert counts (_weight=1) per status
+	finalCounts := make(map[string]float64)
+	for _, r := range results {
+		if r["_weight"] == float64(1) {
+			status := r["status"].(string)
+			finalCounts[status] = r["cnt"].(float64)
+		}
+	}
+
+	var sum float64
+	for _, cnt := range finalCounts {
+		sum += cnt
+	}
+	if sum != float64(totalRecords) {
+		t.Errorf("expected counts to sum to %d, got %v (per-status: %v)", totalRecords, sum, finalCounts)
+	}
+}
+
+// TestE2E_ExecWithJoin: EXEC as join table source with stdin as primary.
+func TestE2E_ExecWithJoin(t *testing.T) {
+	tmpDir := t.TempDir()
+	usersFile := filepath.Join(tmpDir, "users.json")
+	if err := os.WriteFile(usersFile, []byte("{\"id\":1,\"name\":\"Alice\"}\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	stdinData := "{\"id\":1}\n"
+	sql := fmt.Sprintf("SELECT e.id, u.name FROM stdin e JOIN EXEC('cat %s') u ON e.id = u.id", usersFile)
+	stdout, stderr, err := runFolddb(t, sql, stdinData)
+	if err != nil {
+		t.Fatalf("folddb failed: %v\nstderr: %s", err, stderr)
+	}
+
+	results := parseFolddbOutput(t, stdout)
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d: %v", len(results), results)
+	}
+	if results[0]["name"] != "Alice" {
+		t.Errorf("expected name=Alice, got %v", results[0]["name"])
+	}
+}
+
+// TestE2E_ExecFormatCSV: CSV output from a command.
+func TestE2E_ExecFormatCSV(t *testing.T) {
+	tmpDir := t.TempDir()
+	csvFile := filepath.Join(tmpDir, "data.csv")
+	csvContent := "name,age\nAlice,30\nBob,25\n"
+	if err := os.WriteFile(csvFile, []byte(csvContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	sql := fmt.Sprintf("SELECT name, age FROM EXEC('cat %s') FORMAT CSV(header=true) WHERE age::int > 28", csvFile)
+	stdout, stderr, err := runFolddb(t, sql, "")
+	if err != nil {
+		t.Fatalf("folddb failed: %v\nstderr: %s", err, stderr)
+	}
+
+	results := parseFolddbOutput(t, stdout)
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d: %v", len(results), results)
+	}
+	if results[0]["name"] != "Alice" {
+		t.Errorf("expected name=Alice, got %v", results[0]["name"])
 	}
 }
 
