@@ -188,7 +188,7 @@ The envelope specifies how to interpret each record and derive Z-set weights:
 |---|---|
 | *(none)* | Plain records -- every record is an insert (weight=+1) |
 | `DEBEZIUM` | Debezium CDC envelope with `op`/`before`/`after` fields; derives Z-set weights from operations |
-| `FOLDDB` | FoldDB changelog with `_weight` field; reads weight directly |
+| `FOLDDB` | Feldera weighted format with `weight` and `data` fields; reads weight directly and unwraps data |
 
 ### Examples
 
@@ -198,7 +198,7 @@ FORMAT AVRO                             -- plain Avro records
 FORMAT AVRO DEBEZIUM                    -- Avro-encoded Debezium CDC
 FORMAT JSON DEBEZIUM                    -- JSON-encoded Debezium CDC
 FORMAT DEBEZIUM                         -- shorthand: JSON + Debezium
-FORMAT FOLDDB                           -- FoldDB changelog (_weight)
+FORMAT FOLDDB                           -- Feldera weighted format (weight + data)
 FORMAT CSV(header=true, delimiter='|')  -- CSV with options
 FORMAT AVRO(registry='http://...') DEBEZIUM  -- Avro with registry + Debezium
 FORMAT PROTOBUF(message='Order')        -- typed Protobuf

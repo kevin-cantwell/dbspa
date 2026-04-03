@@ -260,16 +260,19 @@ func (s *HTTPSink) snapshotRows() []map[string]any {
 }
 
 func (s *HTTPSink) buildSSEEvent(rec engine.Record) string {
-	m := make(map[string]any, len(s.ColumnOrder)+1)
-	m["_weight"] = rec.Weight
+	data := make(map[string]any, len(s.ColumnOrder))
 	for _, col := range s.ColumnOrder {
 		if v, ok := rec.Columns[col]; ok {
-			m[col] = v.ToJSON()
+			data[col] = v.ToJSON()
 		} else {
-			m[col] = nil
+			data[col] = nil
 		}
 	}
-	b, _ := json.Marshal(m)
+	envelope := map[string]any{
+		"weight": rec.Weight,
+		"data":   data,
+	}
+	b, _ := json.Marshal(envelope)
 	return string(b)
 }
 

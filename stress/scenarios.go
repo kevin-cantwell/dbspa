@@ -559,15 +559,17 @@ func extractFinalState(output []byte) map[string]map[string]any {
 		if len(line) == 0 {
 			continue
 		}
-		var rec map[string]any
-		if err := json.Unmarshal(line, &rec); err != nil {
+		var envelope struct {
+			Weight float64        `json:"weight"`
+			Data   map[string]any `json:"data"`
+		}
+		if err := json.Unmarshal(line, &envelope); err != nil {
 			continue
 		}
-		w, _ := rec["_weight"].(float64)
-		key, _ := rec["group_key"].(string)
-		if w > 0 {
-			state[key] = rec
-		} else if w < 0 {
+		key, _ := envelope.Data["group_key"].(string)
+		if envelope.Weight > 0 {
+			state[key] = envelope.Data
+		} else if envelope.Weight < 0 {
 			delete(state, key)
 		}
 	}

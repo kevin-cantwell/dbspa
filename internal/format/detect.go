@@ -66,9 +66,11 @@ func looksLikeCSV(data []byte) bool {
 // changelog envelope type. Returns the changelog family name or an error
 // if CHANGELOG was specified but the envelope cannot be determined.
 func DetectChangelog(fields map[string]any) (string, error) {
-	// Check for FoldDB changelog: has _weight field
-	if _, ok := fields["_weight"]; ok {
-		return "FOLDDB", nil
+	// Check for FoldDB changelog: has "weight" + "data" fields (Feldera weighted format)
+	if _, hasWeight := fields["weight"]; hasWeight {
+		if _, hasData := fields["data"]; hasData {
+			return "FOLDDB", nil
+		}
 	}
 	// Check for Debezium: has "op" AND ("before" OR "after")
 	if _, hasOp := fields["op"]; hasOp {

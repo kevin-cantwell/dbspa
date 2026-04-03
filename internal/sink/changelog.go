@@ -14,7 +14,7 @@ import (
 )
 
 // ChangelogSink writes accumulating query results as changelog NDJSON.
-// Each line includes a "_weight" field: 1 for insert, -1 for retract.
+// Each line uses Feldera's weighted format: {"weight": N, "data": {...}}.
 type ChangelogSink struct {
 	Writer      io.Writer
 	ColumnOrder []string
@@ -61,13 +61,19 @@ func (s *ChangelogSink) Write(rec engine.Record) error {
 func (s *ChangelogSink) writeRecord(rec engine.Record) error {
 	w := s.writer()
 
-	w.WriteString(`{"_weight":`)
+	w.WriteString(`{"weight":`)
 	w.WriteString(strconv.Itoa(rec.Weight))
+	w.WriteString(`,"data":{`)
 
+	first := true
 	if len(s.ColumnOrder) > 0 {
 		for _, col := range s.ColumnOrder {
 			if v, ok := rec.Columns[col]; ok {
-				w.WriteString(`,"`)
+				if !first {
+					w.WriteByte(',')
+				}
+				first = false
+				w.WriteString(`"`)
 				w.WriteString(col)
 				w.WriteString(`":`)
 				writeValue(w, v)
@@ -80,14 +86,18 @@ func (s *ChangelogSink) writeRecord(rec engine.Record) error {
 		}
 		sort.Strings(keys)
 		for _, k := range keys {
-			w.WriteString(`,"`)
+			if !first {
+				w.WriteByte(',')
+			}
+			first = false
+			w.WriteString(`"`)
 			w.WriteString(k)
 			w.WriteString(`":`)
 			writeValue(w, rec.Columns[k])
 		}
 	}
 
-	w.WriteString("}\n")
+	w.WriteString("}}\n")
 	return nil
 }
 

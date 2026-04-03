@@ -331,7 +331,7 @@ folddb "SELECT status, COUNT(*) AS cnt
 folddb "SELECT * FROM stdin FORMAT FOLDDB WHERE cnt > 100"
 ```
 
-The `FORMAT FOLDDB` envelope reads the `_weight` field directly from each record, preserving retraction/insertion semantics across the pipe.
+The `FORMAT FOLDDB` envelope reads the `weight` field and unwraps the `data` object from the Feldera weighted format, preserving retraction/insertion semantics across the pipe.
 
 ## Output to SQLite
 

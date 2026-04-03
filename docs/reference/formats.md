@@ -153,7 +153,7 @@ Benefits over JSON Debezium:
 
 ### FoldDB Changelog
 
-The FoldDB envelope reads the `_weight` field directly from each record, treating it as a Z-set weight. This is the native format of FoldDB's [changelog output](../concepts/changelog-output.md).
+The FoldDB envelope reads the Feldera weighted format — a JSON object with a `weight` field (integer) and a `data` field (object containing the columns). This is the native format of FoldDB's [changelog output](../concepts/changelog-output.md), aligned with [Feldera's](https://github.com/feldera/feldera) "weighted" input format for interoperability.
 
 ```sql
 FORMAT FOLDDB                 -- shorthand for FORMAT JSON FOLDDB
@@ -170,7 +170,7 @@ folddb "SELECT status, COUNT(*) FROM 'kafka://broker/orders' GROUP BY status" | 
 folddb "SELECT * FROM stdin FORMAT FOLDDB WHERE status = 'pending'"
 ```
 
-Each record must contain a `_weight` field (integer). Positive weights are insertions, negative weights are retractions. Records without a `_weight` field default to weight=+1.
+Each record must be a JSON object with a `weight` field (integer) and a `data` field (object). Positive weights are insertions, negative weights are retractions. For example: `{"weight":1,"data":{"status":"pending","cnt":42}}`. Records without a `weight` field default to weight=+1 with the entire object treated as data.
 
 ### Confluent Wire Format
 

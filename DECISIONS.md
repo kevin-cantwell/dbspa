@@ -528,26 +528,28 @@ SELECT * FROM 'pg://host/db/orders' WHERE status = 'pending'
 
 ---
 
-### 17. Changelog output format: stay with _weight (FOLDDB)
+### 17. Changelog output format: Feldera weighted envelope
 
-**Status:** Decided
+**Status:** Decided (revised)
 
-**Problem:** FoldDB's changelog output uses `{"_weight":1, ...}` as a flat NDJSON format. Should we align with an industry standard instead?
+**Problem:** FoldDB's changelog output originally used `{"_weight":1, ...}` as a flat NDJSON format. Three issues emerged:
+1. `_weight` could collide with source data columns
+2. No clean separation between delta metadata and record data
+3. No interoperability with any other system
 
 **Research:**
-- **Feldera** `insert_delete` (their default output): `{"insert":{...}}` or `{"delete":{...}}` — no integer weights, boolean only
-- **Feldera** `weighted` (input-only, not fully implemented): `{"weight": N, "data":{...}}` — nested record under "data"
+- **Feldera** `weighted` format: `{"weight": N, "data":{...}}` — nested record under "data"
+- **Feldera** `insert_delete` (their default output): `{"insert":{...}}` or `{"delete":{...}}`
 - **Materialize**: `mz_diff` column in SQL result streams
 - **RisingWave**: `op` varchar column in SQL result streams
-- There is **no standard** Z-set wire format across any of these systems
 
-**Decision:** Keep FoldDB's flat `_weight` format. Advantages:
-1. Flat — no nesting, `jq .region` just works
-2. True Z-set semantics — integer weight, not just insert/delete booleans
-3. Composable — `FORMAT FOLDDB` reads it back correctly for piped instances
-4. Feldera's weighted format is input-only and partially unimplemented — not a real standard to align with
+**Decision:** Adopt Feldera's weighted envelope: `{"weight": N, "data": {...}}`.
+1. No collision risk — `weight` and `data` are envelope fields, not mixed with record columns
+2. Clean separation between delta metadata and record data
+3. Feldera interop baked in — their weighted format uses the same structure
+4. True Z-set semantics preserved — integer weight, not just insert/delete booleans
 
-Future: may add output format options (Feldera insert_delete, etc.) for interop.
+**Trade-off:** Accessing columns requires `.data.region` instead of `.region` in jq. Worth it for correctness and interop.
 
 ---
 

@@ -62,17 +62,17 @@ Without this, an order changing from `pending` to `shipped` would be counted in 
 
 Even without CDC, the accumulator emits retractions. When a `GROUP BY` query processes a new input record, and it changes a group's result, the accumulator emits:
 
-1. A **retraction** of the previous result: `{"_weight":-1, "status":"pending", "count":99}`
-2. An **insertion** of the new result: `{"_weight":1, "status":"pending", "count":100}`
+1. A **retraction** of the previous result: `{"weight":-1, "data":{"status":"pending", "count":99}}`
+2. An **insertion** of the new result: `{"weight":1, "data":{"status":"pending", "count":100}}`
 
 This is the **changelog protocol**. It tells downstream consumers exactly what changed.
 
 ```
 Input records (all weight=+1):         Changelog output:
-  {"status":"pending"}          ->     {"_weight":1,"status":"pending","count":1}
-  {"status":"shipped"}          ->     {"_weight":1,"status":"shipped","count":1}
-  {"status":"pending"}          ->     {"_weight":-1,"status":"pending","count":1}
-                                       {"_weight":1,"status":"pending","count":2}
+  {"status":"pending"}          ->     {"weight":1,"data":{"status":"pending","count":1}}
+  {"status":"shipped"}          ->     {"weight":1,"data":{"status":"shipped","count":1}}
+  {"status":"pending"}          ->     {"weight":-1,"data":{"status":"pending","count":1}}
+                                       {"weight":1,"data":{"status":"pending","count":2}}
 ```
 
 ### Source: Batch compaction
@@ -116,7 +116,7 @@ The Z-set model surfaces differently depending on the output mode:
 | Output mode | How weights appear |
 |---|---|
 | **TUI** (terminal) | You see a live-updating table. Retractions are invisible -- the row just updates in place. |
-| **Changelog NDJSON** (piped) | Every line has a `"_weight"` field (`1` or `-1`). Retraction+insertion pairs are always adjacent. |
+| **Changelog NDJSON** (piped) | Every line uses the Feldera weighted format: `{"weight": N, "data": {...}}`. Retraction+insertion pairs are always adjacent. |
 | **SQLite** (`--state file.db`) | The `result` table is UPSERTed. You always see the current state. |
 | **HTTP** (`folddb serve`) | `GET /` returns current state. `GET /stream` returns SSE changelog entries. |
 

@@ -95,8 +95,8 @@ func TestDetectChangelog(t *testing.T) {
 		wantErr bool
 	}{
 		{
-			name:   "FoldDB changelog (has _weight)",
-			fields: map[string]any{"name": "Alice", "_weight": float64(1)},
+			name:   "FoldDB changelog (has weight + data)",
+			fields: map[string]any{"weight": float64(1), "data": map[string]any{"name": "Alice"}},
 			want:   "FOLDDB",
 		},
 		{

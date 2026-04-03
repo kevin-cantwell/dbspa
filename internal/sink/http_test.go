@@ -229,15 +229,18 @@ func TestHTTPSink_SSE(t *testing.T) {
 		t.Fatal("timeout waiting for SSE event")
 	}
 
-	var event map[string]any
+	var event struct {
+		Weight float64        `json:"weight"`
+		Data   map[string]any `json:"data"`
+	}
 	if err := json.Unmarshal([]byte(eventData), &event); err != nil {
 		t.Fatalf("failed to parse SSE event: %v", err)
 	}
-	if event["_weight"] != float64(1) {
-		t.Errorf("expected _weight 1, got %v", event["_weight"])
+	if event.Weight != 1 {
+		t.Errorf("expected weight 1, got %v", event.Weight)
 	}
-	if event["region"] != "eu-west" {
-		t.Errorf("expected region eu-west, got %v", event["region"])
+	if event.Data["region"] != "eu-west" {
+		t.Errorf("expected region eu-west, got %v", event.Data["region"])
 	}
 }
 

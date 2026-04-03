@@ -8,14 +8,16 @@ import (
 	"github.com/kevin-cantwell/folddb/internal/engine"
 )
 
-// FoldDBChangelogDecoder decodes JSON records with an optional _weight field.
-// The _weight field controls the record's diff weight (1 for insertion, -1 for
-// retraction). If _weight is absent, it defaults to 1 (insertion).
-// The _weight field is consumed and not included in the record's columns.
+// FoldDBChangelogDecoder decodes JSON records in the FoldDB weighted format:
+// {"weight": N, "data": {"col1": val, ...}}
+//
+// The "weight" field controls the record's Z-set weight (1 for insertion, -1 for
+// retraction). If "weight" is absent, it defaults to 1. The "data" field contains
+// the actual record columns. If "data" is absent, the top-level fields (excluding
+// "weight") are used as columns for backwards compatibility.
 type FoldDBChangelogDecoder struct{}
 
-// Decode parses a JSON object, extracts the _weight field if present, and
-// returns a record with the remaining columns.
+// Decode parses a weighted JSON envelope and returns a record.
 func (d *FoldDBChangelogDecoder) Decode(data []byte) (engine.Record, error) {
 	if len(data) == 0 {
 		return engine.Record{}, fmt.Errorf("FoldDB changelog decode error: empty input")
@@ -26,10 +28,9 @@ func (d *FoldDBChangelogDecoder) Decode(data []byte) (engine.Record, error) {
 		return engine.Record{}, fmt.Errorf("FoldDB changelog decode error: %w", err)
 	}
 
-	// Extract _weight (default: 1)
+	// Extract weight (default: 1)
 	weight := 1
-	if w, ok := raw["_weight"]; ok {
-		delete(raw, "_weight")
+	if w, ok := raw["weight"]; ok {
 		switch v := w.(type) {
 		case float64:
 			weight = int(v)
@@ -40,8 +41,22 @@ func (d *FoldDBChangelogDecoder) Decode(data []byte) (engine.Record, error) {
 		}
 	}
 
-	cols := make(map[string]engine.Value, len(raw))
-	for k, v := range raw {
+	// Extract data envelope — if "data" is present, use it; otherwise fall back
+	// to top-level fields (minus "weight") for backwards compatibility.
+	var fields map[string]any
+	if d, ok := raw["data"]; ok {
+		if dm, ok := d.(map[string]any); ok {
+			fields = dm
+		} else {
+			fields = make(map[string]any)
+		}
+	} else {
+		fields = raw
+		delete(fields, "weight")
+	}
+
+	cols := make(map[string]engine.Value, len(fields))
+	for k, v := range fields {
 		cols[k] = inferValue(v)
 	}
 

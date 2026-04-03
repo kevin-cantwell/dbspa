@@ -4,16 +4,16 @@ When an accumulating query (`GROUP BY`) is piped to another process or written t
 
 ## Format
 
-Each line is a JSON object with a `"_weight"` field — the Z-set multiplicity:
+Each line is a JSON object with a `"weight"` field (the Z-set multiplicity) and a `"data"` object containing the columns:
 
 ```json
-{"_weight":1,"region":"us-east","orders":1}
-{"_weight":1,"region":"us-west","orders":1}
-{"_weight":-1,"region":"us-east","orders":1}
-{"_weight":1,"region":"us-east","orders":2}
+{"weight":1,"data":{"region":"us-east","orders":1}}
+{"weight":1,"data":{"region":"us-west","orders":1}}
+{"weight":-1,"data":{"region":"us-east","orders":1}}
+{"weight":1,"data":{"region":"us-east","orders":2}}
 ```
 
-| `_weight` | Meaning |
+| `weight` | Meaning |
 |---|---|
 | Positive (e.g., `1`) | Insertion — this row is added to the result set |
 | Negative (e.g., `-1`) | Retraction — this row is removed from the result set |
@@ -25,8 +25,8 @@ This is the DBSP Z-set delta model. The output stream is a sequence of changes t
 When a group's aggregate result changes (e.g., `COUNT` goes from 1 to 2), the accumulator emits a retraction of the old row followed by an insertion of the new row. These pairs are always adjacent — no other key's deltas interleave between them.
 
 ```json
-{"_weight":-1,"region":"us-east","orders":1}   <- old row retracted
-{"_weight":1,"region":"us-east","orders":2}    <- new row inserted
+{"weight":-1,"data":{"region":"us-east","orders":1}}   <- old row retracted
+{"weight":1,"data":{"region":"us-east","orders":2}}    <- new row inserted
 ```
 
 !!! note "Not every retraction has a matching insertion"
@@ -37,7 +37,7 @@ When a group's aggregate result changes (e.g., `COUNT` goes from 1 to 2), the ac
 
 ## Weights beyond +1/-1
 
-With [batch compaction](../architecture/pipeline.md), the `_weight` field can be any integer — not just +1 and -1. For example, if 5 insertions and 2 retractions for the same record are compacted in a single batch, the accumulator receives a single entry with `_weight: 3`.
+With [batch compaction](../architecture/pipeline.md), the `weight` field can be any integer — not just +1 and -1. For example, if 5 insertions and 2 retractions for the same record are compacted in a single batch, the accumulator receives a single entry with `weight: 3`.
 
 The output weights from the accumulator are always +1 or -1 (since each group key has exactly one current result row). But the internal pipeline may process higher weights.
 
@@ -49,10 +49,10 @@ A downstream consumer maintaining a map of `GROUP BY keys -> latest positive-wei
 state = {}
 for line in changelog:
     record = json.loads(line)
-    key = record["region"]  # the GROUP BY key(s)
-    if record["_weight"] > 0:
-        state[key] = record
-    elif record["_weight"] < 0:
+    key = record["data"]["region"]  # access data inside envelope
+    if record["weight"] > 0:
+        state[key] = record["data"]
+    elif record["weight"] < 0:
         if key in state:
             del state[key]
 # state is always the current aggregation result
@@ -70,7 +70,7 @@ folddb "SELECT status, COUNT(*) FROM 'kafka://broker/orders' GROUP BY status" | 
 folddb "SELECT * FROM stdin FORMAT FOLDDB WHERE status = 'pending'"
 ```
 
-The `FORMAT FOLDDB` envelope reads the `_weight` field directly from each JSON record instead of treating every record as an insert. This means retractions flow through correctly -- when Instance 1 retracts an old count and inserts a new one, Instance 2 sees both the retraction and insertion, keeping its own state consistent.
+The `FORMAT FOLDDB` envelope reads the `weight` field from the Feldera weighted format and unwraps the `data` object, instead of treating every record as an insert. This means retractions flow through correctly -- when Instance 1 retracts an old count and inserts a new one, Instance 2 sees both the retraction and insertion, keeping its own state consistent.
 
 Without `FORMAT FOLDDB`, the downstream instance would treat every line (including retractions) as a plain insert with weight=+1, which would produce incorrect results.
 
@@ -78,7 +78,7 @@ See [FORMAT FOLDDB](../reference/formats.md#folddb-changelog) for the full envel
 
 ## Non-accumulating queries
 
-For non-accumulating queries (no `GROUP BY`), every line is a plain insertion. The `"_weight"` field is omitted for brevity — the output is plain NDJSON:
+For non-accumulating queries (no `GROUP BY`), every line is a plain insertion. The weight envelope is omitted for brevity — the output is plain NDJSON:
 
 ```json
 {"name":"alice","age":30}
@@ -98,11 +98,11 @@ FoldDB auto-detects the output mode:
 | Context | Accumulating query | Non-accumulating query |
 |---|---|---|
 | TTY (terminal) | TUI (live table) | Scrolling NDJSON |
-| Piped / non-TTY | Changelog NDJSON with `_weight` | Plain NDJSON |
+| Piped / non-TTY | Changelog NDJSON (Feldera weighted format) | Plain NDJSON |
 | `--state file.db` | SQLite UPSERT | SQLite INSERT |
 
 ## Relationship to the Z-set model
 
-The changelog is the external representation of FoldDB's internal [Z-set model](diff-model.md). Internally, every record carries a `Weight` field — a Z-set multiplicity. The changelog serializes this directly as the `_weight` JSON field.
+The changelog is the external representation of FoldDB's internal [Z-set model](diff-model.md). Internally, every record carries a `Weight` field — a Z-set multiplicity. The changelog serializes this using the Feldera weighted format: `{"weight": N, "data": {...}}`. This aligns with [Feldera's](https://github.com/feldera/feldera) "weighted" input format for interoperability.
 
 The [TUI mode](../reference/cli.md) consumes the same Z-set delta stream internally but renders it as a live-updating table — retractions are invisible because the row updates in place.

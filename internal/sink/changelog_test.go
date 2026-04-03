@@ -9,6 +9,28 @@ import (
 	"github.com/kevin-cantwell/folddb/internal/engine"
 )
 
+// weightedRecord is the Feldera weighted format: {"weight": N, "data": {...}}
+type weightedRecord struct {
+	Weight float64        `json:"weight"`
+	Data   map[string]any `json:"data"`
+}
+
+func parseWeightedNDJSON(t *testing.T, buf *bytes.Buffer) []weightedRecord {
+	t.Helper()
+	var results []weightedRecord
+	for _, line := range strings.Split(strings.TrimSpace(buf.String()), "\n") {
+		if line == "" {
+			continue
+		}
+		var r weightedRecord
+		if err := json.Unmarshal([]byte(line), &r); err != nil {
+			t.Fatalf("JSON parse error: %v\nline: %s", err, line)
+		}
+		results = append(results, r)
+	}
+	return results
+}
+
 func parseNDJSON(t *testing.T, buf *bytes.Buffer) []map[string]any {
 	t.Helper()
 	var results []map[string]any
@@ -41,12 +63,15 @@ func TestChangelogSink_InsertionHasPositiveWeight(t *testing.T) {
 		t.Fatalf("Write error: %v", err)
 	}
 	s.Close()
-	results := parseNDJSON(t, &buf)
+	results := parseWeightedNDJSON(t, &buf)
 	if len(results) != 1 {
 		t.Fatalf("expected 1 line, got %d: %q", len(results), buf.String())
 	}
-	if results[0]["_weight"] != float64(1) {
-		t.Errorf("expected _weight=1, got %v", results[0]["_weight"])
+	if results[0].Weight != 1 {
+		t.Errorf("expected weight=1, got %v", results[0].Weight)
+	}
+	if results[0].Data["name"] != "alice" {
+		t.Errorf("expected name=alice, got %v", results[0].Data["name"])
 	}
 }
 
@@ -67,9 +92,9 @@ func TestChangelogSink_RetractionHasNegativeWeight(t *testing.T) {
 	}
 
 	s.Close()
-	results := parseNDJSON(t, &buf)
-	if results[0]["_weight"] != float64(-1) {
-		t.Errorf("expected _weight=-1, got %v", results[0]["_weight"])
+	results := parseWeightedNDJSON(t, &buf)
+	if results[0].Weight != -1 {
+		t.Errorf("expected weight=-1, got %v", results[0].Weight)
 	}
 }
 
@@ -95,12 +120,12 @@ func TestChangelogSink_ColumnOrderPreserved(t *testing.T) {
 	s.Close()
 
 	line := strings.TrimSpace(buf.String())
-	// "_weight" should come first, then columns in specified order
-	if !strings.HasPrefix(line, `{"_weight":1`) {
-		t.Errorf("expected line to start with _weight, got: %s", line)
+	// Should start with weight and data envelope
+	if !strings.HasPrefix(line, `{"weight":1,"data":{`) {
+		t.Errorf("expected line to start with weight+data envelope, got: %s", line)
 	}
 
-	// Verify the column order by checking byte positions
+	// Verify the column order within the data object
 	cityIdx := strings.Index(line, `"city"`)
 	totalIdx := strings.Index(line, `"total"`)
 	avgIdx := strings.Index(line, `"avg"`)
@@ -129,7 +154,7 @@ func TestChangelogSink_NoColumnOrderSortsKeys(t *testing.T) {
 	s.Close()
 
 	line := strings.TrimSpace(buf.String())
-	// Keys should be sorted: _weight, a, m, z
+	// Keys in data should be sorted: a, m, z
 	aIdx := strings.Index(line, `"a"`)
 	mIdx := strings.Index(line, `"m"`)
 	zIdx := strings.Index(line, `"z"`)
@@ -154,9 +179,9 @@ func TestChangelogSink_NullValues(t *testing.T) {
 	}
 
 	s.Close()
-	results := parseNDJSON(t, &buf)
-	if results[0]["x"] != nil {
-		t.Errorf("expected null, got %v", results[0]["x"])
+	results := parseWeightedNDJSON(t, &buf)
+	if results[0].Data["x"] != nil {
+		t.Errorf("expected null, got %v", results[0].Data["x"])
 	}
 }
 
@@ -171,7 +196,6 @@ func TestChangelogSink_MultipleWrites(t *testing.T) {
 	var buf bytes.Buffer
 	s := &ChangelogSink{Writer: &buf, ColumnOrder: []string{"g", "cnt"}}
 
-	// Simulate retraction + insertion pair
 	retract := engine.Record{
 		Columns: map[string]engine.Value{
 			"g":   engine.TextValue{V: "a"},
@@ -195,20 +219,20 @@ func TestChangelogSink_MultipleWrites(t *testing.T) {
 	}
 
 	s.Close()
-	results := parseNDJSON(t, &buf)
+	results := parseWeightedNDJSON(t, &buf)
 	if len(results) != 2 {
 		t.Fatalf("expected 2 lines, got %d", len(results))
 	}
-	if results[0]["_weight"] != float64(-1) {
+	if results[0].Weight != -1 {
 		t.Errorf("first line should be retraction")
 	}
-	if results[1]["_weight"] != float64(1) {
+	if results[1].Weight != 1 {
 		t.Errorf("second line should be insertion")
 	}
 }
 
 func TestJSONSink_NoWeightField(t *testing.T) {
-	// Non-accumulating queries use JSONSink which omits "_weight"
+	// Non-accumulating queries use JSONSink which omits weight envelope
 	var buf bytes.Buffer
 	s := &JSONSink{Writer: &buf}
 
@@ -225,8 +249,11 @@ func TestJSONSink_NoWeightField(t *testing.T) {
 
 	s.Close()
 	results := parseNDJSON(t, &buf)
-	if _, ok := results[0]["_weight"]; ok {
-		t.Error("JSONSink should not include '_weight' field")
+	if _, ok := results[0]["weight"]; ok {
+		t.Error("JSONSink should not include 'weight' field")
+	}
+	if _, ok := results[0]["data"]; ok {
+		t.Error("JSONSink should not include 'data' envelope")
 	}
 }
 
@@ -246,9 +273,9 @@ func TestChangelogSink_BoolValue(t *testing.T) {
 	}
 
 	s.Close()
-	results := parseNDJSON(t, &buf)
-	if results[0]["active"] != true {
-		t.Errorf("expected true, got %v", results[0]["active"])
+	results := parseWeightedNDJSON(t, &buf)
+	if results[0].Data["active"] != true {
+		t.Errorf("expected true, got %v", results[0].Data["active"])
 	}
 }
 
@@ -268,9 +295,9 @@ func TestChangelogSink_FloatValue(t *testing.T) {
 	}
 
 	s.Close()
-	results := parseNDJSON(t, &buf)
-	if results[0]["val"] != 3.14 {
-		t.Errorf("expected 3.14, got %v", results[0]["val"])
+	results := parseWeightedNDJSON(t, &buf)
+	if results[0].Data["val"] != 3.14 {
+		t.Errorf("expected 3.14, got %v", results[0].Data["val"])
 	}
 }
 
@@ -282,7 +309,6 @@ func TestChangelogSink_OrderBy_SortedFinalSnapshot(t *testing.T) {
 		OrderBy:     []OrderBySpec{{Column: "g", Desc: false}},
 	}
 
-	// Write records in unsorted order
 	for _, rec := range []engine.Record{
 		{Columns: map[string]engine.Value{"g": engine.TextValue{V: "c"}, "cnt": engine.IntValue{V: 3}}, Weight: 1},
 		{Columns: map[string]engine.Value{"g": engine.TextValue{V: "a"}, "cnt": engine.IntValue{V: 1}}, Weight: 1},
@@ -294,7 +320,7 @@ func TestChangelogSink_OrderBy_SortedFinalSnapshot(t *testing.T) {
 	}
 
 	s.Close()
-	results := parseNDJSON(t, &buf)
+	results := parseWeightedNDJSON(t, &buf)
 
 	// First 3 are streaming diffs (unsorted), next 3 are sorted final snapshot
 	if len(results) != 6 {
@@ -303,7 +329,7 @@ func TestChangelogSink_OrderBy_SortedFinalSnapshot(t *testing.T) {
 
 	// Verify sorted final snapshot (last 3 lines)
 	snapshot := results[3:]
-	if snapshot[0]["g"] != "a" || snapshot[1]["g"] != "b" || snapshot[2]["g"] != "c" {
+	if snapshot[0].Data["g"] != "a" || snapshot[1].Data["g"] != "b" || snapshot[2].Data["g"] != "c" {
 		t.Errorf("final snapshot not sorted by g ASC: %v", snapshot)
 	}
 }
@@ -327,12 +353,9 @@ func TestChangelogSink_OrderBy_DescSort(t *testing.T) {
 	}
 
 	s.Close()
-	results := parseNDJSON(t, &buf)
-
-	// Last 3 are sorted snapshot
+	results := parseWeightedNDJSON(t, &buf)
 	snapshot := results[3:]
-	// cnt DESC: 3, 2, 1
-	if snapshot[0]["cnt"] != float64(3) || snapshot[1]["cnt"] != float64(2) || snapshot[2]["cnt"] != float64(1) {
+	if snapshot[0].Data["cnt"] != float64(3) || snapshot[1].Data["cnt"] != float64(2) || snapshot[2].Data["cnt"] != float64(1) {
 		t.Errorf("final snapshot not sorted by cnt DESC: %v", snapshot)
 	}
 }
@@ -345,14 +368,13 @@ func TestChangelogSink_OrderBy_RetractedRowsExcluded(t *testing.T) {
 		OrderBy:     []OrderBySpec{{Column: "g"}},
 	}
 
-	// Insert then retract "b"
 	s.Write(engine.Record{Columns: map[string]engine.Value{"g": engine.TextValue{V: "a"}, "cnt": engine.IntValue{V: 1}}, Weight: 1})
 	s.Write(engine.Record{Columns: map[string]engine.Value{"g": engine.TextValue{V: "b"}, "cnt": engine.IntValue{V: 2}}, Weight: 1})
 	s.Write(engine.Record{Columns: map[string]engine.Value{"g": engine.TextValue{V: "b"}, "cnt": engine.IntValue{V: 2}}, Weight: -1})
 	s.Write(engine.Record{Columns: map[string]engine.Value{"g": engine.TextValue{V: "c"}, "cnt": engine.IntValue{V: 3}}, Weight: 1})
 
 	s.Close()
-	results := parseNDJSON(t, &buf)
+	results := parseWeightedNDJSON(t, &buf)
 
 	// 4 streaming diffs + 2 final snapshot (b retracted)
 	if len(results) != 6 {
@@ -362,7 +384,7 @@ func TestChangelogSink_OrderBy_RetractedRowsExcluded(t *testing.T) {
 	if len(snapshot) != 2 {
 		t.Fatalf("expected 2 snapshot rows, got %d", len(snapshot))
 	}
-	if snapshot[0]["g"] != "a" || snapshot[1]["g"] != "c" {
+	if snapshot[0].Data["g"] != "a" || snapshot[1].Data["g"] != "c" {
 		t.Errorf("snapshot should have a, c (not b): %v", snapshot)
 	}
 }
@@ -378,8 +400,7 @@ func TestChangelogSink_NoOrderBy_NoSnapshot(t *testing.T) {
 	s.Write(engine.Record{Columns: map[string]engine.Value{"g": engine.TextValue{V: "b"}}, Weight: 1})
 	s.Close()
 
-	results := parseNDJSON(t, &buf)
-	// No OrderBy means no final snapshot, just 2 diffs
+	results := parseWeightedNDJSON(t, &buf)
 	if len(results) != 2 {
 		t.Fatalf("expected 2 lines (no snapshot), got %d", len(results))
 	}
