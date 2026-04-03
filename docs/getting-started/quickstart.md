@@ -43,10 +43,10 @@ cat orders.ndjson | folddb "SELECT status, COUNT(*) AS cnt GROUP BY status" | he
 ```
 
 ```json
-{"op":"+","status":"pending","cnt":1}
-{"op":"+","status":"shipped","cnt":1}
-{"op":"-","status":"pending","cnt":1}
-{"op":"+","status":"pending","cnt":2}
+{"_weight":1,"status":"pending","cnt":1}
+{"_weight":1,"status":"shipped","cnt":1}
+{"_weight":-1,"status":"pending","cnt":1}
+{"_weight":1,"status":"pending","cnt":2}
 ```
 
 ## Read from a file

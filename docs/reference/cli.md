@@ -81,7 +81,7 @@ go tool pprof prof.out
 # Debezium Avro with schema registry
 folddb "SELECT _op, customer_id, total
         FROM 'kafka://broker/orders.cdc?registry=http://schema-registry:8081'
-        FORMAT DEBEZIUM_AVRO"
+        FORMAT AVRO CHANGELOG DEBEZIUM"
 ```
 
 !!! note

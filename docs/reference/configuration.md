@@ -65,7 +65,7 @@ registry = "https://psrc-xxx.confluent.cloud"
 
 ```sql
 FROM 'kafka://broker/topic?registry=http://schema-registry:8081' FORMAT AVRO
-FROM 'kafka://broker/topic?registry=http://schema-registry:8081' FORMAT DEBEZIUM_AVRO
+FROM 'kafka://broker/topic?registry=http://schema-registry:8081' FORMAT AVRO CHANGELOG DEBEZIUM
 ```
 
 When a registry is configured, FoldDB auto-detects the [Confluent wire format](formats.md#confluent-wire-format) (magic byte `0x00` + 4-byte schema ID) and fetches the schema on first encounter. Schemas are cached locally since schema IDs are immutable in the Confluent registry.
