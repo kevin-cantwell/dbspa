@@ -599,3 +599,266 @@ func TestIsAggregateFunc(t *testing.T) {
 		}
 	}
 }
+
+// --- ImportInitialState tests ---
+
+// buildSeedTestAggOp creates an AggregateOp with multiple aggregate columns:
+//
+//	SELECT groupCol, <agg1Func>(<agg1Arg>) AS <agg1Alias>, <agg2Func>(<agg2Arg>) AS <agg2Alias> GROUP BY groupCol
+func buildSeedTestAggOp(groupCol string, aggs []struct {
+	Func, Arg, Alias string
+}) *AggregateOp {
+	columns := []AggColumn{
+		{Alias: groupCol, Expr: &ast.ColumnRef{Name: groupCol}, GroupByIdx: 0},
+	}
+	for _, a := range aggs {
+		isStar := a.Arg == "*"
+		var argExpr ast.Expr
+		if !isStar {
+			argExpr = &ast.ColumnRef{Name: a.Arg}
+		}
+		columns = append(columns, AggColumn{
+			Alias:       a.Alias,
+			IsAggregate: true,
+			AggFunc:     a.Func,
+			AggArg:      argExpr,
+			IsStar:      isStar,
+			GroupByIdx:  -1,
+		})
+	}
+	groupBy := []ast.Expr{&ast.ColumnRef{Name: groupCol}}
+	return NewAggregateOp(columns, groupBy, nil)
+}
+
+func TestImportInitialState_CountAndSum(t *testing.T) {
+	// SELECT region, COUNT(*) AS cnt, SUM(amount) AS total GROUP BY region
+	op := buildSeedTestAggOp("region", []struct{ Func, Arg, Alias string }{
+		{"COUNT", "*", "cnt"},
+		{"SUM", "amount", "total"},
+	})
+
+	// Seed: region=us-east has cnt=100, total=1000000
+	seedRecords := []Record{
+		mkRec(1, map[string]Value{
+			"region": TextValue{V: "us-east"},
+			"cnt":    IntValue{V: 100},
+			"total":  IntValue{V: 1000000},
+		}),
+	}
+
+	seedOut := make(chan Record, 10)
+	op.ImportInitialState(seedRecords, seedOut)
+	close(seedOut)
+
+	var seeded []Record
+	for r := range seedOut {
+		seeded = append(seeded, r)
+	}
+
+	if len(seeded) != 1 {
+		t.Fatalf("expected 1 seeded record, got %d", len(seeded))
+	}
+	if seeded[0].Weight != 1 {
+		t.Errorf("seeded record weight: got %d, want 1", seeded[0].Weight)
+	}
+	if v, ok := seeded[0].Columns["cnt"].(IntValue); !ok || v.V != 100 {
+		t.Errorf("seeded cnt: got %v, want 100", seeded[0].Columns["cnt"])
+	}
+	if v, ok := seeded[0].Columns["total"].(IntValue); !ok || v.V != 1000000 {
+		t.Errorf("seeded total: got %v, want 1000000", seeded[0].Columns["total"])
+	}
+
+	// Now stream a record: region=us-east, amount=50
+	streamRecords := []Record{
+		mkRec(1, map[string]Value{"region": TextValue{V: "us-east"}, "amount": IntValue{V: 50}}),
+	}
+	results := processAndCollect(op, streamRecords)
+
+	// Should retract old state and emit new: cnt=101, total=1000050
+	var lastInsert Record
+	for _, r := range results {
+		if r.Weight == 1 {
+			lastInsert = r
+		}
+	}
+	if v, ok := lastInsert.Columns["cnt"].(IntValue); !ok || v.V != 101 {
+		t.Errorf("after stream cnt: got %v, want 101", lastInsert.Columns["cnt"])
+	}
+	if v, ok := lastInsert.Columns["total"].(IntValue); !ok || v.V != 1000050 {
+		t.Errorf("after stream total: got %v, want 1000050", lastInsert.Columns["total"])
+	}
+}
+
+func TestImportInitialState_MinMax(t *testing.T) {
+	// SELECT region, MIN(amount) AS lo, MAX(amount) AS hi GROUP BY region
+	op := buildSeedTestAggOp("region", []struct{ Func, Arg, Alias string }{
+		{"MIN", "amount", "lo"},
+		{"MAX", "amount", "hi"},
+	})
+
+	seedRecords := []Record{
+		mkRec(1, map[string]Value{
+			"region": TextValue{V: "west"},
+			"lo":     IntValue{V: 5},
+			"hi":     IntValue{V: 999},
+		}),
+	}
+
+	seedOut := make(chan Record, 10)
+	op.ImportInitialState(seedRecords, seedOut)
+	close(seedOut)
+
+	var seeded []Record
+	for r := range seedOut {
+		seeded = append(seeded, r)
+	}
+
+	if len(seeded) != 1 {
+		t.Fatalf("expected 1 seeded record, got %d", len(seeded))
+	}
+	if v, ok := seeded[0].Columns["lo"].(IntValue); !ok || v.V != 5 {
+		t.Errorf("seeded lo: got %v, want 5", seeded[0].Columns["lo"])
+	}
+	if v, ok := seeded[0].Columns["hi"].(IntValue); !ok || v.V != 999 {
+		t.Errorf("seeded hi: got %v, want 999", seeded[0].Columns["hi"])
+	}
+
+	// Stream: amount=3 (new min), amount=500 (no change to min or max)
+	streamRecords := []Record{
+		mkRec(1, map[string]Value{"region": TextValue{V: "west"}, "amount": IntValue{V: 3}}),
+		mkRec(1, map[string]Value{"region": TextValue{V: "west"}, "amount": IntValue{V: 500}}),
+	}
+	results := processAndCollect(op, streamRecords)
+
+	// After amount=3: lo should be 3, hi stays 999
+	// After amount=500: lo stays 3, hi stays 999 (500 < 999)
+	var lastInsert Record
+	for _, r := range results {
+		if r.Weight == 1 {
+			lastInsert = r
+		}
+	}
+	if v, ok := lastInsert.Columns["lo"].(IntValue); !ok || v.V != 3 {
+		t.Errorf("after stream lo: got %v, want 3", lastInsert.Columns["lo"])
+	}
+	if v, ok := lastInsert.Columns["hi"].(IntValue); !ok || v.V != 999 {
+		t.Errorf("after stream hi: got %v, want 999", lastInsert.Columns["hi"])
+	}
+}
+
+func TestImportInitialState_MissingSeedColumn(t *testing.T) {
+	// SELECT region, COUNT(*) AS cnt, SUM(amount) AS total GROUP BY region
+	op := buildSeedTestAggOp("region", []struct{ Func, Arg, Alias string }{
+		{"COUNT", "*", "cnt"},
+		{"SUM", "amount", "total"},
+	})
+
+	// Seed only has "cnt", missing "total"
+	seedRecords := []Record{
+		mkRec(1, map[string]Value{
+			"region": TextValue{V: "us-east"},
+			"cnt":    IntValue{V: 50},
+		}),
+	}
+
+	seedOut := make(chan Record, 10)
+	op.ImportInitialState(seedRecords, seedOut)
+	close(seedOut)
+
+	var seeded []Record
+	for r := range seedOut {
+		seeded = append(seeded, r)
+	}
+
+	if len(seeded) != 1 {
+		t.Fatalf("expected 1 seeded record, got %d", len(seeded))
+	}
+	// cnt should be seeded at 50
+	if v, ok := seeded[0].Columns["cnt"].(IntValue); !ok || v.V != 50 {
+		t.Errorf("seeded cnt: got %v, want 50", seeded[0].Columns["cnt"])
+	}
+	// total should be zero/null (missing from seed)
+	totalVal := seeded[0].Columns["total"]
+	if totalVal == nil || totalVal.IsNull() {
+		// Expected: SUM starts at NULL (no value)
+	} else if v, ok := totalVal.(IntValue); ok && v.V != 0 {
+		t.Errorf("missing seed total: got %v, want NULL or 0", totalVal)
+	}
+
+	// Stream a record — total should start accumulating from zero
+	streamRecords := []Record{
+		mkRec(1, map[string]Value{"region": TextValue{V: "us-east"}, "amount": IntValue{V: 100}}),
+	}
+	results := processAndCollect(op, streamRecords)
+
+	var lastInsert Record
+	for _, r := range results {
+		if r.Weight == 1 {
+			lastInsert = r
+		}
+	}
+	if v, ok := lastInsert.Columns["cnt"].(IntValue); !ok || v.V != 51 {
+		t.Errorf("after stream cnt: got %v, want 51", lastInsert.Columns["cnt"])
+	}
+	if v, ok := lastInsert.Columns["total"].(IntValue); !ok || v.V != 100 {
+		t.Errorf("after stream total: got %v, want 100", lastInsert.Columns["total"])
+	}
+}
+
+func TestImportInitialState_MultipleGroups(t *testing.T) {
+	// SELECT region, SUM(amount) AS total GROUP BY region
+	op := buildSimpleAggOp("region", "SUM", "amount", "total", nil)
+
+	seedRecords := []Record{
+		mkRec(1, map[string]Value{"region": TextValue{V: "us-east"}, "total": IntValue{V: 1000}}),
+		mkRec(1, map[string]Value{"region": TextValue{V: "us-west"}, "total": IntValue{V: 2000}}),
+		mkRec(1, map[string]Value{"region": TextValue{V: "eu-west"}, "total": IntValue{V: 3000}}),
+	}
+
+	seedOut := make(chan Record, 10)
+	op.ImportInitialState(seedRecords, seedOut)
+	close(seedOut)
+
+	var seeded []Record
+	for r := range seedOut {
+		seeded = append(seeded, r)
+	}
+
+	if len(seeded) != 3 {
+		t.Fatalf("expected 3 seeded records, got %d", len(seeded))
+	}
+
+	// Verify each group was seeded
+	seededByRegion := make(map[string]int64)
+	for _, r := range seeded {
+		region := r.Columns["region"].(TextValue).V
+		total := r.Columns["total"].(IntValue).V
+		seededByRegion[region] = total
+	}
+	if seededByRegion["us-east"] != 1000 {
+		t.Errorf("us-east: got %d, want 1000", seededByRegion["us-east"])
+	}
+	if seededByRegion["us-west"] != 2000 {
+		t.Errorf("us-west: got %d, want 2000", seededByRegion["us-west"])
+	}
+	if seededByRegion["eu-west"] != 3000 {
+		t.Errorf("eu-west: got %d, want 3000", seededByRegion["eu-west"])
+	}
+
+	// Stream a record to us-east only
+	streamRecords := []Record{
+		mkRec(1, map[string]Value{"region": TextValue{V: "us-east"}, "amount": IntValue{V: 50}}),
+	}
+	results := processAndCollect(op, streamRecords)
+
+	// us-east should update to 1050, others unchanged
+	var lastInsert Record
+	for _, r := range results {
+		if r.Weight == 1 {
+			lastInsert = r
+		}
+	}
+	if v := lastInsert.Columns["total"].(IntValue).V; v != 1050 {
+		t.Errorf("us-east after stream: got %d, want 1050", v)
+	}
+}
