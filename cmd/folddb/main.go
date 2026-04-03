@@ -1157,18 +1157,19 @@ func runAccumulatingFromBatches(ctx context.Context, stmt *ast.SelectStatement, 
 		}
 	}
 
-	// SEED FROM: load seed file and feed directly to aggregator (skip if checkpoint restored).
-	// Seed records are already WHERE-filtered by loadSeedRecords, so we bypass
-	// the fused processor's filter and send them straight to the aggregate.
+	// SEED FROM: inject pre-accumulated state directly into accumulators (skip if checkpoint restored).
+	// Seed records are pre-computed aggregation results (e.g., from BigQuery GROUP BY).
+	// They are NOT filtered through WHERE and NOT processed through Add/Retract —
+	// they set accumulator state directly via ImportInitialState to avoid double-counting.
 	if stmt.Seed != nil && !restoredFromCheckpoint {
-		seedRecords, seedErr := loadSeedRecords(stmt)
+		seedRecords, seedErr := loadSeedFile(stmt.Seed)
 		if seedErr != nil {
 			return fmt.Errorf("seed load error: %w", seedErr)
 		}
 		if len(seedRecords) > 0 {
 			seedOutCh := make(chan engine.Record, 256)
 			go func() {
-				aggOp.ProcessBatch(engine.Batch(seedRecords), seedOutCh)
+				aggOp.ImportInitialState(seedRecords, seedOutCh)
 				close(seedOutCh)
 			}()
 			for rec := range seedOutCh {
@@ -2357,27 +2358,9 @@ func loadSeedFile(seed *ast.SeedClause) ([]engine.Record, error) {
 	return loadTableFile(seed.Source.URI, seedFormat)
 }
 
-// loadSeedRecords loads and WHERE-filters records from a SEED FROM file.
-func loadSeedRecords(stmt *ast.SelectStatement) ([]engine.Record, error) {
-	records, err := loadSeedFile(stmt.Seed)
-	if err != nil {
-		return nil, err
-	}
-
-	// Apply WHERE filter to seed records
-	if stmt.Where == nil {
-		return records, nil
-	}
-	var filtered []engine.Record
-	for _, rec := range records {
-		pass, err := engine.Filter(stmt.Where, rec)
-		if err != nil || !pass {
-			continue
-		}
-		filtered = append(filtered, rec)
-	}
-	return filtered, nil
-}
+// loadSeedRecords is DEPRECATED — pre-accumulated seeds should not be
+// WHERE-filtered since they are already aggregated state, not raw records.
+// Use loadSeedFile directly and pass to ImportInitialState instead.
 
 // buildDDJoinOp constructs a DDJoinOp from the parsed JOIN clause.
 // The right (table) side is loaded into the right arrangement as initial state.

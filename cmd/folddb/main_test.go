@@ -1177,7 +1177,8 @@ func writeFile(path, content string) error {
 }
 
 // runSeedAggQuery is a test helper for SEED FROM accumulating queries.
-// It loads seed records from file, prepends them to stream input, and runs aggregation.
+// Seed records are injected as pre-accumulated state via ImportInitialState,
+// then stream input records continue from that state.
 func runSeedAggQuery(t *testing.T, sql string, inputLines []string) []map[string]any {
 	t.Helper()
 
@@ -1206,8 +1207,8 @@ func runSeedAggQuery(t *testing.T, sql string, inputLines []string) []map[string
 
 	aggOp := engine.NewAggregateOp(aggCols, stmt.GroupBy, stmt.Having)
 
-	// Load seed records
-	seedRecords, err := loadSeedRecords(stmt)
+	// Load seed records (pre-accumulated state, NOT filtered through WHERE)
+	seedRecords, err := loadSeedFile(stmt.Seed)
 	if err != nil {
 		t.Fatalf("seed load error: %v", err)
 	}
@@ -1216,17 +1217,26 @@ func runSeedAggQuery(t *testing.T, sql string, inputLines []string) []map[string
 	var outBuf bytes.Buffer
 	snk := &sink.ChangelogSink{Writer: &outBuf, ColumnOrder: columnOrder}
 
+	// Inject seed as pre-accumulated initial state
+	if len(seedRecords) > 0 {
+		seedOutCh := make(chan engine.Record, 256)
+		go func() {
+			aggOp.ImportInitialState(seedRecords, seedOutCh)
+			close(seedOutCh)
+		}()
+		for rec := range seedOutCh {
+			if err := snk.Write(rec); err != nil {
+				t.Fatalf("sink error during seed: %v", err)
+			}
+		}
+	}
+
+	// Now stream input records through the aggregate
 	filteredCh := make(chan engine.Record)
 	aggOutCh := make(chan engine.Record)
 
-	// Feed seed records then stream input records (with WHERE filter)
 	go func() {
 		defer close(filteredCh)
-		// Seed records first (already WHERE-filtered by loadSeedRecords)
-		for _, rec := range seedRecords {
-			filteredCh <- rec
-		}
-		// Then stream records
 		for _, line := range inputLines {
 			line = strings.TrimSpace(line)
 			if line == "" {
@@ -1276,12 +1286,11 @@ func runSeedAggQuery(t *testing.T, sql string, inputLines []string) []map[string
 }
 
 func TestSeedFromIntegration(t *testing.T) {
+	// Seed data is pre-accumulated state (matching GROUP BY keys + aggregate aliases)
 	seedFile := t.TempDir() + "/seed.ndjson"
-	seedData := `{"status":"pending"}
-{"status":"pending"}
-{"status":"shipped"}
-{"status":"shipped"}
-{"status":"delivered"}`
+	seedData := `{"status":"pending","cnt":2}
+{"status":"shipped","cnt":2}
+{"status":"delivered","cnt":1}`
 	if err := writeFile(seedFile, seedData); err != nil {
 		t.Fatal(err)
 	}
@@ -1315,21 +1324,22 @@ func TestSeedFromIntegration(t *testing.T) {
 }
 
 func TestSeedFromWithWhereIntegration(t *testing.T) {
+	// Seed data is pre-accumulated state (already filtered/grouped by the external system).
+	// WHERE only applies to stream records, not to pre-accumulated seed.
 	seedFile := t.TempDir() + "/seed.ndjson"
-	seedData := `{"status":"pending","region":"us"}
-{"status":"pending","region":"eu"}
-{"status":"shipped","region":"us"}
-{"status":"shipped","region":"eu"}`
+	seedData := `{"status":"pending","cnt":1}
+{"status":"shipped","cnt":1}`
 	if err := writeFile(seedFile, seedData); err != nil {
 		t.Fatal(err)
 	}
 
 	streamInput := []string{
 		`{"status":"pending","region":"us"}`,
+		`{"status":"pending","region":"eu"}`,
 		`{"status":"shipped","region":"us"}`,
 	}
 
-	// WHERE filters to only region='us' — both seed and stream records are filtered
+	// WHERE filters stream records to only region='us'. Seed is pre-accumulated (not filtered).
 	sql := "SELECT status, COUNT(*) AS cnt FROM stdin SEED FROM '" + seedFile + "' WHERE region = 'us' GROUP BY status"
 	results := runSeedAggQuery(t, sql, streamInput)
 
@@ -1340,7 +1350,7 @@ func TestSeedFromWithWhereIntegration(t *testing.T) {
 		}
 	}
 
-	// us-only: 1 pending seed + 1 pending stream = 2, 1 shipped seed + 1 shipped stream = 2
+	// pending: seed=1 + 1 us stream = 2, shipped: seed=1 + 1 us stream = 2
 	if finalState["pending"] != 2 {
 		t.Errorf("pending: got %v, want 2", finalState["pending"])
 	}
@@ -3443,13 +3453,13 @@ func TestE2E_ExecServeBlocked(t *testing.T) {
 	}
 }
 
-// TestE2E_SeedFromExec: SEED FROM EXEC('cat snapshot.json') seeds the accumulator
+// TestE2E_SeedFromExec: SEED FROM EXEC('cat snapshot.json') injects pre-accumulated state
 func TestE2E_SeedFromExec(t *testing.T) {
 	tmpDir := t.TempDir()
 	snapshotFile := filepath.Join(tmpDir, "snapshot.json")
-	snapshotData := `{"region":"east","amount":100}
-{"region":"west","amount":200}
-{"region":"east","amount":50}
+	// Seed data is pre-accumulated state (matching GROUP BY keys + aggregate aliases)
+	snapshotData := `{"region":"east","total":150}
+{"region":"west","total":200}
 `
 	if err := os.WriteFile(snapshotFile, []byte(snapshotData), 0644); err != nil {
 		t.Fatal(err)
@@ -3480,7 +3490,7 @@ func TestE2E_SeedFromExec(t *testing.T) {
 		}
 	}
 
-	// east: 100 + 50 (seed) + 25 (stream) = 175
+	// east: 150 (seed) + 25 (stream) = 175
 	if finalState["east"] != float64(175) {
 		t.Errorf("east total: got %v, want 175", finalState["east"])
 	}
