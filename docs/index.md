@@ -6,11 +6,11 @@ DBSPA is a CLI tool that brings the power of [DBSP](https://github.com/feldera/d
 
 ## What is DBSP?
 
-DBSP (Database Stream Processors) is a mathematical framework for incremental computation over streams, rooted in the theory of [Differential Dataflow](https://github.com/TimelyDataflow/differential-dataflow). The key insight is that instead of recomputing query results from scratch on every new event, you can express any relational operator — filters, joins, aggregations, even recursive queries — as an *incremental* operator that processes only the *changes* (deltas) to its inputs.
+DBSP (Database Stream Processors) is a mathematical framework for incremental computation over streams, introduced in the [VLDB 2023 paper](https://arxiv.org/abs/2203.16684) *"DBSP: Automatic Incremental View Maintenance for Rich Query Languages"* (Budiu, McSherry, Ryzhyk, Tannen — Best Paper Award). It is rooted in the theory of [Differential Dataflow](https://github.com/TimelyDataflow/differential-dataflow). The key insight is that instead of recomputing query results from scratch on every new event, you can express any relational operator — filters, joins, aggregations, even recursive queries — as an *incremental* operator that processes only the *changes* (deltas) to its inputs.
 
 Changes are represented as **Z-sets**: multisets of records with integer weights, where `+1` means an insertion and `-1` means a retraction. Operators compose over Z-sets the same way they compose over ordinary tables, which means you get correct, consistent query results as streams evolve — including accurate retractions when upstream data is corrected or deleted.
 
-DBSPA implements this model for the command line: you write a SQL query, point it at a Kafka topic or a stdin pipe, and get a live, incrementally-maintained result set — the same guarantee that Feldera and Materialize provide at cluster scale, available as a single binary with no infrastructure required.
+DBSPA implements this model for the command line: you write a SQL query, point it at a Kafka topic or a stdin pipe, and get a live, incrementally-maintained result set — the same guarantee that [Feldera](https://feldera.com) and [Materialize](https://materialize.com) provide at cluster scale, available as a single binary with no infrastructure required.
 
 ```bash
 # Count orders by status from a Kafka CDC stream, updating in real time
