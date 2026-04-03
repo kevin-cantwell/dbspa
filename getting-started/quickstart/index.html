@@ -1557,15 +1557,15 @@
 <div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>dbspa<span class="w"> </span><span class="s2">&quot;SELECT * FROM &#39;kafka://localhost:9092/events&#39;&quot;</span>
 </code></pre></div>
 <p>With Debezium CDC:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>dbspa<span class="w"> </span><span class="s2">&quot;SELECT _after-&gt;&gt;&#39;status&#39; AS status, COUNT(*) AS orders</span>
-<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="s2">        FROM &#39;kafka://broker:9092/orders.cdc&#39; FORMAT DEBEZIUM</span>
-<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="s2">        GROUP BY _after-&gt;&gt;&#39;status&#39;&quot;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>dbspa<span class="w"> </span><span class="s2">&quot;SELECT _after.status AS status, COUNT(*) AS orders</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="s2">        FROM &#39;kafka://broker:9092/orders.cdc&#39; CHANGELOG DEBEZIUM</span>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="s2">        GROUP BY _after.status&quot;</span>
 </code></pre></div>
 <h2 id="save-state-to-sqlite">Save state to SQLite<a class="headerlink" href="#save-state-to-sqlite" title="Permanent link">&para;</a></h2>
 <p>Write the current aggregation result to a SQLite file that other processes can read concurrently:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>dbspa<span class="w"> </span>--state<span class="w"> </span>orders.db<span class="w"> </span><span class="se">\</span>
 <a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="w">  </span><span class="s2">&quot;SELECT region, COUNT(*) AS cnt</span>
-<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="s2">   FROM &#39;kafka://broker/orders.cdc&#39; FORMAT DEBEZIUM</span>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="s2">   FROM &#39;kafka://broker/orders.cdc&#39; CHANGELOG DEBEZIUM</span>
 <a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="s2">   GROUP BY region&quot;</span>
 </code></pre></div>
 <p>In another terminal:</p>
@@ -1575,7 +1575,7 @@
 <p>Run a query as an HTTP sidecar:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>dbspa<span class="w"> </span>serve<span class="w"> </span>--port<span class="w"> </span><span class="m">8080</span><span class="w"> </span><span class="se">\</span>
 <a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="w">  </span><span class="s2">&quot;SELECT region, COUNT(*) AS orders</span>
-<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="s2">   FROM &#39;kafka://broker/orders.cdc&#39; FORMAT DEBEZIUM</span>
+<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="s2">   FROM &#39;kafka://broker/orders.cdc&#39; CHANGELOG DEBEZIUM</span>
 <a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="s2">   GROUP BY region&quot;</span>
 </code></pre></div>
 <p>Then query it:</p>

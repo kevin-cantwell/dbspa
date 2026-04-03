@@ -1746,9 +1746,9 @@
 <a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>kubectl<span class="w"> </span>logs<span class="w"> </span>my-pod<span class="w"> </span>-f<span class="w"> </span><span class="p">|</span><span class="w"> </span>dbspa<span class="w"> </span><span class="s2">&quot;SELECT message WHERE level = &#39;ERROR&#39;&quot;</span>
 <a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>
 <a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="c1"># JSON path extraction</span>
-<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>cat<span class="w"> </span>events.ndjson<span class="w"> </span><span class="p">|</span><span class="w"> </span>dbspa<span class="w"> </span><span class="s2">&quot;SELECT payload-&gt;&#39;user&#39;-&gt;&gt;&#39;email&#39; AS email,</span>
-<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="s2">                                    payload-&gt;&#39;user&#39;-&gt;&gt;&#39;name&#39; AS name</span>
-<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="s2">                             WHERE payload-&gt;&#39;user&#39;-&gt;&gt;&#39;role&#39; = &#39;admin&#39;&quot;</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>cat<span class="w"> </span>events.ndjson<span class="w"> </span><span class="p">|</span><span class="w"> </span>dbspa<span class="w"> </span><span class="s2">&quot;SELECT payload.user.email AS email,</span>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="s2">                                    payload.user.name AS name</span>
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="s2">                             WHERE payload.user.role = &#39;admin&#39;&quot;</span>
 </code></pre></div>
 <h2 id="aggregation">Aggregation<a class="headerlink" href="#aggregation" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># Count by status</span>
@@ -1774,21 +1774,21 @@
 </code></pre></div>
 <h2 id="debezium-cdc">Debezium CDC<a class="headerlink" href="#debezium-cdc" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># Live order counts from a CDC stream</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>dbspa<span class="w"> </span><span class="s2">&quot;SELECT _after-&gt;&gt;&#39;status&#39; AS status, COUNT(*) AS orders</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="s2">        FROM &#39;kafka://broker:9092/orders.cdc&#39; FORMAT DEBEZIUM</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="s2">        GROUP BY _after-&gt;&gt;&#39;status&#39;&quot;</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>dbspa<span class="w"> </span><span class="s2">&quot;SELECT _after.status AS status, COUNT(*) AS orders</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="s2">        FROM &#39;kafka://broker:9092/orders.cdc&#39; CHANGELOG DEBEZIUM</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="s2">        GROUP BY _after.status&quot;</span>
 <a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>
 <a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="c1"># Revenue by region — updates correctly when orders change status</span>
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>dbspa<span class="w"> </span><span class="s2">&quot;SELECT _after-&gt;&gt;&#39;region&#39; AS region,</span>
-<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="s2">               SUM((_after-&gt;&gt;&#39;total&#39;)::float) AS revenue</span>
-<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="s2">        FROM &#39;kafka://broker:9092/orders.cdc&#39; FORMAT DEBEZIUM</span>
-<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="s2">        GROUP BY _after-&gt;&gt;&#39;region&#39;&quot;</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>dbspa<span class="w"> </span><span class="s2">&quot;SELECT _after.region AS region,</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="s2">               SUM((_after.total)::float) AS revenue</span>
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="s2">        FROM &#39;kafka://broker:9092/orders.cdc&#39; CHANGELOG DEBEZIUM</span>
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="s2">        GROUP BY _after.region&quot;</span>
 <a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a>
 <a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="c1"># Filter only updates</span>
-<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a>dbspa<span class="w"> </span><span class="s2">&quot;SELECT _after-&gt;&gt;&#39;order_id&#39; AS id,</span>
-<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a><span class="s2">               _before-&gt;&gt;&#39;status&#39; AS old_status,</span>
-<a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a><span class="s2">               _after-&gt;&gt;&#39;status&#39; AS new_status</span>
-<a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a><span class="s2">        FROM &#39;kafka://broker:9092/orders.cdc&#39; FORMAT DEBEZIUM</span>
+<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a>dbspa<span class="w"> </span><span class="s2">&quot;SELECT _after.order_id AS id,</span>
+<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a><span class="s2">               _before.status AS old_status,</span>
+<a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a><span class="s2">               _after.status AS new_status</span>
+<a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a><span class="s2">        FROM &#39;kafka://broker:9092/orders.cdc&#39; CHANGELOG DEBEZIUM</span>
 <a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a><span class="s2">        WHERE _op = &#39;u&#39;&quot;</span>
 </code></pre></div>
 <h2 id="windowed-aggregation">Windowed aggregation<a class="headerlink" href="#windowed-aggregation" title="Permanent link">&para;</a></h2>
@@ -1876,7 +1876,7 @@
 <a id="__codelineno-6-11" name="__codelineno-6-11" href="#__codelineno-6-11"></a>
 <a id="__codelineno-6-12" name="__codelineno-6-12" href="#__codelineno-6-12"></a><span class="c1"># Seed accumulator from BigQuery, then stream from Kafka</span>
 <a id="__codelineno-6-13" name="__codelineno-6-13" href="#__codelineno-6-13"></a>dbspa<span class="w"> </span><span class="s2">&quot;SELECT region, SUM(amount) AS total</span>
-<a id="__codelineno-6-14" name="__codelineno-6-14" href="#__codelineno-6-14"></a><span class="s2">        FROM &#39;kafka://broker/orders.cdc&#39; FORMAT DEBEZIUM</span>
+<a id="__codelineno-6-14" name="__codelineno-6-14" href="#__codelineno-6-14"></a><span class="s2">        FROM &#39;kafka://broker/orders.cdc&#39; CHANGELOG DEBEZIUM</span>
 <a id="__codelineno-6-15" name="__codelineno-6-15" href="#__codelineno-6-15"></a><span class="s2">        SEED FROM EXEC(&#39;bq query --format=json \&quot;SELECT * FROM orders_snapshot\&quot;&#39;)</span>
 <a id="__codelineno-6-16" name="__codelineno-6-16" href="#__codelineno-6-16"></a><span class="s2">        GROUP BY region&quot;</span>
 <a id="__codelineno-6-17" name="__codelineno-6-17" href="#__codelineno-6-17"></a>
@@ -1897,7 +1897,7 @@
 <a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="s2">        FROM &#39;kafka://broker/events&#39; e</span>
 <a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="s2">        JOIN (</span>
 <a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="s2">            SELECT region, SUM(amount) AS revenue</span>
-<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="s2">            FROM &#39;kafka://broker/orders.cdc&#39; FORMAT DEBEZIUM</span>
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="s2">            FROM &#39;kafka://broker/orders.cdc&#39; CHANGELOG DEBEZIUM</span>
 <a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="s2">            GROUP BY region</span>
 <a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a><span class="s2">        ) r ON e.region = r.region&quot;</span>
 </code></pre></div>
@@ -1906,7 +1906,7 @@
 <p>Use a Kafka-based subquery as a derived table with outer filtering:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="c1"># Live order status counts, filtered for statuses with &gt; 100 orders</span>
 <a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>dbspa<span class="w"> </span><span class="s2">&quot;SELECT * FROM (SELECT status, COUNT(*) AS cnt</span>
-<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="s2">                        FROM &#39;kafka://broker/orders.cdc&#39; FORMAT DEBEZIUM</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="s2">                        FROM &#39;kafka://broker/orders.cdc&#39; CHANGELOG DEBEZIUM</span>
 <a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="s2">                        GROUP BY status) t</span>
 <a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="s2">        WHERE cnt &gt; 100&quot;</span>
 </code></pre></div>
@@ -1918,7 +1918,7 @@
 <a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="s2">        FROM &#39;/data/customers.parquet&#39; c</span>
 <a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="s2">        JOIN (</span>
 <a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="s2">            SELECT customer_id, COUNT(*) AS order_count</span>
-<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="s2">            FROM &#39;kafka://broker/orders.cdc&#39; FORMAT DEBEZIUM</span>
+<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="s2">            FROM &#39;kafka://broker/orders.cdc&#39; CHANGELOG DEBEZIUM</span>
 <a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a><span class="s2">            GROUP BY customer_id</span>
 <a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a><span class="s2">        ) r ON c.id = r.customer_id&quot;</span>
 </code></pre></div>
@@ -1937,9 +1937,9 @@
 <p>Stream-stream joins auto-enable spill-to-disk to prevent OOM.</p>
 <h2 id="deduplication">Deduplication<a class="headerlink" href="#deduplication" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="c1"># Deduplicate by order_id within a 10-minute window</span>
-<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>dbspa<span class="w"> </span><span class="s2">&quot;SELECT _after-&gt;&gt;&#39;order_id&#39; AS id, _after-&gt;&gt;&#39;status&#39; AS status</span>
-<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="s2">        FROM &#39;kafka://broker/orders.cdc&#39; FORMAT DEBEZIUM</span>
-<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="s2">        DEDUPLICATE BY _after-&gt;&gt;&#39;order_id&#39; WITHIN &#39;10 minutes&#39;&quot;</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>dbspa<span class="w"> </span><span class="s2">&quot;SELECT _after.order_id AS id, _after.status AS status</span>
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="s2">        FROM &#39;kafka://broker/orders.cdc&#39; CHANGELOG DEBEZIUM</span>
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="s2">        DEDUPLICATE BY _after.order_id WITHIN &#39;10 minutes&#39;&quot;</span>
 <a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a>
 <a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a><span class="c1"># With custom cache capacity</span>
 <a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a>dbspa<span class="w"> </span><span class="s2">&quot;SELECT *</span>
@@ -1949,7 +1949,7 @@
 <h2 id="seeding-from-a-file">Seeding from a file<a class="headerlink" href="#seeding-from-a-file" title="Permanent link">&para;</a></h2>
 <p>Bootstrap aggregation state from a snapshot before streaming:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>dbspa<span class="w"> </span><span class="s2">&quot;SELECT region, COUNT(*) AS orders</span>
-<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="s2">        FROM &#39;kafka://broker/orders.cdc&#39; FORMAT DEBEZIUM</span>
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="s2">        FROM &#39;kafka://broker/orders.cdc&#39; CHANGELOG DEBEZIUM</span>
 <a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="s2">        SEED FROM &#39;/data/orders-snapshot.parquet&#39;</span>
 <a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="s2">        GROUP BY region&quot;</span>
 </code></pre></div>
@@ -1957,7 +1957,7 @@
 <p>Use EXEC to pull pre-aggregated state from a data warehouse, then continue with live CDC:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="c1"># Seed from BigQuery, continue from Kafka CDC</span>
 <a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a>dbspa<span class="w"> </span><span class="s2">&quot;SELECT region, SUM(amount) AS total</span>
-<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="s2">        FROM &#39;kafka://broker/orders.cdc?offset=2026-04-01&#39; FORMAT DEBEZIUM</span>
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="s2">        FROM &#39;kafka://broker/orders.cdc?offset=2026-04-01&#39; CHANGELOG DEBEZIUM</span>
 <a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="s2">        SEED FROM EXEC(&#39;bq query --format=json \&quot;SELECT region, SUM(amount) AS total FROM orders WHERE ts &lt; &#39;&#39;2026-04-01&#39;&#39; GROUP BY region\&quot;&#39;)</span>
 <a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a><span class="s2">        GROUP BY region&quot;</span>
 </code></pre></div>
@@ -1966,7 +1966,7 @@
 <p>Survive restarts without replaying from the beginning:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>dbspa<span class="w"> </span>--stateful<span class="w"> </span><span class="se">\</span>
 <a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="w">  </span><span class="s2">&quot;SELECT region, COUNT(*)</span>
-<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="s2">   FROM &#39;kafka://broker/orders.cdc&#39; FORMAT DEBEZIUM</span>
+<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="s2">   FROM &#39;kafka://broker/orders.cdc&#39; CHANGELOG DEBEZIUM</span>
 <a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="s2">   GROUP BY region&quot;</span>
 <a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a>
 <a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a><span class="c1"># Inspect checkpoint state</span>
@@ -1984,8 +1984,8 @@
 <a id="__codelineno-15-7" name="__codelineno-15-7" href="#__codelineno-15-7"></a><span class="c1"># Avro from Kafka with schema registry</span>
 <a id="__codelineno-15-8" name="__codelineno-15-8" href="#__codelineno-15-8"></a>dbspa<span class="w"> </span><span class="s2">&quot;SELECT * FROM &#39;kafka://broker/events?registry=http://registry:8081&#39; FORMAT AVRO&quot;</span>
 <a id="__codelineno-15-9" name="__codelineno-15-9" href="#__codelineno-15-9"></a>
-<a id="__codelineno-15-10" name="__codelineno-15-10" href="#__codelineno-15-10"></a><span class="c1"># Avro-encoded Debezium CDC (replaces deprecated FORMAT DEBEZIUM_AVRO)</span>
-<a id="__codelineno-15-11" name="__codelineno-15-11" href="#__codelineno-15-11"></a>dbspa<span class="w"> </span><span class="s2">&quot;SELECT * FROM &#39;kafka://broker/orders.cdc?registry=http://registry:8081&#39; FORMAT AVRO DEBEZIUM&quot;</span>
+<a id="__codelineno-15-10" name="__codelineno-15-10" href="#__codelineno-15-10"></a><span class="c1"># Avro-encoded Debezium CDC</span>
+<a id="__codelineno-15-11" name="__codelineno-15-11" href="#__codelineno-15-11"></a>dbspa<span class="w"> </span><span class="s2">&quot;SELECT * FROM &#39;kafka://broker/orders.cdc?registry=http://registry:8081&#39; FORMAT AVRO CHANGELOG DEBEZIUM&quot;</span>
 <a id="__codelineno-15-12" name="__codelineno-15-12" href="#__codelineno-15-12"></a>
 <a id="__codelineno-15-13" name="__codelineno-15-13" href="#__codelineno-15-13"></a><span class="c1"># Protobuf with typed messages</span>
 <a id="__codelineno-15-14" name="__codelineno-15-14" href="#__codelineno-15-14"></a>cat<span class="w"> </span>data.pb<span class="w"> </span><span class="p">|</span><span class="w"> </span>dbspa<span class="w"> </span><span class="s2">&quot;SELECT * FORMAT PROTOBUF(message=&#39;Order&#39;)&quot;</span>
@@ -1994,15 +1994,15 @@
 <a id="__codelineno-15-17" name="__codelineno-15-17" href="#__codelineno-15-17"></a>dbspa<span class="w"> </span>-i<span class="w"> </span>users.parquet<span class="w"> </span><span class="s2">&quot;SELECT * WHERE country = &#39;US&#39; FORMAT PARQUET&quot;</span>
 </code></pre></div>
 <h2 id="dbspa-changelog-piping">DBSPA changelog piping<a class="headerlink" href="#dbspa-changelog-piping" title="Permanent link">&para;</a></h2>
-<p>Compose DBSPA instances by piping one changelog into another using <code>FORMAT DBSPA</code>:</p>
+<p>Compose DBSPA instances by piping one changelog into another using <code>CHANGELOG DBSPA</code>:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="c1"># Instance 1: aggregate orders by status, emit changelog</span>
 <a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a>dbspa<span class="w"> </span><span class="s2">&quot;SELECT status, COUNT(*) AS cnt</span>
 <a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a><span class="s2">        FROM &#39;kafka://broker/orders&#39; GROUP BY status&quot;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span><span class="se">\</span>
 <a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a>
 <a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a><span class="c1"># Instance 2: consume changelog, filter for high-count statuses</span>
-<a id="__codelineno-16-6" name="__codelineno-16-6" href="#__codelineno-16-6"></a>dbspa<span class="w"> </span><span class="s2">&quot;SELECT * FROM stdin FORMAT DBSPA WHERE cnt &gt; 100&quot;</span>
+<a id="__codelineno-16-6" name="__codelineno-16-6" href="#__codelineno-16-6"></a>dbspa<span class="w"> </span><span class="s2">&quot;SELECT * FROM stdin CHANGELOG DBSPA WHERE cnt &gt; 100&quot;</span>
 </code></pre></div>
-<p>The <code>FORMAT DBSPA</code> envelope reads the <code>weight</code> field and unwraps the <code>data</code> object from the Feldera weighted format, preserving retraction/insertion semantics across the pipe.</p>
+<p>The <code>CHANGELOG DBSPA</code> envelope reads the <code>weight</code> field and unwraps the <code>data</code> object from the Feldera weighted format, preserving retraction/insertion semantics across the pipe.</p>
 <h2 id="output-to-sqlite">Output to SQLite<a class="headerlink" href="#output-to-sqlite" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="c1"># Accumulating query: result table is UPSERTed</span>
 <a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a>dbspa<span class="w"> </span>--state<span class="w"> </span>metrics.db<span class="w"> </span><span class="se">\</span>

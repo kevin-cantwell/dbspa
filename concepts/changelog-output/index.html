@@ -1555,11 +1555,11 @@
 <a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>dbspa<span class="w"> </span><span class="s2">&quot;SELECT status, COUNT(*) FROM &#39;kafka://broker/orders&#39; GROUP BY status&quot;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span><span class="se">\</span>
 <a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>
 <a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="c1"># Instance 2: consume the changelog, apply further filtering</span>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>dbspa<span class="w"> </span><span class="s2">&quot;SELECT * FROM stdin FORMAT DBSPA WHERE status = &#39;pending&#39;&quot;</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>dbspa<span class="w"> </span><span class="s2">&quot;SELECT * FROM stdin CHANGELOG DBSPA WHERE status = &#39;pending&#39;&quot;</span>
 </code></pre></div>
 <p>The <code>FORMAT DBSPA</code> envelope reads the <code>weight</code> field from the Feldera weighted format and unwraps the <code>data</code> object, instead of treating every record as an insert. This means retractions flow through correctly -- when Instance 1 retracts an old count and inserts a new one, Instance 2 sees both the retraction and insertion, keeping its own state consistent.</p>
 <p>Without <code>FORMAT DBSPA</code>, the downstream instance would treat every line (including retractions) as a plain insert with weight=+1, which would produce incorrect results.</p>
-<p>See <a href="../../reference/formats/#dbspa-changelog">FORMAT DBSPA</a> for the full envelope reference.</p>
+<p>See <a href="../../reference/formats/#dbspa-changelog">CHANGELOG DBSPA</a> for the full envelope reference.</p>
 <h2 id="non-accumulating-queries">Non-accumulating queries<a class="headerlink" href="#non-accumulating-queries" title="Permanent link">&para;</a></h2>
 <p>For non-accumulating queries (no <code>GROUP BY</code>), every line is a plain insertion. The weight envelope is omitted for brevity — the output is plain NDJSON:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="p">{</span><span class="nt">&quot;name&quot;</span><span class="p">:</span><span class="s2">&quot;alice&quot;</span><span class="p">,</span><span class="nt">&quot;age&quot;</span><span class="p">:</span><span class="mi">30</span><span class="p">}</span>

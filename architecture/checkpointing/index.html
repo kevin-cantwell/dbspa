@@ -1540,7 +1540,7 @@
 <p>Checkpointing allows DBSPA to survive restarts without replaying the entire stream from the beginning.</p>
 <h2 id="enabling-checkpoints">Enabling checkpoints<a class="headerlink" href="#enabling-checkpoints" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>dbspa<span class="w"> </span>--stateful<span class="w"> </span><span class="s2">&quot;SELECT region, COUNT(*)</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="s2">                    FROM &#39;kafka://broker/orders.cdc&#39; FORMAT DEBEZIUM</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="s2">                    FROM &#39;kafka://broker/orders.cdc&#39; CHANGELOG DEBEZIUM</span>
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="s2">                    GROUP BY region&quot;</span>
 </code></pre></div>
 <h2 id="what-is-saved">What is saved<a class="headerlink" href="#what-is-saved" title="Permanent link">&para;</a></h2>

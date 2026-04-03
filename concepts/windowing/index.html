@@ -1579,7 +1579,7 @@
 <h2 id="non-windowed-aggregation">Non-windowed aggregation<a class="headerlink" href="#non-windowed-aggregation" title="Permanent link">&para;</a></h2>
 <p>Queries without <code>WINDOW</code> aggregate over the entire stream (running/cumulative totals):</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="k">SELECT</span><span class="w"> </span><span class="n">region</span><span class="p">,</span><span class="w"> </span><span class="k">COUNT</span><span class="p">(</span><span class="o">*</span><span class="p">)</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">orders</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="k">FROM</span><span class="w"> </span><span class="s1">&#39;kafka://broker/orders.cdc&#39;</span><span class="w"> </span><span class="n">FORMAT</span><span class="w"> </span><span class="n">DEBEZIUM</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="k">FROM</span><span class="w"> </span><span class="s1">&#39;kafka://broker/orders.cdc&#39;</span><span class="w"> </span><span class="n">CHANGELOG</span><span class="w"> </span><span class="n">DEBEZIUM</span>
 <a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="k">GROUP</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">region</span>
 </code></pre></div>
 <p>Each input record that changes a group's result triggers an output diff immediately. There are no window boundaries — the aggregation is unbounded.</p>
