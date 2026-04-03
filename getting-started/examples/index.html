@@ -1785,10 +1785,10 @@
 <a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>
 <a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="c1"># Filter only updates — _before/_after virtuals let you compare old and new values</span>
 <a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a>dbspa<span class="w"> </span><span class="s2">&quot;SELECT order_id,</span>
-<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a><span class="s2">               _before.status AS old_status,</span>
-<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a><span class="s2">               _after.status AS new_status</span>
+<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a><span class="s2">               </span><span class="nv">$before</span><span class="s2">.status AS old_status,</span>
+<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a><span class="s2">               </span><span class="nv">$after</span><span class="s2">.status AS new_status</span>
 <a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a><span class="s2">        FROM &#39;kafka://broker:9092/orders.cdc&#39; CHANGELOG DEBEZIUM</span>
-<a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a><span class="s2">        WHERE _op = &#39;u&#39;&quot;</span>
+<a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a><span class="s2">        WHERE </span><span class="nv">$op</span><span class="s2"> = &#39;u&#39;&quot;</span>
 </code></pre></div>
 <h2 id="windowed-aggregation">Windowed aggregation<a class="headerlink" href="#windowed-aggregation" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1"># Tumbling window: per-minute request counts</span>

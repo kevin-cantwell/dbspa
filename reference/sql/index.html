@@ -2459,7 +2459,7 @@
 </tbody>
 </table>
 <h3 id="debezium-virtual-columns">Debezium virtual columns<a class="headerlink" href="#debezium-virtual-columns" title="Permanent link">&para;</a></h3>
-<p>When <code>FORMAT DEBEZIUM</code> is specified:</p>
+<p>When <code>CHANGELOG DEBEZIUM</code> is specified:</p>
 <table>
 <thead>
 <tr>
@@ -2470,37 +2470,37 @@
 </thead>
 <tbody>
 <tr>
-<td><code>_op</code></td>
+<td><code>$op</code></td>
 <td>TEXT</td>
 <td><code>c</code>, <code>u</code>, <code>d</code>, <code>r</code></td>
 </tr>
 <tr>
-<td><code>_before</code></td>
+<td><code>$before</code></td>
 <td>JSON</td>
 <td>Row state before the change</td>
 </tr>
 <tr>
-<td><code>_after</code></td>
+<td><code>$after</code></td>
 <td>JSON</td>
 <td>Row state after the change</td>
 </tr>
 <tr>
-<td><code>_table</code></td>
+<td><code>$table</code></td>
 <td>TEXT</td>
 <td>Source table name</td>
 </tr>
 <tr>
-<td><code>_db</code></td>
+<td><code>$db</code></td>
 <td>TEXT</td>
 <td>Source database name</td>
 </tr>
 <tr>
-<td><code>_ts</code></td>
+<td><code>$ts</code></td>
 <td>TIMESTAMP</td>
 <td>Source database transaction timestamp</td>
 </tr>
 <tr>
-<td><code>_source</code></td>
+<td><code>$source</code></td>
 <td>JSON</td>
 <td>Full Debezium source block</td>
 </tr>

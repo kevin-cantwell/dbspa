@@ -1841,7 +1841,7 @@
 <a id="__codelineno-2-30" name="__codelineno-2-30" href="#__codelineno-2-30"></a>go<span class="w"> </span>tool<span class="w"> </span>pprof<span class="w"> </span>prof.out
 <a id="__codelineno-2-31" name="__codelineno-2-31" href="#__codelineno-2-31"></a>
 <a id="__codelineno-2-32" name="__codelineno-2-32" href="#__codelineno-2-32"></a><span class="c1"># Debezium Avro with schema registry</span>
-<a id="__codelineno-2-33" name="__codelineno-2-33" href="#__codelineno-2-33"></a>dbspa<span class="w"> </span><span class="s2">&quot;SELECT _op, customer_id, total</span>
+<a id="__codelineno-2-33" name="__codelineno-2-33" href="#__codelineno-2-33"></a>dbspa<span class="w"> </span><span class="s2">&quot;SELECT </span><span class="nv">$op</span><span class="s2">, customer_id, total</span>
 <a id="__codelineno-2-34" name="__codelineno-2-34" href="#__codelineno-2-34"></a><span class="s2">        FROM &#39;kafka://broker/orders.cdc?registry=http://schema-registry:8081&#39;</span>
 <a id="__codelineno-2-35" name="__codelineno-2-35" href="#__codelineno-2-35"></a><span class="s2">        FORMAT AVRO CHANGELOG DEBEZIUM&quot;</span>
 </code></pre></div>
@@ -1951,14 +1951,14 @@
 <a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a>  after       JSON        {order_id: INT, status: TEXT, region: TEXT, total: FLOAT, ...}
 <a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a>  source      JSON        {db: TEXT, table: TEXT, ts_ms: BIGINT, lsn: TEXT, ...}
 <a id="__codelineno-6-11" name="__codelineno-6-11" href="#__codelineno-6-11"></a>
-<a id="__codelineno-6-12" name="__codelineno-6-12" href="#__codelineno-6-12"></a>With FORMAT DEBEZIUM, virtual columns:
-<a id="__codelineno-6-13" name="__codelineno-6-13" href="#__codelineno-6-13"></a>  _op         TEXT
-<a id="__codelineno-6-14" name="__codelineno-6-14" href="#__codelineno-6-14"></a>  _before     JSON
-<a id="__codelineno-6-15" name="__codelineno-6-15" href="#__codelineno-6-15"></a>  _after      JSON
-<a id="__codelineno-6-16" name="__codelineno-6-16" href="#__codelineno-6-16"></a>  _table      TEXT
-<a id="__codelineno-6-17" name="__codelineno-6-17" href="#__codelineno-6-17"></a>  _db         TEXT
-<a id="__codelineno-6-18" name="__codelineno-6-18" href="#__codelineno-6-18"></a>  _ts         TIMESTAMP
-<a id="__codelineno-6-19" name="__codelineno-6-19" href="#__codelineno-6-19"></a>  _source     JSON
+<a id="__codelineno-6-12" name="__codelineno-6-12" href="#__codelineno-6-12"></a>With CHANGELOG DEBEZIUM, virtual columns:
+<a id="__codelineno-6-13" name="__codelineno-6-13" href="#__codelineno-6-13"></a>  $op         TEXT
+<a id="__codelineno-6-14" name="__codelineno-6-14" href="#__codelineno-6-14"></a>  $before     JSON
+<a id="__codelineno-6-15" name="__codelineno-6-15" href="#__codelineno-6-15"></a>  $after      JSON
+<a id="__codelineno-6-16" name="__codelineno-6-16" href="#__codelineno-6-16"></a>  $table      TEXT
+<a id="__codelineno-6-17" name="__codelineno-6-17" href="#__codelineno-6-17"></a>  $db         TEXT
+<a id="__codelineno-6-18" name="__codelineno-6-18" href="#__codelineno-6-18"></a>  $ts         TIMESTAMP
+<a id="__codelineno-6-19" name="__codelineno-6-19" href="#__codelineno-6-19"></a>  $source     JSON
 </code></pre></div>
 <h2 id="state">state<a class="headerlink" href="#state" title="Permanent link">&para;</a></h2>
 <p>Manage checkpoint state.</p>

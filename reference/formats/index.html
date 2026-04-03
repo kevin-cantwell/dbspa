@@ -1684,10 +1684,10 @@
 </tr>
 </tbody>
 </table>
-<p>When a Debezium envelope is specified, <a href="../sql/#debezium-virtual-columns">virtual columns</a> (<code>_op</code>, <code>_before</code>, <code>_after</code>, <code>_table</code>, <code>_db</code>, <code>_ts</code>, <code>_source</code>) are available.</p>
+<p>When a Debezium envelope is specified, <a href="../sql/#debezium-virtual-columns">virtual columns</a> (<code>$op</code>, <code>$before</code>, <code>$after</code>, <code>$table</code>, <code>$db</code>, <code>$ts</code>, <code>$source</code>) are available.</p>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
-<p>If <code>_before</code> is NULL on an update (common without <code>REPLICA IDENTITY FULL</code>), the retraction is skipped. DBSPA logs a warning on the first occurrence. Accumulators may drift over time without full replica identity.</p>
+<p>If <code>$before</code> is NULL on an update (common without <code>REPLICA IDENTITY FULL</code>), the retraction is skipped. DBSPA logs a warning on the first occurrence. Accumulators may drift over time without full replica identity.</p>
 </div>
 <p><strong>Avro-encoded Debezium</strong> (<code>FORMAT AVRO CHANGELOG DEBEZIUM</code>) combines the CDC semantics with the compact binary encoding of Avro. Debezium Avro messages use the Confluent wire format and require a schema registry:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="k">FROM</span><span class="w"> </span><span class="s1">&#39;kafka://broker/orders.cdc?registry=http://schema-registry:8081&#39;</span><span class="w"> </span><span class="n">FORMAT</span><span class="w"> </span><span class="n">AVRO</span><span class="w"> </span><span class="n">CHANGELOG</span><span class="w"> </span><span class="n">DEBEZIUM</span>
