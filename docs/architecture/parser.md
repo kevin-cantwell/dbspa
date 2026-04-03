@@ -91,13 +91,13 @@ GROUP BY accepts expressions or integer ordinals (1-indexed, referencing the SEL
 
 ```sql
 -- Valid:
-GROUP BY _after->>'region'
+GROUP BY _after.region
 GROUP BY 1, 2
 
 -- Invalid (alias not allowed in GROUP BY):
-SELECT _after->>'region' AS region ... GROUP BY region
+SELECT _after.region AS region ... GROUP BY region
 -- Use instead:
-SELECT _after->>'region' AS region ... GROUP BY 1
+SELECT _after.region AS region ... GROUP BY 1
 ```
 
 ORDER BY accepts expressions, ordinals, or aliases.

@@ -74,9 +74,9 @@ dbspa "SELECT * FROM 'kafka://localhost:9092/events'"
 With Debezium CDC:
 
 ```bash
-dbspa "SELECT _after->>'status' AS status, COUNT(*) AS orders
-        FROM 'kafka://broker:9092/orders.cdc' FORMAT DEBEZIUM
-        GROUP BY _after->>'status'"
+dbspa "SELECT _after.status AS status, COUNT(*) AS orders
+        FROM 'kafka://broker:9092/orders.cdc' CHANGELOG DEBEZIUM
+        GROUP BY _after.status"
 ```
 
 ## Save state to SQLite
@@ -86,7 +86,7 @@ Write the current aggregation result to a SQLite file that other processes can r
 ```bash
 dbspa --state orders.db \
   "SELECT region, COUNT(*) AS cnt
-   FROM 'kafka://broker/orders.cdc' FORMAT DEBEZIUM
+   FROM 'kafka://broker/orders.cdc' CHANGELOG DEBEZIUM
    GROUP BY region"
 ```
 
@@ -103,7 +103,7 @@ Run a query as an HTTP sidecar:
 ```bash
 dbspa serve --port 8080 \
   "SELECT region, COUNT(*) AS orders
-   FROM 'kafka://broker/orders.cdc' FORMAT DEBEZIUM
+   FROM 'kafka://broker/orders.cdc' CHANGELOG DEBEZIUM
    GROUP BY region"
 ```
 

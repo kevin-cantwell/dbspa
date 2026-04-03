@@ -11,9 +11,9 @@ tail -f /var/log/api.json | dbspa "SELECT endpoint, status_code, latency_ms
 kubectl logs my-pod -f | dbspa "SELECT message WHERE level = 'ERROR'"
 
 # JSON path extraction
-cat events.ndjson | dbspa "SELECT payload->'user'->>'email' AS email,
-                                    payload->'user'->>'name' AS name
-                             WHERE payload->'user'->>'role' = 'admin'"
+cat events.ndjson | dbspa "SELECT payload.user.email AS email,
+                                    payload.user.name AS name
+                             WHERE payload.user.role = 'admin'"
 ```
 
 ## Aggregation
@@ -45,21 +45,21 @@ cat orders.ndjson | dbspa "SELECT status, COUNT(*) AS cnt
 
 ```bash
 # Live order counts from a CDC stream
-dbspa "SELECT _after->>'status' AS status, COUNT(*) AS orders
-        FROM 'kafka://broker:9092/orders.cdc' FORMAT DEBEZIUM
-        GROUP BY _after->>'status'"
+dbspa "SELECT _after.status AS status, COUNT(*) AS orders
+        FROM 'kafka://broker:9092/orders.cdc' CHANGELOG DEBEZIUM
+        GROUP BY _after.status"
 
 # Revenue by region — updates correctly when orders change status
-dbspa "SELECT _after->>'region' AS region,
-               SUM((_after->>'total')::float) AS revenue
-        FROM 'kafka://broker:9092/orders.cdc' FORMAT DEBEZIUM
-        GROUP BY _after->>'region'"
+dbspa "SELECT _after.region AS region,
+               SUM((_after.total)::float) AS revenue
+        FROM 'kafka://broker:9092/orders.cdc' CHANGELOG DEBEZIUM
+        GROUP BY _after.region"
 
 # Filter only updates
-dbspa "SELECT _after->>'order_id' AS id,
-               _before->>'status' AS old_status,
-               _after->>'status' AS new_status
-        FROM 'kafka://broker:9092/orders.cdc' FORMAT DEBEZIUM
+dbspa "SELECT _after.order_id AS id,
+               _before.status AS old_status,
+               _after.status AS new_status
+        FROM 'kafka://broker:9092/orders.cdc' CHANGELOG DEBEZIUM
         WHERE _op = 'u'"
 ```
 
@@ -162,7 +162,7 @@ cat events.json | dbspa \
 
 # Seed accumulator from BigQuery, then stream from Kafka
 dbspa "SELECT region, SUM(amount) AS total
-        FROM 'kafka://broker/orders.cdc' FORMAT DEBEZIUM
+        FROM 'kafka://broker/orders.cdc' CHANGELOG DEBEZIUM
         SEED FROM EXEC('bq query --format=json \"SELECT * FROM orders_snapshot\"')
         GROUP BY region"
 
@@ -187,7 +187,7 @@ dbspa "SELECT e.user_id, r.revenue
         FROM 'kafka://broker/events' e
         JOIN (
             SELECT region, SUM(amount) AS revenue
-            FROM 'kafka://broker/orders.cdc' FORMAT DEBEZIUM
+            FROM 'kafka://broker/orders.cdc' CHANGELOG DEBEZIUM
             GROUP BY region
         ) r ON e.region = r.region"
 ```
@@ -201,7 +201,7 @@ Use a Kafka-based subquery as a derived table with outer filtering:
 ```bash
 # Live order status counts, filtered for statuses with > 100 orders
 dbspa "SELECT * FROM (SELECT status, COUNT(*) AS cnt
-                        FROM 'kafka://broker/orders.cdc' FORMAT DEBEZIUM
+                        FROM 'kafka://broker/orders.cdc' CHANGELOG DEBEZIUM
                         GROUP BY status) t
         WHERE cnt > 100"
 ```
@@ -218,7 +218,7 @@ dbspa "SELECT c.name, c.tier, r.order_count
         FROM '/data/customers.parquet' c
         JOIN (
             SELECT customer_id, COUNT(*) AS order_count
-            FROM 'kafka://broker/orders.cdc' FORMAT DEBEZIUM
+            FROM 'kafka://broker/orders.cdc' CHANGELOG DEBEZIUM
             GROUP BY customer_id
         ) r ON c.id = r.customer_id"
 ```
@@ -245,9 +245,9 @@ Stream-stream joins auto-enable spill-to-disk to prevent OOM.
 
 ```bash
 # Deduplicate by order_id within a 10-minute window
-dbspa "SELECT _after->>'order_id' AS id, _after->>'status' AS status
-        FROM 'kafka://broker/orders.cdc' FORMAT DEBEZIUM
-        DEDUPLICATE BY _after->>'order_id' WITHIN '10 minutes'"
+dbspa "SELECT _after.order_id AS id, _after.status AS status
+        FROM 'kafka://broker/orders.cdc' CHANGELOG DEBEZIUM
+        DEDUPLICATE BY _after.order_id WITHIN '10 minutes'"
 
 # With custom cache capacity
 dbspa "SELECT *
@@ -261,7 +261,7 @@ Bootstrap aggregation state from a snapshot before streaming:
 
 ```bash
 dbspa "SELECT region, COUNT(*) AS orders
-        FROM 'kafka://broker/orders.cdc' FORMAT DEBEZIUM
+        FROM 'kafka://broker/orders.cdc' CHANGELOG DEBEZIUM
         SEED FROM '/data/orders-snapshot.parquet'
         GROUP BY region"
 ```
@@ -273,7 +273,7 @@ Use EXEC to pull pre-aggregated state from a data warehouse, then continue with 
 ```bash
 # Seed from BigQuery, continue from Kafka CDC
 dbspa "SELECT region, SUM(amount) AS total
-        FROM 'kafka://broker/orders.cdc?offset=2026-04-01' FORMAT DEBEZIUM
+        FROM 'kafka://broker/orders.cdc?offset=2026-04-01' CHANGELOG DEBEZIUM
         SEED FROM EXEC('bq query --format=json \"SELECT region, SUM(amount) AS total FROM orders WHERE ts < ''2026-04-01'' GROUP BY region\"')
         GROUP BY region"
 ```
@@ -287,7 +287,7 @@ Survive restarts without replaying from the beginning:
 ```bash
 dbspa --stateful \
   "SELECT region, COUNT(*)
-   FROM 'kafka://broker/orders.cdc' FORMAT DEBEZIUM
+   FROM 'kafka://broker/orders.cdc' CHANGELOG DEBEZIUM
    GROUP BY region"
 
 # Inspect checkpoint state
@@ -308,8 +308,8 @@ cat data.csv | dbspa "SELECT * FORMAT CSV(delimiter='|', header=true)"
 # Avro from Kafka with schema registry
 dbspa "SELECT * FROM 'kafka://broker/events?registry=http://registry:8081' FORMAT AVRO"
 
-# Avro-encoded Debezium CDC (replaces deprecated FORMAT DEBEZIUM_AVRO)
-dbspa "SELECT * FROM 'kafka://broker/orders.cdc?registry=http://registry:8081' FORMAT AVRO DEBEZIUM"
+# Avro-encoded Debezium CDC
+dbspa "SELECT * FROM 'kafka://broker/orders.cdc?registry=http://registry:8081' FORMAT AVRO CHANGELOG DEBEZIUM"
 
 # Protobuf with typed messages
 cat data.pb | dbspa "SELECT * FORMAT PROTOBUF(message='Order')"
@@ -320,7 +320,7 @@ dbspa -i users.parquet "SELECT * WHERE country = 'US' FORMAT PARQUET"
 
 ## DBSPA changelog piping
 
-Compose DBSPA instances by piping one changelog into another using `FORMAT DBSPA`:
+Compose DBSPA instances by piping one changelog into another using `CHANGELOG DBSPA`:
 
 ```bash
 # Instance 1: aggregate orders by status, emit changelog
@@ -328,10 +328,10 @@ dbspa "SELECT status, COUNT(*) AS cnt
         FROM 'kafka://broker/orders' GROUP BY status" | \
 
 # Instance 2: consume changelog, filter for high-count statuses
-dbspa "SELECT * FROM stdin FORMAT DBSPA WHERE cnt > 100"
+dbspa "SELECT * FROM stdin CHANGELOG DBSPA WHERE cnt > 100"
 ```
 
-The `FORMAT DBSPA` envelope reads the `weight` field and unwraps the `data` object from the Feldera weighted format, preserving retraction/insertion semantics across the pipe.
+The `CHANGELOG DBSPA` envelope reads the `weight` field and unwraps the `data` object from the Feldera weighted format, preserving retraction/insertion semantics across the pipe.
 
 ## Output to SQLite
 

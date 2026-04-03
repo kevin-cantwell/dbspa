@@ -67,14 +67,14 @@ DBSPA's changelog output can be consumed by another DBSPA instance using the `FO
 dbspa "SELECT status, COUNT(*) FROM 'kafka://broker/orders' GROUP BY status" | \
 
 # Instance 2: consume the changelog, apply further filtering
-dbspa "SELECT * FROM stdin FORMAT DBSPA WHERE status = 'pending'"
+dbspa "SELECT * FROM stdin CHANGELOG DBSPA WHERE status = 'pending'"
 ```
 
 The `FORMAT DBSPA` envelope reads the `weight` field from the Feldera weighted format and unwraps the `data` object, instead of treating every record as an insert. This means retractions flow through correctly -- when Instance 1 retracts an old count and inserts a new one, Instance 2 sees both the retraction and insertion, keeping its own state consistent.
 
 Without `FORMAT DBSPA`, the downstream instance would treat every line (including retractions) as a plain insert with weight=+1, which would produce incorrect results.
 
-See [FORMAT DBSPA](../reference/formats.md#dbspa-changelog) for the full envelope reference.
+See [CHANGELOG DBSPA](../reference/formats.md#dbspa-changelog) for the full envelope reference.
 
 ## Non-accumulating queries
 

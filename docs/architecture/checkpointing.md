@@ -6,7 +6,7 @@ Checkpointing allows DBSPA to survive restarts without replaying the entire stre
 
 ```bash
 dbspa --stateful "SELECT region, COUNT(*)
-                    FROM 'kafka://broker/orders.cdc' FORMAT DEBEZIUM
+                    FROM 'kafka://broker/orders.cdc' CHANGELOG DEBEZIUM
                     GROUP BY region"
 ```
 

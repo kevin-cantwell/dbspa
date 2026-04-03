@@ -55,7 +55,7 @@ dbspa -i orders.ndjson "SELECT status, COUNT(*) GROUP BY status"
 
 # Kafka with state
 dbspa --stateful --state orders.db \
-  "SELECT region, COUNT(*) FROM 'kafka://broker/orders.cdc' FORMAT DEBEZIUM GROUP BY region"
+  "SELECT region, COUNT(*) FROM 'kafka://broker/orders.cdc' CHANGELOG DEBEZIUM GROUP BY region"
 
 # Dry run
 dbspa --dry-run "SELECT status, COUNT(*) GROUP BY status"
@@ -119,7 +119,7 @@ dbspa serve [flags] <SQL>
 ```bash
 dbspa serve --port 8080 \
   "SELECT region, COUNT(*) AS orders
-   FROM 'kafka://broker/orders.cdc' FORMAT DEBEZIUM
+   FROM 'kafka://broker/orders.cdc' CHANGELOG DEBEZIUM
    GROUP BY region"
 
 # Query it

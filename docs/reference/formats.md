@@ -116,9 +116,8 @@ Envelopes define how to interpret each record and derive [Z-set weights](../conc
 Debezium CDC envelope format. Used with Kafka sources that carry database change events.
 
 ```sql
-FORMAT JSON DEBEZIUM          -- JSON-encoded Debezium CDC
-FORMAT AVRO DEBEZIUM          -- Avro-encoded Debezium CDC
-FORMAT DEBEZIUM               -- shorthand for FORMAT JSON DEBEZIUM
+CHANGELOG DEBEZIUM            -- JSON-encoded Debezium CDC
+FORMAT AVRO CHANGELOG DEBEZIUM -- Avro-encoded Debezium CDC
 ```
 
 Debezium records have an `op` field and `before`/`after` payloads. DBSPA unwraps the envelope and derives weights from the `op` field:
@@ -136,10 +135,10 @@ When a Debezium envelope is specified, [virtual columns](sql.md#debezium-virtual
 !!! note
     If `_before` is NULL on an update (common without `REPLICA IDENTITY FULL`), the retraction is skipped. DBSPA logs a warning on the first occurrence. Accumulators may drift over time without full replica identity.
 
-**Avro-encoded Debezium** (`FORMAT AVRO DEBEZIUM`) combines the CDC semantics with the compact binary encoding of Avro. Debezium Avro messages use the Confluent wire format and require a schema registry:
+**Avro-encoded Debezium** (`FORMAT AVRO CHANGELOG DEBEZIUM`) combines the CDC semantics with the compact binary encoding of Avro. Debezium Avro messages use the Confluent wire format and require a schema registry:
 
 ```sql
-FROM 'kafka://broker/orders.cdc?registry=http://schema-registry:8081' FORMAT AVRO DEBEZIUM
+FROM 'kafka://broker/orders.cdc?registry=http://schema-registry:8081' FORMAT AVRO CHANGELOG DEBEZIUM
 ```
 
 Benefits over JSON Debezium:
@@ -148,16 +147,12 @@ Benefits over JSON Debezium:
 - **Typed before/after records** -- the Avro schema defines the field types, so there is no JSON re-parse step. Fields arrive as native integers, floats, and strings.
 - **Faster decoding** -- binary Avro decoding is cheaper than JSON parsing for large payloads.
 
-!!! note "Deprecated syntax"
-    `FORMAT DEBEZIUM_AVRO` still works but logs a deprecation warning. Use `FORMAT AVRO DEBEZIUM` instead.
-
 ### DBSPA Changelog
 
 The DBSPA envelope reads the Feldera weighted format — a JSON object with a `weight` field (integer) and a `data` field (object containing the columns). This is the native format of DBSPA's [changelog output](../concepts/changelog-output.md), aligned with [Feldera's](https://github.com/feldera/feldera) "weighted" input format for interoperability.
 
 ```sql
-FORMAT DBSPA                 -- shorthand for FORMAT JSON DBSPA
-FORMAT JSON DBSPA            -- explicit encoding + envelope
+CHANGELOG DBSPA              -- Feldera weighted format
 ```
 
 The primary use case is **composing DBSPA instances**: one instance produces a changelog, another consumes it with further transformations.
@@ -167,7 +162,7 @@ The primary use case is **composing DBSPA instances**: one instance produces a c
 dbspa "SELECT status, COUNT(*) FROM 'kafka://broker/orders' GROUP BY status" | \
 
 # Instance 2: consume the changelog and filter for pending orders
-dbspa "SELECT * FROM stdin FORMAT DBSPA WHERE status = 'pending'"
+dbspa "SELECT * FROM stdin CHANGELOG DBSPA WHERE status = 'pending'"
 ```
 
 Each record must be a JSON object with a `weight` field (integer) and a `data` field (object). Positive weights are insertions, negative weights are retractions. For example: `{"weight":1,"data":{"status":"pending","cnt":42}}`. Records without a `weight` field default to weight=+1 with the entire object treated as data.
@@ -207,7 +202,7 @@ This wire format is used by both `FORMAT AVRO` and `FORMAT AVRO DEBEZIUM`.
 
 | Source | Default format | Override with |
 |---|---|---|
-| Kafka (no registry) | NDJSON | `FORMAT CSV`, `FORMAT AVRO`, `FORMAT DEBEZIUM`, etc. |
+| Kafka (no registry) | NDJSON | `FORMAT CSV`, `FORMAT AVRO`, `CHANGELOG DEBEZIUM`, etc. |
 | Kafka (with registry) | Auto-detect via magic byte | `FORMAT AVRO`, `FORMAT PROTOBUF` |
 | stdin | NDJSON | Any `FORMAT` clause |
 | File (JOIN / --input) | Detected from extension | `FORMAT` clause |

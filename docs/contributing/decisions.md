@@ -105,7 +105,7 @@ Endpoints:
 
 ```sql
 SELECT region, COUNT(*) AS orders
-FROM 'kafka://broker/orders.cdc' FORMAT DEBEZIUM
+FROM 'kafka://broker/orders.cdc' CHANGELOG DEBEZIUM
 SEED FROM '/path/to/snapshot.parquet'
 GROUP BY region
 ```

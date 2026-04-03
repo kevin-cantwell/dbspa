@@ -193,29 +193,15 @@ The envelope specifies how to interpret each record and derive Z-set weights:
 ### Examples
 
 ```sql
-FORMAT JSON                             -- plain JSON records
-FORMAT AVRO                             -- plain Avro records
-FORMAT AVRO DEBEZIUM                    -- Avro-encoded Debezium CDC
-FORMAT JSON DEBEZIUM                    -- JSON-encoded Debezium CDC
-FORMAT DEBEZIUM                         -- shorthand: JSON + Debezium
-FORMAT DBSPA                           -- Feldera weighted format (weight + data)
-FORMAT CSV(header=true, delimiter='|')  -- CSV with options
-FORMAT AVRO(registry='http://...') DEBEZIUM  -- Avro with registry + Debezium
-FORMAT PROTOBUF(message='Order')        -- typed Protobuf
+FORMAT JSON                                      -- plain JSON records
+FORMAT AVRO                                      -- plain Avro records
+FORMAT AVRO CHANGELOG DEBEZIUM                   -- Avro-encoded Debezium CDC
+CHANGELOG DEBEZIUM                               -- JSON-encoded Debezium CDC
+CHANGELOG DBSPA                                  -- Feldera weighted format (weight + data)
+FORMAT CSV(header=true, delimiter='|')           -- CSV with options
+FORMAT AVRO(registry='http://...') CHANGELOG DEBEZIUM  -- Avro with registry + Debezium
+FORMAT PROTOBUF(message='Order')                 -- typed Protobuf
 ```
-
-### Shorthand
-
-If the first token is an envelope name (`DEBEZIUM`, `DBSPA`), JSON encoding is assumed:
-
-```sql
-FORMAT DEBEZIUM    -- equivalent to FORMAT JSON DEBEZIUM
-FORMAT DBSPA      -- equivalent to FORMAT JSON DBSPA
-```
-
-### Deprecated syntax
-
-`FORMAT DEBEZIUM_AVRO` still works but logs a deprecation warning. Use `FORMAT AVRO DEBEZIUM` instead.
 
 ### Auto-detection
 
@@ -241,7 +227,7 @@ WHERE x IS DISTINCT FROM y        -- NULL-safe inequality
 GROUP BY status
 GROUP BY region, status
 GROUP BY 1, 2                     -- ordinal references to SELECT list
-GROUP BY _after->>'region'        -- expressions
+GROUP BY _after.region            -- expressions
 ```
 
 Column aliases from SELECT are **not** valid in GROUP BY. Use the original expression or an ordinal.
@@ -310,12 +296,12 @@ Bootstraps **pre-computed accumulator state** from a file or command before stre
 
 ```sql
 -- From a file
-FROM 'kafka://broker/topic' FORMAT DEBEZIUM
+FROM 'kafka://broker/topic' CHANGELOG DEBEZIUM
 SEED FROM '/path/to/snapshot.parquet'
 GROUP BY region
 
 -- From a shell command (e.g., BigQuery via EXEC)
-FROM 'kafka://broker/orders.cdc?offset=2026-04-01' FORMAT DEBEZIUM
+FROM 'kafka://broker/orders.cdc?offset=2026-04-01' CHANGELOG DEBEZIUM
 SEED FROM EXEC('bq query --format=json "SELECT region, SUM(amount) AS total FROM orders WHERE ts < ''2026-04-01'' GROUP BY region"')
 GROUP BY region
 ```
@@ -326,7 +312,7 @@ The seed query's columns must match the outer query's **GROUP BY keys** and **ag
 
 ```sql
 SELECT region, SUM(amount) AS total, COUNT(*) AS cnt
-FROM 'kafka://broker/orders.cdc' FORMAT DEBEZIUM
+FROM 'kafka://broker/orders.cdc' CHANGELOG DEBEZIUM
 SEED FROM '/data/seed.json'
 GROUP BY region
 ```

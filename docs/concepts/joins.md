@@ -62,8 +62,8 @@ The right side is loaded from an initial snapshot and then updated via Debezium 
 
 ```sql
 SELECT o.order_id, o.total, c.name, c.tier
-FROM 'kafka://broker/orders' o FORMAT DEBEZIUM
-JOIN 'kafka://broker/customers.cdc' c FORMAT DEBEZIUM ON o.customer_id = c.id
+FROM 'kafka://broker/orders' o CHANGELOG DEBEZIUM
+JOIN 'kafka://broker/customers.cdc' c CHANGELOG DEBEZIUM ON o.customer_id = c.id
 ```
 
 !!! note
@@ -180,7 +180,7 @@ A FROM subquery can also use a Kafka source. The inner accumulating query runs c
 ```sql
 -- Filter for order statuses with more than 100 orders, updated live
 SELECT * FROM (SELECT status, COUNT(*) AS cnt
-                FROM 'kafka://broker/orders.cdc' FORMAT DEBEZIUM
+                FROM 'kafka://broker/orders.cdc' CHANGELOG DEBEZIUM
                 GROUP BY status) t
 WHERE cnt > 100
 ```
@@ -197,7 +197,7 @@ SELECT c.name, c.tier, r.order_count
 FROM '/data/customers.parquet' c
 JOIN (
     SELECT customer_id, COUNT(*) AS order_count
-    FROM 'kafka://broker/orders.cdc' FORMAT DEBEZIUM
+    FROM 'kafka://broker/orders.cdc' CHANGELOG DEBEZIUM
     GROUP BY customer_id
 ) r ON c.id = r.customer_id
 ```
@@ -235,7 +235,7 @@ SELECT e.user_id, r.revenue
 FROM 'kafka://broker/events' e
 JOIN (
     SELECT region, SUM(amount) AS revenue
-    FROM 'kafka://broker/orders.cdc' FORMAT DEBEZIUM
+    FROM 'kafka://broker/orders.cdc' CHANGELOG DEBEZIUM
     GROUP BY region
 ) r ON e.region = r.region
 ```

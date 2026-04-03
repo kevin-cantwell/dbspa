@@ -57,7 +57,7 @@ SELECT c.tier, c.region,
        SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END)
 FROM stdin e
 JOIN '/path/to/customers.parquet' c ON e.customer_id = c.id
-FORMAT DEBEZIUM
+CHANGELOG DEBEZIUM
 WHERE _op IN ('c', 'u')
 GROUP BY c.tier, c.region
 ```

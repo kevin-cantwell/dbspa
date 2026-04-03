@@ -254,7 +254,7 @@ SEED FROM does **not** replay raw records through the pipeline. Instead, it inje
 
 ```sql
 SELECT region, SUM(amount) / COUNT(*) AS avg_amount
-FROM 'kafka://broker/orders.cdc' FORMAT DEBEZIUM
+FROM 'kafka://broker/orders.cdc' CHANGELOG DEBEZIUM
 SEED FROM EXEC('bq query --format=json "SELECT region, SUM(amount) AS sum_amount, COUNT(*) AS cnt FROM orders GROUP BY region"')
 GROUP BY region
 ```

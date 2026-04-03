@@ -106,7 +106,7 @@ Queries without `WINDOW` aggregate over the entire stream (running/cumulative to
 
 ```sql
 SELECT region, COUNT(*) AS orders
-FROM 'kafka://broker/orders.cdc' FORMAT DEBEZIUM
+FROM 'kafka://broker/orders.cdc' CHANGELOG DEBEZIUM
 GROUP BY region
 ```
 
