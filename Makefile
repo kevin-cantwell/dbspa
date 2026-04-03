@@ -2,7 +2,7 @@ VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -ldflags "-X main.Version=$(VERSION)"
 BINARY := folddb
 
-.PHONY: build test test-unit test-integration test-all verify bench bench-full bench-full-kafka bench-compare lint release clean docker-up docker-down testdata grammar
+.PHONY: build test test-unit test-integration test-all verify bench bench-full bench-full-kafka bench-compare stress stress-quick lint release clean docker-up docker-down testdata grammar
 
 build:
 	go build $(LDFLAGS) -o $(BINARY) ./cmd/folddb
@@ -71,6 +71,14 @@ bench-full-kafka: build
 
 bench-compare: build
 	./bench/harness/run.sh --compare bench/harness/baseline.json
+
+stress: build
+	@echo "Running stress tests (this may take 15-30 minutes)..."
+	./stress/run.sh --output stress/results/$$(date +%Y%m%d_%H%M%S).json
+
+stress-quick: build
+	@echo "Running quick stress tests (~5 minutes)..."
+	./stress/run.sh --duration 1m --scenarios "sustained/passthrough|adversarial/high_card|adversarial/schema" --output stress/results/$$(date +%Y%m%d_%H%M%S).json
 
 clean:
 	rm -rf dist/ $(BINARY) folddb-gen
