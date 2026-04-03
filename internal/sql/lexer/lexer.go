@@ -125,7 +125,7 @@ const (
 	TokenExec
 	TokenStream
 	TokenTable
-	TokenFolddb
+	TokenDBSPA
 	TokenAvro
 	TokenJson
 	TokenNdjson
@@ -214,7 +214,7 @@ var keywords = map[string]TokenType{
 	"EXEC":                 TokenExec,
 	"STREAM":               TokenStream,
 	"TABLE":                TokenTable,
-	"DBSPA":               TokenFolddb,
+	"DBSPA":               TokenDBSPA,
 	"AVRO":                 TokenAvro,
 	"JSON":                 TokenJson,
 	"NDJSON":               TokenNdjson,
