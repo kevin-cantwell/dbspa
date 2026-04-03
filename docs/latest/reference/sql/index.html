@@ -1,0 +1,3186 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Streaming SQL with incremental aggregation">
+      
+      
+      
+        <link rel="canonical" href="https://kevin-cantwell.github.io/dbspa/docs/latest/reference/sql/">
+      
+      
+        <link rel="prev" href="../../architecture/performance/">
+      
+      
+        <link rel="next" href="../grammar/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>SQL Dialect - DBSPA</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="slate" data-md-color-primary="teal" data-md-color-accent="cyan">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#sql-dialect" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="DBSPA" class="md-header__button md-logo" aria-label="DBSPA" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            DBSPA
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              SQL Dialect
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+    
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/kevin-cantwell/dbspa" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    kevin-cantwell/dbspa
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="DBSPA" class="md-nav__button md-logo" aria-label="DBSPA" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    DBSPA
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/kevin-cantwell/dbspa" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    kevin-cantwell/dbspa
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting Started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/install/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Install
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quickstart
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/examples/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Examples
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concepts
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Concepts
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/when-to-use/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    When to Use DBSPA
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/streams-vs-tables/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Streams vs Tables
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/diff-model/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    The Z-Set Model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/changelog-output/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Changelog Output
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/windowing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Windowing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/joins/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Joins
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/error-handling/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Error Handling
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Architecture
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/parser/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SQL Parser
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/accumulators/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Accumulators
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/pipeline/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Execution Pipeline
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/checkpointing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Checkpointing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/performance/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Performance
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SQL Dialect
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SQL Dialect
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#clause-syntax" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Clause syntax
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#select" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SELECT
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#from" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        FROM
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="FROM">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#subquery-in-from" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Subquery in FROM
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#kafka-uri-parameters" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Kafka URI parameters
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#kafka-virtual-columns" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Kafka virtual columns
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#debezium-virtual-columns" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Debezium virtual columns
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#exec" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        EXEC
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="EXEC">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#mode-as-table-vs-as-stream" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Mode: AS TABLE vs AS STREAM
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#shell-execution" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Shell execution
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#security" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Security
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#format" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        FORMAT
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="FORMAT">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#encodings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Encodings
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#envelopes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Envelopes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#examples" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Examples
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#auto-detection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Auto-detection
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#where" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WHERE
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#group-by" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GROUP BY
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#having" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        HAVING
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#window" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WINDOW
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#event-time-by" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        EVENT TIME BY
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#watermark" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WATERMARK
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#emit" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        EMIT
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#seed-from" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SEED FROM
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="SEED FROM">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#column-mapping" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Column mapping
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#supported-accumulators" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Supported accumulators
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#deduplicate-by" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        DEDUPLICATE BY
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#order-by" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ORDER BY
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#limit" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        LIMIT
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#join" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        JOIN
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="JOIN">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#subquery-as-join-source" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Subquery as JOIN source
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#within-interval" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WITHIN INTERVAL
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#expressions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Expressions
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Expressions">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#operator-precedence-highest-to-lowest" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Operator precedence (highest to lowest)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#json-access" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        JSON access
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#type-cast" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Type cast
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#conditional" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Conditional
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#types" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Types
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Types">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#type-coercion" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Type coercion
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#aggregate-functions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Aggregate functions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#scalar-functions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scalar functions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#null-semantics" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        NULL semantics
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../grammar/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SQL Grammar (EBNF)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../formats/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Formats
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Contributing
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../contributing/development/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Development
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../contributing/decisions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Decisions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#clause-syntax" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Clause syntax
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#select" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SELECT
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#from" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        FROM
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="FROM">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#subquery-in-from" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Subquery in FROM
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#kafka-uri-parameters" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Kafka URI parameters
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#kafka-virtual-columns" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Kafka virtual columns
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#debezium-virtual-columns" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Debezium virtual columns
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#exec" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        EXEC
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="EXEC">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#mode-as-table-vs-as-stream" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Mode: AS TABLE vs AS STREAM
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#shell-execution" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Shell execution
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#security" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Security
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#format" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        FORMAT
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="FORMAT">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#encodings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Encodings
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#envelopes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Envelopes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#examples" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Examples
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#auto-detection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Auto-detection
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#where" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WHERE
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#group-by" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GROUP BY
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#having" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        HAVING
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#window" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WINDOW
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#event-time-by" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        EVENT TIME BY
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#watermark" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WATERMARK
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#emit" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        EMIT
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#seed-from" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SEED FROM
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="SEED FROM">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#column-mapping" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Column mapping
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#supported-accumulators" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Supported accumulators
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#deduplicate-by" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        DEDUPLICATE BY
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#order-by" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ORDER BY
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#limit" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        LIMIT
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#join" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        JOIN
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="JOIN">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#subquery-as-join-source" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Subquery as JOIN source
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#within-interval" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WITHIN INTERVAL
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#expressions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Expressions
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Expressions">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#operator-precedence-highest-to-lowest" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Operator precedence (highest to lowest)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#json-access" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        JSON access
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#type-cast" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Type cast
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#conditional" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Conditional
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#types" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Types
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Types">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#type-coercion" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Type coercion
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#aggregate-functions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Aggregate functions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#scalar-functions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scalar functions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#null-semantics" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        NULL semantics
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="sql-dialect">SQL Dialect<a class="headerlink" href="#sql-dialect" title="Permanent link">&para;</a></h1>
+<p>DBSPA's SQL is aligned with <strong>PostgreSQL</strong> — the same dialect DuckDB aligns to. Streaming extensions are DBSPA-specific.</p>
+<h2 id="clause-syntax">Clause syntax<a class="headerlink" href="#clause-syntax" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="k">SELECT</span><span class="w"> </span><span class="p">[</span><span class="k">DISTINCT</span><span class="p">]</span><span class="w"> </span><span class="n">expr</span><span class="w"> </span><span class="p">[</span><span class="k">AS</span><span class="w"> </span><span class="k">alias</span><span class="p">],</span><span class="w"> </span><span class="p">...</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="k">FROM</span><span class="w"> </span><span class="k">source</span><span class="w"> </span><span class="p">[</span><span class="n">FORMAT</span><span class="w"> </span><span class="n">format_spec</span><span class="p">]</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="p">[</span><span class="n">SEED</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">file_path</span><span class="p">]</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="p">[</span><span class="k">JOIN</span><span class="w"> </span><span class="k">source</span><span class="w"> </span><span class="k">alias</span><span class="w"> </span><span class="p">[</span><span class="n">FORMAT</span><span class="w"> </span><span class="n">format_spec</span><span class="p">]</span><span class="w"> </span><span class="k">ON</span><span class="w"> </span><span class="n">condition</span><span class="w"> </span><span class="p">[</span><span class="n">WITHIN</span><span class="w"> </span><span class="nb">INTERVAL</span><span class="w"> </span><span class="n">duration</span><span class="p">]]</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="p">[</span><span class="k">LEFT</span><span class="w"> </span><span class="k">JOIN</span><span class="w"> </span><span class="k">source</span><span class="w"> </span><span class="k">alias</span><span class="w"> </span><span class="p">[</span><span class="n">FORMAT</span><span class="w"> </span><span class="n">format_spec</span><span class="p">]</span><span class="w"> </span><span class="k">ON</span><span class="w"> </span><span class="n">condition</span><span class="w"> </span><span class="p">[</span><span class="n">WITHIN</span><span class="w"> </span><span class="nb">INTERVAL</span><span class="w"> </span><span class="n">duration</span><span class="p">]]</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="p">[</span><span class="k">WHERE</span><span class="w"> </span><span class="n">condition</span><span class="p">]</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="p">[</span><span class="k">GROUP</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">expr</span><span class="p">,</span><span class="w"> </span><span class="p">...]</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="p">[</span><span class="k">HAVING</span><span class="w"> </span><span class="n">condition</span><span class="p">]</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="p">[</span><span class="n">WINDOW</span><span class="w"> </span><span class="n">window_spec</span><span class="p">]</span>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="p">[</span><span class="n">EVENT</span><span class="w"> </span><span class="k">TIME</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">expr</span><span class="p">]</span>
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="p">[</span><span class="n">WATERMARK</span><span class="w"> </span><span class="n">duration</span><span class="p">]</span>
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="p">[</span><span class="n">EMIT</span><span class="w"> </span><span class="n">emit_spec</span><span class="p">]</span>
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a><span class="p">[</span><span class="n">DEDUPLICATE</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">expr</span><span class="w"> </span><span class="p">[</span><span class="n">WITHIN</span><span class="w"> </span><span class="n">duration</span><span class="p">]</span><span class="w"> </span><span class="p">[</span><span class="n">CAPACITY</span><span class="w"> </span><span class="n">n</span><span class="p">]]</span>
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a><span class="p">[</span><span class="k">ORDER</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">expr</span><span class="w"> </span><span class="p">[</span><span class="k">ASC</span><span class="o">|</span><span class="k">DESC</span><span class="p">],</span><span class="w"> </span><span class="p">...]</span>
+<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a><span class="p">[</span><span class="k">LIMIT</span><span class="w"> </span><span class="n">n</span><span class="p">]</span>
+</code></pre></div>
+<div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>Clause ordering is rigid. Clauses must appear in the order shown above. The parser reports a clear error for out-of-order clauses.</p>
+</div>
+<h2 id="select">SELECT<a class="headerlink" href="#select" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="k">SELECT</span><span class="w"> </span><span class="o">*</span><span class="w">                          </span><span class="c1">-- all columns</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="k">SELECT</span><span class="w"> </span><span class="n">name</span><span class="p">,</span><span class="w"> </span><span class="n">age</span><span class="w">                  </span><span class="c1">-- specific columns</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="k">SELECT</span><span class="w"> </span><span class="n">name</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">n</span><span class="p">,</span><span class="w"> </span><span class="n">age</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">a</span><span class="w">        </span><span class="c1">-- aliases</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="k">SELECT</span><span class="w"> </span><span class="k">DISTINCT</span><span class="w"> </span><span class="n">region</span><span class="w">            </span><span class="c1">-- deduplicate output rows</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="k">SELECT</span><span class="w"> </span><span class="k">COUNT</span><span class="p">(</span><span class="o">*</span><span class="p">),</span><span class="w"> </span><span class="k">SUM</span><span class="p">(</span><span class="n">total</span><span class="p">)</span><span class="w">       </span><span class="c1">-- aggregate functions (implicit single group if no GROUP BY)</span>
+</code></pre></div>
+<p><code>SELECT DISTINCT</code> on a non-accumulating query maintains an in-memory set of seen rows. For accumulating queries, <code>DISTINCT</code> is a no-op (output is already one row per group key).</p>
+<h2 id="from">FROM<a class="headerlink" href="#from" title="Permanent link">&para;</a></h2>
+<p>Specifies the data source. Optional when reading from stdin.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1">-- Kafka topic</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="k">FROM</span><span class="w"> </span><span class="s1">&#39;kafka://broker:9092/topic&#39;</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="k">FROM</span><span class="w"> </span><span class="s1">&#39;kafka://broker/topic?offset=earliest&#39;</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="k">FROM</span><span class="w"> </span><span class="s1">&#39;kafka://broker/topic?offset=2024-01-01T00:00:00Z&#39;</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="k">FROM</span><span class="w"> </span><span class="s1">&#39;kafka://broker/topic?group=my-group&amp;partition=0,1,2&#39;</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="c1">-- Kafka with authentication</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="k">FROM</span><span class="w"> </span><span class="s1">&#39;kafka://broker/topic?sasl_mechanism=PLAIN&amp;sasl_username=X&amp;sasl_password=Y&#39;</span>
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="k">FROM</span><span class="w"> </span><span class="s1">&#39;kafka://my-cluster/events&#39;</span><span class="w">    </span><span class="c1">-- resolved from ~/.dbspa/credentials</span>
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>
+<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="c1">-- stdin (implicit or explicit)</span>
+<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="k">FROM</span><span class="w"> </span><span class="s1">&#39;stdin://&#39;</span>
+<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a>
+<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a><span class="c1">-- Subquery (derived table)</span>
+<a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a><span class="k">FROM</span><span class="w"> </span><span class="p">(</span><span class="k">SELECT</span><span class="w"> </span><span class="n">status</span><span class="p">,</span><span class="w"> </span><span class="k">SUM</span><span class="p">(</span><span class="n">amount</span><span class="p">)</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">total</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="s1">&#39;/data/orders.parquet&#39;</span><span class="w"> </span><span class="k">GROUP</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">status</span><span class="p">)</span><span class="w"> </span><span class="n">t</span>
+</code></pre></div>
+<h3 id="subquery-in-from">Subquery in FROM<a class="headerlink" href="#subquery-in-from" title="Permanent link">&para;</a></h3>
+<p>A parenthesized <code>SELECT</code> statement can be used as the FROM source, producing a <strong>derived table</strong>. The inner query is executed to completion before the outer query begins. An alias is mandatory.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1">-- Pre-aggregate a file then filter in the outer query</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="k">SELECT</span><span class="w"> </span><span class="o">*</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="k">FROM</span><span class="w"> </span><span class="p">(</span><span class="k">SELECT</span><span class="w"> </span><span class="n">region</span><span class="p">,</span><span class="w"> </span><span class="k">COUNT</span><span class="p">(</span><span class="o">*</span><span class="p">)</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">cnt</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="s1">&#39;/data/events.parquet&#39;</span><span class="w"> </span><span class="k">GROUP</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">region</span><span class="p">)</span><span class="w"> </span><span class="n">stats</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="k">WHERE</span><span class="w"> </span><span class="n">cnt</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="mi">100</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="c1">-- Nested subqueries</span>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="k">SELECT</span><span class="w"> </span><span class="o">*</span>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="k">FROM</span><span class="w"> </span><span class="p">(</span><span class="k">SELECT</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="p">(</span><span class="k">SELECT</span><span class="w"> </span><span class="n">id</span><span class="p">,</span><span class="w"> </span><span class="n">name</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="s1">&#39;/data/users.ndjson&#39;</span><span class="p">)</span><span class="w"> </span><span class="n">inner_t</span><span class="p">)</span><span class="w"> </span><span class="n">outer_t</span>
+</code></pre></div>
+<p>The inner query supports the full SQL dialect: WHERE, GROUP BY, HAVING, JOIN, LIMIT, etc. FROM subqueries with Kafka sources run as <a href="../../concepts/joins/#from-streaming-subqueries">FROM Streaming Subqueries</a>, streaming Z-set deltas to the outer pipeline. For Kafka sources in JOIN subqueries, see <a href="../../concepts/joins/#streaming-subqueries-join">Streaming Subqueries (JOIN)</a>.</p>
+<h3 id="kafka-uri-parameters">Kafka URI parameters<a class="headerlink" href="#kafka-uri-parameters" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Param</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>offset</code></td>
+<td><code>latest</code></td>
+<td><code>earliest</code>, <code>latest</code>, ISO timestamp, or integer offset</td>
+</tr>
+<tr>
+<td><code>partition</code></td>
+<td>all</td>
+<td>Comma-separated partition IDs</td>
+</tr>
+<tr>
+<td><code>group</code></td>
+<td>(ephemeral)</td>
+<td>Consumer group ID</td>
+</tr>
+<tr>
+<td><code>registry</code></td>
+<td>(none)</td>
+<td>Schema registry URL for Avro/Protobuf</td>
+</tr>
+<tr>
+<td><code>sasl_mechanism</code></td>
+<td>(none)</td>
+<td><code>PLAIN</code>, <code>SCRAM-SHA-256</code>, <code>SCRAM-SHA-512</code></td>
+</tr>
+<tr>
+<td><code>sasl_username</code></td>
+<td>(none)</td>
+<td>SASL username</td>
+</tr>
+<tr>
+<td><code>sasl_password</code></td>
+<td>(none)</td>
+<td>SASL password</td>
+</tr>
+<tr>
+<td><code>tls_cert</code></td>
+<td>(none)</td>
+<td>Path to client certificate (mTLS)</td>
+</tr>
+<tr>
+<td><code>tls_key</code></td>
+<td>(none)</td>
+<td>Path to client private key (mTLS)</td>
+</tr>
+<tr>
+<td><code>tls_ca</code></td>
+<td>(none)</td>
+<td>Path to CA certificate (mTLS)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="kafka-virtual-columns">Kafka virtual columns<a class="headerlink" href="#kafka-virtual-columns" title="Permanent link">&para;</a></h3>
+<p>Every Kafka record exposes:</p>
+<table>
+<thead>
+<tr>
+<th>Column</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>_offset</code></td>
+<td>BIGINT</td>
+<td>Partition offset</td>
+</tr>
+<tr>
+<td><code>_partition</code></td>
+<td>INT</td>
+<td>Partition number</td>
+</tr>
+<tr>
+<td><code>_timestamp</code></td>
+<td>TIMESTAMP</td>
+<td>Kafka log-append timestamp</td>
+</tr>
+<tr>
+<td><code>_key</code></td>
+<td>TEXT</td>
+<td>Message key (UTF-8, or <code>b64:</code> prefixed if not valid UTF-8)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="debezium-virtual-columns">Debezium virtual columns<a class="headerlink" href="#debezium-virtual-columns" title="Permanent link">&para;</a></h3>
+<p>When <code>CHANGELOG DEBEZIUM</code> is specified:</p>
+<table>
+<thead>
+<tr>
+<th>Column</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>$op</code></td>
+<td>TEXT</td>
+<td><code>c</code>, <code>u</code>, <code>d</code>, <code>r</code></td>
+</tr>
+<tr>
+<td><code>$before</code></td>
+<td>JSON</td>
+<td>Row state before the change</td>
+</tr>
+<tr>
+<td><code>$after</code></td>
+<td>JSON</td>
+<td>Row state after the change</td>
+</tr>
+<tr>
+<td><code>$table</code></td>
+<td>TEXT</td>
+<td>Source table name</td>
+</tr>
+<tr>
+<td><code>$db</code></td>
+<td>TEXT</td>
+<td>Source database name</td>
+</tr>
+<tr>
+<td><code>$ts</code></td>
+<td>TIMESTAMP</td>
+<td>Source database transaction timestamp</td>
+</tr>
+<tr>
+<td><code>$source</code></td>
+<td>JSON</td>
+<td>Full Debezium source block</td>
+</tr>
+</tbody>
+</table>
+<h2 id="exec">EXEC<a class="headerlink" href="#exec" title="Permanent link">&para;</a></h2>
+<p>Execute a shell command and use its stdout as a data source. EXEC can appear in FROM, JOIN, and SEED FROM positions.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="c1">-- Read records from a command</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="k">FROM</span><span class="w"> </span><span class="k">EXEC</span><span class="p">(</span><span class="s1">&#39;cat /data/snapshot.json&#39;</span><span class="p">)</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="c1">-- With format and mode</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="k">FROM</span><span class="w"> </span><span class="k">EXEC</span><span class="p">(</span><span class="s1">&#39;cat data.csv&#39;</span><span class="p">)</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">FORMAT</span><span class="w"> </span><span class="n">CSV</span><span class="p">(</span><span class="n">header</span><span class="o">=</span><span class="k">true</span><span class="p">)</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="k">FROM</span><span class="w"> </span><span class="k">EXEC</span><span class="p">(</span><span class="s1">&#39;kubectl logs my-pod --output=json&#39;</span><span class="p">)</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">STREAM</span>
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>
+<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="c1">-- As a JOIN source</span>
+<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a><span class="k">JOIN</span><span class="w"> </span><span class="k">EXEC</span><span class="p">(</span><span class="s1">&#39;cat /data/users.json&#39;</span><span class="p">)</span><span class="w"> </span><span class="n">u</span><span class="w"> </span><span class="k">ON</span><span class="w"> </span><span class="n">e</span><span class="p">.</span><span class="n">user_id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">u</span><span class="p">.</span><span class="n">id</span>
+<a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a>
+<a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a><span class="c1">-- As a SEED source</span>
+<a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a><span class="n">SEED</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="k">EXEC</span><span class="p">(</span><span class="s1">&#39;bq query --format=json &quot;SELECT * FROM orders_snapshot&quot;&#39;</span><span class="p">)</span>
+</code></pre></div>
+<h3 id="mode-as-table-vs-as-stream">Mode: AS TABLE vs AS STREAM<a class="headerlink" href="#mode-as-table-vs-as-stream" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Mode</th>
+<th>Behavior</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>AS TABLE</code> (default)</td>
+<td>Materializes the command's full output before processing. Waits for the command to exit.</td>
+</tr>
+<tr>
+<td><code>AS STREAM</code></td>
+<td>Runs the command concurrently with the query. Suitable for continuous sources like <code>tail -f</code> or <code>kubectl logs -f</code>.</td>
+</tr>
+</tbody>
+</table>
+<div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p><code>AS TABLE</code> on a command that never exits (e.g., <code>tail -f</code>) will wait indefinitely. Use <code>AS STREAM</code> for continuous sources.</p>
+</div>
+<h3 id="shell-execution">Shell execution<a class="headerlink" href="#shell-execution" title="Permanent link">&para;</a></h3>
+<p>The command runs through <code>/bin/sh -c</code>, so pipes, redirects, and shell expansions work:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="k">FROM</span><span class="w"> </span><span class="k">EXEC</span><span class="p">(</span><span class="s1">&#39;cat file.json | grep error&#39;</span><span class="p">)</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="k">FROM</span><span class="w"> </span><span class="k">EXEC</span><span class="p">(</span><span class="s1">&#39;psql -c &quot;COPY users TO STDOUT WITH (FORMAT csv, HEADER)&quot;&#39;</span><span class="p">)</span><span class="w"> </span><span class="n">FORMAT</span><span class="w"> </span><span class="n">CSV</span><span class="p">(</span><span class="n">header</span><span class="o">=</span><span class="k">true</span><span class="p">)</span>
+</code></pre></div>
+<p>Subprocess stderr is forwarded to DBSPA's stderr with an <code>[exec]</code> prefix for debugging.</p>
+<h3 id="security">Security<a class="headerlink" href="#security" title="Permanent link">&para;</a></h3>
+<p>EXEC is disabled in serve mode (<code>dbspa serve</code>). Any query containing EXEC in FROM, JOIN, or SEED FROM positions is rejected with an error. This prevents HTTP clients from triggering arbitrary shell commands.</p>
+<h2 id="format">FORMAT<a class="headerlink" href="#format" title="Permanent link">&para;</a></h2>
+<p>Declares the input format using a two-tier model: <strong>encoding</strong> (how bytes are serialized) and <strong>envelope</strong> (how to interpret the record). Placed after the <code>FROM</code> clause.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="n">FORMAT</span><span class="w"> </span><span class="o">&lt;</span><span class="k">encoding</span><span class="o">&gt;</span><span class="w"> </span><span class="p">[</span><span class="o">&lt;</span><span class="n">envelope</span><span class="o">&gt;</span><span class="p">]</span><span class="w"> </span><span class="p">[(</span><span class="o">&lt;</span><span class="k">options</span><span class="o">&gt;</span><span class="p">)]</span>
+</code></pre></div>
+<h3 id="encodings">Encodings<a class="headerlink" href="#encodings" title="Permanent link">&para;</a></h3>
+<p>The encoding specifies the serialization format of the raw bytes:</p>
+<table>
+<thead>
+<tr>
+<th>Encoding</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>JSON</code> / <code>NDJSON</code></td>
+<td>Line-delimited JSON (default)</td>
+</tr>
+<tr>
+<td><code>AVRO</code></td>
+<td>Apache Avro -- OCF for files, Confluent wire format for Kafka with registry</td>
+</tr>
+<tr>
+<td><code>CSV</code></td>
+<td>Comma-separated values</td>
+</tr>
+<tr>
+<td><code>PROTOBUF</code></td>
+<td>Protocol Buffers</td>
+</tr>
+<tr>
+<td><code>PARQUET</code></td>
+<td>Apache Parquet (file only)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="envelopes">Envelopes<a class="headerlink" href="#envelopes" title="Permanent link">&para;</a></h3>
+<p>The envelope specifies how to interpret each record and derive Z-set weights:</p>
+<table>
+<thead>
+<tr>
+<th>Envelope</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><em>(none)</em></td>
+<td>Plain records -- every record is an insert (weight=+1)</td>
+</tr>
+<tr>
+<td><code>DEBEZIUM</code></td>
+<td>Debezium CDC envelope with <code>op</code>/<code>before</code>/<code>after</code> fields; derives Z-set weights from operations</td>
+</tr>
+<tr>
+<td><code>DBSPA</code></td>
+<td>Feldera weighted format with <code>weight</code> and <code>data</code> fields; reads weight directly and unwraps data</td>
+</tr>
+</tbody>
+</table>
+<h3 id="examples">Examples<a class="headerlink" href="#examples" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="n">FORMAT</span><span class="w"> </span><span class="n">JSON</span><span class="w">                                      </span><span class="c1">-- plain JSON records</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="n">FORMAT</span><span class="w"> </span><span class="n">AVRO</span><span class="w">                                      </span><span class="c1">-- plain Avro records</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="n">FORMAT</span><span class="w"> </span><span class="n">AVRO</span><span class="w"> </span><span class="n">CHANGELOG</span><span class="w"> </span><span class="n">DEBEZIUM</span><span class="w">                   </span><span class="c1">-- Avro-encoded Debezium CDC</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="n">CHANGELOG</span><span class="w"> </span><span class="n">DEBEZIUM</span><span class="w">                               </span><span class="c1">-- JSON-encoded Debezium CDC</span>
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="n">CHANGELOG</span><span class="w"> </span><span class="n">DBSPA</span><span class="w">                                  </span><span class="c1">-- Feldera weighted format (weight + data)</span>
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="n">FORMAT</span><span class="w"> </span><span class="n">CSV</span><span class="p">(</span><span class="n">header</span><span class="o">=</span><span class="k">true</span><span class="p">,</span><span class="w"> </span><span class="k">delimiter</span><span class="o">=</span><span class="s1">&#39;|&#39;</span><span class="p">)</span><span class="w">           </span><span class="c1">-- CSV with options</span>
+<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="n">FORMAT</span><span class="w"> </span><span class="n">AVRO</span><span class="p">(</span><span class="n">registry</span><span class="o">=</span><span class="s1">&#39;http://...&#39;</span><span class="p">)</span><span class="w"> </span><span class="n">CHANGELOG</span><span class="w"> </span><span class="n">DEBEZIUM</span><span class="w">  </span><span class="c1">-- Avro with registry + Debezium</span>
+<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a><span class="n">FORMAT</span><span class="w"> </span><span class="n">PROTOBUF</span><span class="p">(</span><span class="n">message</span><span class="o">=</span><span class="s1">&#39;Order&#39;</span><span class="p">)</span><span class="w">                 </span><span class="c1">-- typed Protobuf</span>
+</code></pre></div>
+<h3 id="auto-detection">Auto-detection<a class="headerlink" href="#auto-detection" title="Permanent link">&para;</a></h3>
+<p>Kafka without a registry defaults to NDJSON. Kafka with a registry auto-detects via the Confluent wire format magic byte. stdin defaults to NDJSON.</p>
+<h2 id="where">WHERE<a class="headerlink" href="#where" title="Permanent link">&para;</a></h2>
+<p>Standard SQL filter expressions.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="k">WHERE</span><span class="w"> </span><span class="n">age</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="mi">25</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="k">WHERE</span><span class="w"> </span><span class="n">status</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">&#39;active&#39;</span><span class="w"> </span><span class="k">AND</span><span class="w"> </span><span class="n">region</span><span class="w"> </span><span class="k">IN</span><span class="w"> </span><span class="p">(</span><span class="s1">&#39;us-east&#39;</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;us-west&#39;</span><span class="p">)</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="k">WHERE</span><span class="w"> </span><span class="n">name</span><span class="w"> </span><span class="k">LIKE</span><span class="w"> </span><span class="s1">&#39;A%&#39;</span>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="k">WHERE</span><span class="w"> </span><span class="n">name</span><span class="w"> </span><span class="k">ILIKE</span><span class="w"> </span><span class="s1">&#39;%alice%&#39;</span>
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="k">WHERE</span><span class="w"> </span><span class="n">amount</span><span class="w"> </span><span class="k">BETWEEN</span><span class="w"> </span><span class="mi">10</span><span class="w"> </span><span class="k">AND</span><span class="w"> </span><span class="mi">100</span>
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="k">WHERE</span><span class="w"> </span><span class="n">status</span><span class="w"> </span><span class="k">IS</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span>
+<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a><span class="k">WHERE</span><span class="w"> </span><span class="n">x</span><span class="w"> </span><span class="k">IS</span><span class="w"> </span><span class="k">DISTINCT</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">y</span><span class="w">        </span><span class="c1">-- NULL-safe inequality</span>
+</code></pre></div>
+<h2 id="group-by">GROUP BY<a class="headerlink" href="#group-by" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="k">GROUP</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">status</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="k">GROUP</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">region</span><span class="p">,</span><span class="w"> </span><span class="n">status</span>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="k">GROUP</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="mi">2</span><span class="w">                     </span><span class="c1">-- ordinal references to SELECT list</span>
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="k">GROUP</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">region</span><span class="w">                   </span><span class="c1">-- expressions</span>
+</code></pre></div>
+<p>Column aliases from SELECT are <strong>not</strong> valid in GROUP BY. Use the original expression or an ordinal.</p>
+<h2 id="having">HAVING<a class="headerlink" href="#having" title="Permanent link">&para;</a></h2>
+<p>Filters groups after aggregation:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="k">HAVING</span><span class="w"> </span><span class="k">COUNT</span><span class="p">(</span><span class="o">*</span><span class="p">)</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="mi">100</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="k">HAVING</span><span class="w"> </span><span class="k">SUM</span><span class="p">(</span><span class="n">total</span><span class="p">)</span><span class="w"> </span><span class="o">&gt;=</span><span class="w"> </span><span class="mi">1000</span><span class="p">.</span><span class="mi">0</span>
+</code></pre></div>
+<h2 id="window">WINDOW<a class="headerlink" href="#window" title="Permanent link">&para;</a></h2>
+<p>DBSPA extension for time-based windowed aggregation.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="c1">-- Tumbling (non-overlapping)</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="n">WINDOW</span><span class="w"> </span><span class="n">TUMBLING</span><span class="w"> </span><span class="s1">&#39;1 minute&#39;</span>
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="c1">-- Sliding (overlapping)</span>
+<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a><span class="n">WINDOW</span><span class="w"> </span><span class="n">SLIDING</span><span class="w"> </span><span class="s1">&#39;10 minutes&#39;</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="s1">&#39;5 minutes&#39;</span>
+<a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a>
+<a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a><span class="c1">-- Session (activity-based)</span>
+<a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a><span class="n">WINDOW</span><span class="w"> </span><span class="k">SESSION</span><span class="w"> </span><span class="s1">&#39;5 minutes&#39;</span>
+</code></pre></div>
+<p>Duration literals: <code>'1 minute'</code>, <code>'30 seconds'</code>, <code>'1 hour'</code>, <code>'1 day'</code>.</p>
+<p>See <a href="../../concepts/windowing/">Windowing</a> for details.</p>
+<h2 id="event-time-by">EVENT TIME BY<a class="headerlink" href="#event-time-by" title="Permanent link">&para;</a></h2>
+<p>Declares which column carries event time for windowed queries.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="n">EVENT</span><span class="w"> </span><span class="k">TIME</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="k">timestamp</span>
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="n">EVENT</span><span class="w"> </span><span class="k">TIME</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">event_time</span>
+</code></pre></div>
+<p>Parsed as ISO 8601 or Unix epoch (seconds). Timestamps without timezone offset are assumed UTC.</p>
+<h2 id="watermark">WATERMARK<a class="headerlink" href="#watermark" title="Permanent link">&para;</a></h2>
+<p>Sets allowed lateness for event-time windows. Records arriving behind the watermark by more than this duration are dropped.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="n">WATERMARK</span><span class="w"> </span><span class="s1">&#39;30 seconds&#39;</span>
+</code></pre></div>
+<p>Default: 5 seconds when <code>EVENT TIME BY</code> is specified.</p>
+<h2 id="emit">EMIT<a class="headerlink" href="#emit" title="Permanent link">&para;</a></h2>
+<p>Controls when windowed results are emitted.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="n">EMIT</span><span class="w"> </span><span class="k">FINAL</span><span class="w">              </span><span class="c1">-- default: emit once when window closes</span>
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="n">EMIT</span><span class="w"> </span><span class="n">EARLY</span><span class="w"> </span><span class="s1">&#39;10 seconds&#39;</span><span class="w"> </span><span class="c1">-- periodic partial results</span>
+</code></pre></div>
+<h2 id="seed-from">SEED FROM<a class="headerlink" href="#seed-from" title="Permanent link">&para;</a></h2>
+<p>Bootstraps <strong>pre-computed accumulator state</strong> from a file or command before streaming. Unlike a regular FROM source, SEED FROM does not inject raw records into the pipeline -- it sets the initial value of each accumulator directly.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="c1">-- From a file</span>
+<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="k">FROM</span><span class="w"> </span><span class="s1">&#39;kafka://broker/topic&#39;</span><span class="w"> </span><span class="n">CHANGELOG</span><span class="w"> </span><span class="n">DEBEZIUM</span>
+<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a><span class="n">SEED</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="s1">&#39;/path/to/snapshot.parquet&#39;</span>
+<a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a><span class="k">GROUP</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">region</span>
+<a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a>
+<a id="__codelineno-15-6" name="__codelineno-15-6" href="#__codelineno-15-6"></a><span class="c1">-- From a shell command (e.g., BigQuery via EXEC)</span>
+<a id="__codelineno-15-7" name="__codelineno-15-7" href="#__codelineno-15-7"></a><span class="k">FROM</span><span class="w"> </span><span class="s1">&#39;kafka://broker/orders.cdc?offset=2026-04-01&#39;</span><span class="w"> </span><span class="n">CHANGELOG</span><span class="w"> </span><span class="n">DEBEZIUM</span>
+<a id="__codelineno-15-8" name="__codelineno-15-8" href="#__codelineno-15-8"></a><span class="n">SEED</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="k">EXEC</span><span class="p">(</span><span class="s1">&#39;bq query --format=json &quot;SELECT region, SUM(amount) AS total FROM orders WHERE ts &lt; &#39;&#39;2026-04-01&#39;&#39; GROUP BY region&quot;&#39;</span><span class="p">)</span>
+<a id="__codelineno-15-9" name="__codelineno-15-9" href="#__codelineno-15-9"></a><span class="k">GROUP</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">region</span>
+</code></pre></div>
+<h3 id="column-mapping">Column mapping<a class="headerlink" href="#column-mapping" title="Permanent link">&para;</a></h3>
+<p>The seed query's columns must match the outer query's <strong>GROUP BY keys</strong> and <strong>aggregate aliases</strong>. For the query:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="k">SELECT</span><span class="w"> </span><span class="n">region</span><span class="p">,</span><span class="w"> </span><span class="k">SUM</span><span class="p">(</span><span class="n">amount</span><span class="p">)</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">total</span><span class="p">,</span><span class="w"> </span><span class="k">COUNT</span><span class="p">(</span><span class="o">*</span><span class="p">)</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">cnt</span>
+<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="k">FROM</span><span class="w"> </span><span class="s1">&#39;kafka://broker/orders.cdc&#39;</span><span class="w"> </span><span class="n">CHANGELOG</span><span class="w"> </span><span class="n">DEBEZIUM</span>
+<a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a><span class="n">SEED</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="s1">&#39;/data/seed.json&#39;</span>
+<a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a><span class="k">GROUP</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">region</span>
+</code></pre></div>
+<p>The seed data must contain columns <code>region</code> (group key), <code>total</code> (maps to <code>SUM(amount)</code>), and <code>cnt</code> (maps to <code>COUNT(*)</code>). Each row sets the initial accumulator state for that group key.</p>
+<p>Missing seed columns log a warning and start the corresponding accumulator at zero.</p>
+<h3 id="supported-accumulators">Supported accumulators<a class="headerlink" href="#supported-accumulators" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Accumulator</th>
+<th>Seedable</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>COUNT</code></td>
+<td>Yes</td>
+<td>Seed with the pre-computed count</td>
+</tr>
+<tr>
+<td><code>SUM</code></td>
+<td>Yes</td>
+<td>Seed with the pre-computed sum</td>
+</tr>
+<tr>
+<td><code>MIN</code></td>
+<td>Yes</td>
+<td>Seed with the pre-computed minimum</td>
+</tr>
+<tr>
+<td><code>MAX</code></td>
+<td>Yes</td>
+<td>Seed with the pre-computed maximum</td>
+</tr>
+<tr>
+<td><code>AVG</code></td>
+<td>No</td>
+<td>Cannot be seeded directly -- seed <code>SUM</code> + <code>COUNT</code> separately and compute AVG in the SELECT</td>
+</tr>
+<tr>
+<td><code>FIRST</code></td>
+<td>No</td>
+<td>Non-deterministic; depends on arrival order</td>
+</tr>
+<tr>
+<td><code>LAST</code></td>
+<td>No</td>
+<td>Non-deterministic; depends on arrival order</td>
+</tr>
+</tbody>
+</table>
+<div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p><strong>Bridge responsibility:</strong> The user must ensure there is no overlap or gap between the seed cutoff and the stream offset. For example, if the seed covers data up to <code>2026-04-01</code>, the Kafka offset should start at <code>2026-04-01</code>. DBSPA does not verify continuity between seed and stream.</p>
+</div>
+<p>See <a href="../../architecture/checkpointing/">Checkpointing</a> for interaction with <code>--stateful</code>.</p>
+<h2 id="deduplicate-by">DEDUPLICATE BY<a class="headerlink" href="#deduplicate-by" title="Permanent link">&para;</a></h2>
+<p>Bounded deduplication on a key.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="n">DEDUPLICATE</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">order_id</span><span class="w"> </span><span class="n">WITHIN</span><span class="w"> </span><span class="s1">&#39;10 minutes&#39;</span>
+<a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a><span class="n">DEDUPLICATE</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">order_id</span><span class="w"> </span><span class="n">WITHIN</span><span class="w"> </span><span class="s1">&#39;10 minutes&#39;</span><span class="w"> </span><span class="n">CAPACITY</span><span class="w"> </span><span class="mi">500000</span>
+</code></pre></div>
+<p>Default cache capacity: 100,000 entries. LRU eviction when exceeded. Retractions (negative weight) always pass through unconditionally.</p>
+<h2 id="order-by">ORDER BY<a class="headerlink" href="#order-by" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a><span class="k">ORDER</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">revenue</span><span class="w"> </span><span class="k">DESC</span>
+<a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a><span class="k">ORDER</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">region</span><span class="w"> </span><span class="k">ASC</span><span class="p">,</span><span class="w"> </span><span class="n">cnt</span><span class="w"> </span><span class="k">DESC</span>
+<a id="__codelineno-18-3" name="__codelineno-18-3" href="#__codelineno-18-3"></a><span class="k">ORDER</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="mi">2</span><span class="w"> </span><span class="k">DESC</span>
+</code></pre></div>
+<p>Accepts expressions, ordinals, or aliases. For accumulating queries, ORDER BY controls TUI display order and SQLite row order. For non-accumulating streaming queries, ORDER BY is rejected at parse time.</p>
+<h2 id="limit">LIMIT<a class="headerlink" href="#limit" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a><span class="k">LIMIT</span><span class="w"> </span><span class="mi">100</span>
+</code></pre></div>
+<p>Terminates after N output records. For non-accumulating queries, this is straightforward. For accumulating queries, LIMIT applies to the total number of changelog emissions.</p>
+<h2 id="join">JOIN<a class="headerlink" href="#join" title="Permanent link">&para;</a></h2>
+<p>Equi-join between a stream and a table, a stream and a CDC source, two streams, a stream and a subquery, or a stream and an EXEC command.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a><span class="c1">-- Stream-to-file</span>
+<a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a><span class="k">JOIN</span><span class="w"> </span><span class="s1">&#39;/data/users.parquet&#39;</span><span class="w"> </span><span class="n">u</span><span class="w"> </span><span class="k">ON</span><span class="w"> </span><span class="n">e</span><span class="p">.</span><span class="n">user_id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">u</span><span class="p">.</span><span class="n">id</span>
+<a id="__codelineno-20-3" name="__codelineno-20-3" href="#__codelineno-20-3"></a><span class="k">LEFT</span><span class="w"> </span><span class="k">JOIN</span><span class="w"> </span><span class="s1">&#39;/data/users.csv&#39;</span><span class="w"> </span><span class="n">u</span><span class="w"> </span><span class="n">FORMAT</span><span class="w"> </span><span class="n">CSV</span><span class="p">(</span><span class="n">header</span><span class="o">=</span><span class="k">true</span><span class="p">)</span><span class="w"> </span><span class="k">ON</span><span class="w"> </span><span class="n">e</span><span class="p">.</span><span class="n">user_id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">u</span><span class="p">.</span><span class="n">id</span>
+<a id="__codelineno-20-4" name="__codelineno-20-4" href="#__codelineno-20-4"></a>
+<a id="__codelineno-20-5" name="__codelineno-20-5" href="#__codelineno-20-5"></a><span class="c1">-- Stream-to-EXEC (shell command as table source)</span>
+<a id="__codelineno-20-6" name="__codelineno-20-6" href="#__codelineno-20-6"></a><span class="k">JOIN</span><span class="w"> </span><span class="k">EXEC</span><span class="p">(</span><span class="s1">&#39;cat /data/users.json&#39;</span><span class="p">)</span><span class="w"> </span><span class="n">u</span><span class="w"> </span><span class="k">ON</span><span class="w"> </span><span class="n">e</span><span class="p">.</span><span class="n">user_id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">u</span><span class="p">.</span><span class="n">id</span>
+<a id="__codelineno-20-7" name="__codelineno-20-7" href="#__codelineno-20-7"></a><span class="k">JOIN</span><span class="w"> </span><span class="k">EXEC</span><span class="p">(</span><span class="s1">&#39;psql -c &quot;COPY users TO STDOUT WITH (FORMAT csv, HEADER)&quot;&#39;</span><span class="p">)</span><span class="w"> </span><span class="n">u</span><span class="w"> </span><span class="n">FORMAT</span><span class="w"> </span><span class="n">CSV</span><span class="p">(</span><span class="n">header</span><span class="o">=</span><span class="k">true</span><span class="p">)</span><span class="w"> </span><span class="k">ON</span><span class="w"> </span><span class="n">e</span><span class="p">.</span><span class="n">user_id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">u</span><span class="p">.</span><span class="n">id</span>
+<a id="__codelineno-20-8" name="__codelineno-20-8" href="#__codelineno-20-8"></a>
+<a id="__codelineno-20-9" name="__codelineno-20-9" href="#__codelineno-20-9"></a><span class="c1">-- Stream-to-subquery (pre-aggregate a file, then join)</span>
+<a id="__codelineno-20-10" name="__codelineno-20-10" href="#__codelineno-20-10"></a><span class="k">JOIN</span><span class="w"> </span><span class="p">(</span><span class="k">SELECT</span><span class="w"> </span><span class="n">customer_id</span><span class="p">,</span><span class="w"> </span><span class="k">COUNT</span><span class="p">(</span><span class="o">*</span><span class="p">)</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">cnt</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="s1">&#39;/data/orders.parquet&#39;</span><span class="w"> </span><span class="k">GROUP</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">customer_id</span><span class="p">)</span><span class="w"> </span><span class="n">r</span>
+<a id="__codelineno-20-11" name="__codelineno-20-11" href="#__codelineno-20-11"></a><span class="w">  </span><span class="k">ON</span><span class="w"> </span><span class="n">e</span><span class="p">.</span><span class="n">customer_id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">r</span><span class="p">.</span><span class="n">customer_id</span>
+<a id="__codelineno-20-12" name="__codelineno-20-12" href="#__codelineno-20-12"></a>
+<a id="__codelineno-20-13" name="__codelineno-20-13" href="#__codelineno-20-13"></a><span class="c1">-- Stream-to-stream (WITHIN is mandatory)</span>
+<a id="__codelineno-20-14" name="__codelineno-20-14" href="#__codelineno-20-14"></a><span class="k">FROM</span><span class="w"> </span><span class="s1">&#39;kafka://broker/orders&#39;</span><span class="w"> </span><span class="n">o</span>
+<a id="__codelineno-20-15" name="__codelineno-20-15" href="#__codelineno-20-15"></a><span class="k">JOIN</span><span class="w"> </span><span class="s1">&#39;kafka://broker/payments&#39;</span><span class="w"> </span><span class="n">p</span><span class="w"> </span><span class="k">ON</span><span class="w"> </span><span class="n">o</span><span class="p">.</span><span class="n">order_id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">p</span><span class="p">.</span><span class="n">order_id</span>
+<a id="__codelineno-20-16" name="__codelineno-20-16" href="#__codelineno-20-16"></a><span class="n">WITHIN</span><span class="w"> </span><span class="nb">INTERVAL</span><span class="w"> </span><span class="s1">&#39;10 minutes&#39;</span>
+</code></pre></div>
+<h3 id="subquery-as-join-source">Subquery as JOIN source<a class="headerlink" href="#subquery-as-join-source" title="Permanent link">&para;</a></h3>
+<p>A parenthesized <code>SELECT</code> can replace a file path as the JOIN source. The subquery is materialized into an in-memory table before the stream begins. This is useful for joining a live stream against pre-aggregated or filtered reference data.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a><span class="c1">-- Enrich events with per-customer order counts</span>
+<a id="__codelineno-21-2" name="__codelineno-21-2" href="#__codelineno-21-2"></a><span class="k">SELECT</span><span class="w"> </span><span class="n">e</span><span class="p">.</span><span class="n">customer_id</span><span class="p">,</span><span class="w"> </span><span class="n">e</span><span class="p">.</span><span class="n">action</span><span class="p">,</span><span class="w"> </span><span class="n">r</span><span class="p">.</span><span class="n">order_count</span>
+<a id="__codelineno-21-3" name="__codelineno-21-3" href="#__codelineno-21-3"></a><span class="k">FROM</span><span class="w"> </span><span class="k">stdin</span><span class="w"> </span><span class="n">e</span>
+<a id="__codelineno-21-4" name="__codelineno-21-4" href="#__codelineno-21-4"></a><span class="k">JOIN</span><span class="w"> </span><span class="p">(</span><span class="k">SELECT</span><span class="w"> </span><span class="n">customer_id</span><span class="p">,</span><span class="w"> </span><span class="k">COUNT</span><span class="p">(</span><span class="o">*</span><span class="p">)</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">order_count</span>
+<a id="__codelineno-21-5" name="__codelineno-21-5" href="#__codelineno-21-5"></a><span class="w">      </span><span class="k">FROM</span><span class="w"> </span><span class="s1">&#39;/data/orders.parquet&#39;</span>
+<a id="__codelineno-21-6" name="__codelineno-21-6" href="#__codelineno-21-6"></a><span class="w">      </span><span class="k">GROUP</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">customer_id</span><span class="p">)</span><span class="w"> </span><span class="n">r</span>
+<a id="__codelineno-21-7" name="__codelineno-21-7" href="#__codelineno-21-7"></a><span class="w">  </span><span class="k">ON</span><span class="w"> </span><span class="n">e</span><span class="p">.</span><span class="n">customer_id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">r</span><span class="p">.</span><span class="n">customer_id</span>
+</code></pre></div>
+<p>An alias is mandatory for the subquery. The alias is used to qualify column references in the ON condition and SELECT list.</p>
+<p><strong>Streaming subqueries:</strong> When the inner query's FROM source is a Kafka topic (<code>kafka://</code>), the subquery runs concurrently with the outer query instead of being materialized. The inner query must have GROUP BY -- its accumulation results feed into the DD join as live Z-set deltas. The outer query sees live-updating results from the inner aggregation. See <a href="../../concepts/joins/#streaming-subqueries-join">Streaming Subqueries</a> for details.</p>
+<h3 id="within-interval">WITHIN INTERVAL<a class="headerlink" href="#within-interval" title="Permanent link">&para;</a></h3>
+<p>Required for stream-to-stream joins. Bounds how long records are retained in the join arrangements. Records older than the interval are evicted and their join results are retracted.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a><span class="n">WITHIN</span><span class="w"> </span><span class="nb">INTERVAL</span><span class="w"> </span><span class="s1">&#39;10 minutes&#39;</span>
+<a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a><span class="n">WITHIN</span><span class="w"> </span><span class="nb">INTERVAL</span><span class="w"> </span><span class="s1">&#39;1 hour&#39;</span>
+<a id="__codelineno-22-3" name="__codelineno-22-3" href="#__codelineno-22-3"></a><span class="n">WITHIN</span><span class="w"> </span><span class="nb">INTERVAL</span><span class="w"> </span><span class="s1">&#39;30 seconds&#39;</span>
+</code></pre></div>
+<p>Without <code>WITHIN</code>, a stream-to-stream join is rejected at parse time.</p>
+<p>See <a href="../../concepts/joins/">Joins</a> for full details on DD joins, CDC propagation, and stream-to-stream semantics.</p>
+<h2 id="expressions">Expressions<a class="headerlink" href="#expressions" title="Permanent link">&para;</a></h2>
+<h3 id="operator-precedence-highest-to-lowest">Operator precedence (highest to lowest)<a class="headerlink" href="#operator-precedence-highest-to-lowest" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Precedence</th>
+<th>Operators</th>
+<th>Associativity</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td><code>::</code> (type cast)</td>
+<td>Left</td>
+</tr>
+<tr>
+<td>2</td>
+<td><code>-&gt;</code>, <code>-&gt;&gt;</code> (JSON access)</td>
+<td>Left</td>
+</tr>
+<tr>
+<td>3</td>
+<td>unary <code>-</code>, unary <code>+</code></td>
+<td>Right</td>
+</tr>
+<tr>
+<td>4</td>
+<td><code>*</code>, <code>/</code>, <code>%</code></td>
+<td>Left</td>
+</tr>
+<tr>
+<td>5</td>
+<td><code>+</code>, <code>-</code> (binary)</td>
+<td>Left</td>
+</tr>
+<tr>
+<td>6</td>
+<td><code>\|\|</code> (string concat)</td>
+<td>Left</td>
+</tr>
+<tr>
+<td>7</td>
+<td><code>=</code>, <code>!=</code>, <code>&lt;&gt;</code>, <code>&lt;</code>, <code>&gt;</code>, <code>&lt;=</code>, <code>&gt;=</code>, <code>LIKE</code>, <code>ILIKE</code>, <code>IS</code>, <code>IN</code>, <code>BETWEEN</code>, <code>IS DISTINCT FROM</code></td>
+<td>Non-associative</td>
+</tr>
+<tr>
+<td>8</td>
+<td><code>NOT</code></td>
+<td>Right</td>
+</tr>
+<tr>
+<td>9</td>
+<td><code>AND</code></td>
+<td>Left</td>
+</tr>
+<tr>
+<td>10</td>
+<td><code>OR</code></td>
+<td>Left</td>
+</tr>
+</tbody>
+</table>
+<h3 id="json-access">JSON access<a class="headerlink" href="#json-access" title="Permanent link">&para;</a></h3>
+<p>DBSPA supports two syntaxes for accessing nested JSON fields:</p>
+<p><strong>Dot notation</strong> (recommended for readability):
+<div class="highlight"><pre><span></span><code><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a><span class="k">data</span><span class="p">.</span><span class="n">name</span><span class="w">               </span><span class="c1">-- one level: extract field as text</span>
+<a id="__codelineno-23-2" name="__codelineno-23-2" href="#__codelineno-23-2"></a><span class="k">user</span><span class="p">.</span><span class="n">address</span><span class="p">.</span><span class="n">city</span><span class="w">       </span><span class="c1">-- multi-level: traverse nested objects</span>
+<a id="__codelineno-23-3" name="__codelineno-23-3" href="#__codelineno-23-3"></a><span class="n">e</span><span class="p">.</span><span class="n">payload</span><span class="p">.</span><span class="n">score</span><span class="w">         </span><span class="c1">-- works with table aliases (e is alias, payload is column)</span>
+</code></pre></div></p>
+<p><strong>PostgreSQL arrow syntax</strong> (full control over JSON vs text return type):
+<div class="highlight"><pre><span></span><code><a id="__codelineno-24-1" name="__codelineno-24-1" href="#__codelineno-24-1"></a><span class="n">col</span><span class="o">-&gt;</span><span class="s1">&#39;key&#39;</span><span class="w">              </span><span class="c1">-- extract JSON field as JSON</span>
+<a id="__codelineno-24-2" name="__codelineno-24-2" href="#__codelineno-24-2"></a><span class="n">col</span><span class="o">-&gt;&gt;</span><span class="s1">&#39;key&#39;</span><span class="w">             </span><span class="c1">-- extract JSON field as TEXT</span>
+<a id="__codelineno-24-3" name="__codelineno-24-3" href="#__codelineno-24-3"></a><span class="n">col</span><span class="o">-&gt;</span><span class="mi">0</span><span class="w">                  </span><span class="c1">-- extract JSON array element as JSON</span>
+<a id="__codelineno-24-4" name="__codelineno-24-4" href="#__codelineno-24-4"></a><span class="n">col</span><span class="o">-&gt;&gt;</span><span class="mi">0</span><span class="w">                 </span><span class="c1">-- extract JSON array element as TEXT</span>
+<a id="__codelineno-24-5" name="__codelineno-24-5" href="#__codelineno-24-5"></a><span class="n">payload</span><span class="o">-&gt;</span><span class="s1">&#39;user&#39;</span><span class="o">-&gt;&gt;</span><span class="s1">&#39;email&#39;</span><span class="w">  </span><span class="c1">-- chaining</span>
+</code></pre></div></p>
+<p>Dot notation always returns text for the final field (like <code>-&gt;&gt;</code>). For intermediate levels in multi-level access, it preserves JSON (like <code>-&gt;</code>). If you need to keep a nested object as JSON, use the arrow syntax: <code>col-&gt;'key'</code>.</p>
+<p><strong>Resolution order:</strong> <code>a.b</code> first tries alias resolution (table <code>a</code>, column <code>b</code>). If no alias matches, it tries JSON field access (column <code>a</code>, field <code>b</code>). This means table aliases always take priority over JSON column names.</p>
+<div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>Cast precedence: <code>col-&gt;&gt;'amount'::float</code> parses as <code>col-&gt;&gt;('amount'::float)</code>, not <code>(col-&gt;&gt;'amount')::float</code>. Always use parentheses: <code>(col-&gt;&gt;'amount')::float</code>.</p>
+</div>
+<h3 id="type-cast">Type cast<a class="headerlink" href="#type-cast" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-25-1" name="__codelineno-25-1" href="#__codelineno-25-1"></a><span class="n">expr</span><span class="p">::</span><span class="k">type</span><span class="w">              </span><span class="c1">-- PostgreSQL shorthand</span>
+<a id="__codelineno-25-2" name="__codelineno-25-2" href="#__codelineno-25-2"></a><span class="k">CAST</span><span class="p">(</span><span class="n">expr</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="k">type</span><span class="p">)</span><span class="w">      </span><span class="c1">-- standard SQL</span>
+</code></pre></div>
+<h3 id="conditional">Conditional<a class="headerlink" href="#conditional" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-26-1" name="__codelineno-26-1" href="#__codelineno-26-1"></a><span class="k">CASE</span><span class="w"> </span><span class="k">WHEN</span><span class="w"> </span><span class="n">status</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">&#39;active&#39;</span><span class="w"> </span><span class="k">THEN</span><span class="w"> </span><span class="mi">1</span><span class="w"> </span><span class="k">ELSE</span><span class="w"> </span><span class="mi">0</span><span class="w"> </span><span class="k">END</span>
+<a id="__codelineno-26-2" name="__codelineno-26-2" href="#__codelineno-26-2"></a><span class="k">CASE</span><span class="w"> </span><span class="n">status</span><span class="w"> </span><span class="k">WHEN</span><span class="w"> </span><span class="s1">&#39;active&#39;</span><span class="w"> </span><span class="k">THEN</span><span class="w"> </span><span class="mi">1</span><span class="w"> </span><span class="k">WHEN</span><span class="w"> </span><span class="s1">&#39;inactive&#39;</span><span class="w"> </span><span class="k">THEN</span><span class="w"> </span><span class="mi">0</span><span class="w"> </span><span class="k">ELSE</span><span class="w"> </span><span class="o">-</span><span class="mi">1</span><span class="w"> </span><span class="k">END</span>
+</code></pre></div>
+<h2 id="types">Types<a class="headerlink" href="#types" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Type</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>BOOLEAN</code></td>
+<td></td>
+</tr>
+<tr>
+<td><code>INT</code> / <code>BIGINT</code></td>
+<td>64-bit internally</td>
+</tr>
+<tr>
+<td><code>FLOAT</code> / <code>DOUBLE</code></td>
+<td>64-bit internally</td>
+</tr>
+<tr>
+<td><code>TEXT</code></td>
+<td>UTF-8 strings</td>
+</tr>
+<tr>
+<td><code>TIMESTAMP</code></td>
+<td>UTC internally</td>
+</tr>
+<tr>
+<td><code>INTERVAL</code></td>
+<td>For window durations and time arithmetic</td>
+</tr>
+<tr>
+<td><code>JSON</code></td>
+<td>Opaque JSON value, queryable via <code>-&gt;</code> / <code>-&gt;&gt;</code></td>
+</tr>
+<tr>
+<td><code>NULL</code></td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<h3 id="type-coercion">Type coercion<a class="headerlink" href="#type-coercion" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Context</th>
+<th>Rule</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Arithmetic between INT and FLOAT</td>
+<td>INT promoted to FLOAT</td>
+</tr>
+<tr>
+<td>Comparison between INT and FLOAT</td>
+<td>INT promoted to FLOAT</td>
+</tr>
+<tr>
+<td>TEXT compared to INT/FLOAT</td>
+<td>Error — use explicit cast</td>
+</tr>
+<tr>
+<td><code>\|\|</code> with non-TEXT operand</td>
+<td>Non-TEXT cast to TEXT</td>
+</tr>
+<tr>
+<td><code>-&gt;&gt;</code> result in arithmetic</td>
+<td>Error — <code>-&gt;&gt;</code> returns TEXT, cast explicitly</td>
+</tr>
+<tr>
+<td>TIMESTAMP compared to TEXT</td>
+<td>TEXT parsed as ISO 8601</td>
+</tr>
+</tbody>
+</table>
+<h2 id="aggregate-functions">Aggregate functions<a class="headerlink" href="#aggregate-functions" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Function</th>
+<th>State</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>COUNT(*)</code></td>
+<td>O(1)</td>
+<td>Counts all rows including NULLs</td>
+</tr>
+<tr>
+<td><code>COUNT(x)</code></td>
+<td>O(1)</td>
+<td>Counts non-NULL values</td>
+</tr>
+<tr>
+<td><code>COUNT(DISTINCT x)</code></td>
+<td>O(n)</td>
+<td>Exact count of distinct values</td>
+</tr>
+<tr>
+<td><code>APPROX_COUNT_DISTINCT(x)</code></td>
+<td>O(1)</td>
+<td>HyperLogLog approximation</td>
+</tr>
+<tr>
+<td><code>SUM(x)</code></td>
+<td>O(1)</td>
+<td></td>
+</tr>
+<tr>
+<td><code>AVG(x)</code></td>
+<td>O(1)</td>
+<td></td>
+</tr>
+<tr>
+<td><code>MIN(x)</code></td>
+<td>O(n)</td>
+<td>Retraction-aware via heap</td>
+</tr>
+<tr>
+<td><code>MAX(x)</code></td>
+<td>O(n)</td>
+<td>Retraction-aware via heap</td>
+</tr>
+<tr>
+<td><code>MEDIAN(x)</code></td>
+<td>O(n)</td>
+<td>Dual-heap</td>
+</tr>
+<tr>
+<td><code>PERCENTILE_CONT(p) WITHIN GROUP (ORDER BY x)</code></td>
+<td>O(n)</td>
+<td>PostgreSQL syntax</td>
+</tr>
+<tr>
+<td><code>ARRAY_AGG(x)</code></td>
+<td>O(n)</td>
+<td>Includes NULLs</td>
+</tr>
+<tr>
+<td><code>FIRST(x)</code></td>
+<td>O(1)</td>
+<td>First non-NULL; not retractable</td>
+</tr>
+<tr>
+<td><code>LAST(x)</code></td>
+<td>O(1)</td>
+<td>Most recent non-NULL; ignores retractions</td>
+</tr>
+</tbody>
+</table>
+<h2 id="scalar-functions">Scalar functions<a class="headerlink" href="#scalar-functions" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Function</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>COALESCE(a, b, ...)</code></td>
+<td>First non-null argument</td>
+</tr>
+<tr>
+<td><code>NULLIF(a, b)</code></td>
+<td>NULL if a = b</td>
+</tr>
+<tr>
+<td><code>LENGTH(s)</code></td>
+<td>String length</td>
+</tr>
+<tr>
+<td><code>UPPER(s)</code> / <code>LOWER(s)</code></td>
+<td>Case conversion</td>
+</tr>
+<tr>
+<td><code>TRIM(s)</code> / <code>LTRIM(s)</code> / <code>RTRIM(s)</code></td>
+<td>Whitespace trim</td>
+</tr>
+<tr>
+<td><code>SUBSTR(s, start, len)</code></td>
+<td>Substring extraction</td>
+</tr>
+<tr>
+<td><code>REPLACE(s, from, to)</code></td>
+<td>String replacement</td>
+</tr>
+<tr>
+<td><code>SPLIT_PART(s, delim, idx)</code></td>
+<td>Split string and index into result</td>
+</tr>
+<tr>
+<td><code>PARSE_TIMESTAMP(s, fmt)</code></td>
+<td>Parse string to timestamp</td>
+</tr>
+<tr>
+<td><code>FORMAT_TIMESTAMP(ts, fmt)</code></td>
+<td>Format timestamp to string</td>
+</tr>
+<tr>
+<td><code>NOW()</code></td>
+<td>Current processing time</td>
+</tr>
+<tr>
+<td><code>EXTRACT(field FROM ts)</code></td>
+<td>Extract year/month/day/hour/minute/second</td>
+</tr>
+<tr>
+<td><code>json_keys(j)</code></td>
+<td>Array of keys in a JSON object</td>
+</tr>
+</tbody>
+</table>
+<h2 id="null-semantics">NULL semantics<a class="headerlink" href="#null-semantics" title="Permanent link">&para;</a></h2>
+<p>DBSPA follows PostgreSQL three-valued logic.</p>
+<ul>
+<li><code>NULL = NULL</code> is NULL, not TRUE. Use <code>IS NOT DISTINCT FROM</code> for NULL-safe equality.</li>
+<li><code>NULL IN (1, 2, NULL)</code> is NULL, not TRUE.</li>
+<li><code>NULL BETWEEN 1 AND 10</code> is NULL.</li>
+<li>NULL is a valid GROUP BY key value — all NULLs are grouped together.</li>
+<li>Division by zero returns NULL (integer) or <code>+Inf</code>/<code>-Inf</code>/<code>NaN</code> (float, per IEEE 754).</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.sections", "navigation.expand", "navigation.top", "content.code.copy", "search.highlight"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

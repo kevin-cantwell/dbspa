@@ -1,0 +1,2295 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Streaming SQL with incremental aggregation">
+      
+      
+      
+        <link rel="canonical" href="https://kevin-cantwell.github.io/dbspa/docs/latest/architecture/pipeline/">
+      
+      
+        <link rel="prev" href="../accumulators/">
+      
+      
+        <link rel="next" href="../checkpointing/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Execution Pipeline - DBSPA</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="slate" data-md-color-primary="teal" data-md-color-accent="cyan">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#execution-pipeline" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="DBSPA" class="md-header__button md-logo" aria-label="DBSPA" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            DBSPA
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Execution Pipeline
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+    
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/kevin-cantwell/dbspa" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    kevin-cantwell/dbspa
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="DBSPA" class="md-nav__button md-logo" aria-label="DBSPA" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    DBSPA
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/kevin-cantwell/dbspa" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    kevin-cantwell/dbspa
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting Started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/install/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Install
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quickstart
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/examples/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Examples
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concepts
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Concepts
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/when-to-use/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    When to Use DBSPA
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/streams-vs-tables/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Streams vs Tables
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/diff-model/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    The Z-Set Model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/changelog-output/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Changelog Output
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/windowing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Windowing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/joins/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Joins
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/error-handling/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Error Handling
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Architecture
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../parser/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SQL Parser
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../accumulators/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Accumulators
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Execution Pipeline
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Execution Pipeline
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#pipeline-stages" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pipeline stages
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#query-classification" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Query classification
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Query classification">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#non-accumulating-filterproject" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Non-accumulating (filter/project)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#accumulating-group-by" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Accumulating (GROUP BY)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#windowed-group-by-window" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Windowed (GROUP BY + WINDOW)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#source-layer" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Source layer
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#decoder-layer" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Decoder layer
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#batch-processing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Batch processing
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Batch processing">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#how-batching-works" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How batching works
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#why-batching-helps" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why batching helps
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#unbatching" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Unbatching
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#concurrency-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Concurrency model
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sink-layer" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sink layer
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#duckdb-integration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        DuckDB Integration
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="DuckDB Integration">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#when-duckdb-is-used" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        When DuckDB is used
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#how-it-works" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How it works
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#predicate-pushdown-and-column-pruning" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Predicate pushdown and column pruning
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#duckdb-scans-dbspa-aggregates" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        DuckDB scans, DBSPA aggregates
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#syntax" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Syntax
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#streaming-subquery-execution" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Streaming Subquery Execution
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Streaming Subquery Execution">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#concurrent-pipeline" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Concurrent pipeline
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#execution-flow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Execution flow
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#delta-semantics" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Delta semantics
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#seed-from" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SEED FROM
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="SEED FROM">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#how-it-works-importinitialstate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How it works: ImportInitialState
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#column-mapping-rules" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Column mapping rules
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#why-avg-cannot-be-seeded" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why AVG cannot be seeded
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#checkpoint-vs-seed-precedence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Checkpoint vs seed precedence
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../checkpointing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Checkpointing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../performance/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Performance
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/sql/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SQL Dialect
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/grammar/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SQL Grammar (EBNF)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/formats/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Formats
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Contributing
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../contributing/development/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Development
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../contributing/decisions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Decisions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#pipeline-stages" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pipeline stages
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#query-classification" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Query classification
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Query classification">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#non-accumulating-filterproject" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Non-accumulating (filter/project)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#accumulating-group-by" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Accumulating (GROUP BY)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#windowed-group-by-window" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Windowed (GROUP BY + WINDOW)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#source-layer" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Source layer
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#decoder-layer" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Decoder layer
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#batch-processing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Batch processing
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Batch processing">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#how-batching-works" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How batching works
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#why-batching-helps" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why batching helps
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#unbatching" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Unbatching
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#concurrency-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Concurrency model
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sink-layer" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sink layer
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#duckdb-integration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        DuckDB Integration
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="DuckDB Integration">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#when-duckdb-is-used" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        When DuckDB is used
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#how-it-works" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How it works
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#predicate-pushdown-and-column-pruning" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Predicate pushdown and column pruning
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#duckdb-scans-dbspa-aggregates" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        DuckDB scans, DBSPA aggregates
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#syntax" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Syntax
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#streaming-subquery-execution" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Streaming Subquery Execution
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Streaming Subquery Execution">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#concurrent-pipeline" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Concurrent pipeline
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#execution-flow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Execution flow
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#delta-semantics" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Delta semantics
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#seed-from" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SEED FROM
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="SEED FROM">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#how-it-works-importinitialstate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How it works: ImportInitialState
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#column-mapping-rules" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Column mapping rules
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#why-avg-cannot-be-seeded" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why AVG cannot be seeded
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#checkpoint-vs-seed-precedence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Checkpoint vs seed precedence
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="execution-pipeline">Execution Pipeline<a class="headerlink" href="#execution-pipeline" title="Permanent link">&para;</a></h1>
+<p>Every DBSPA query flows through the same pipeline, connected by Go channels with natural backpressure.</p>
+<h2 id="pipeline-stages">Pipeline stages<a class="headerlink" href="#pipeline-stages" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>Source → Decode → [Seed] → [Dedup] → [Join] → Filter → [Batch] → [Aggregate] → Sink
+</code></pre></div>
+<p>Stages in brackets are optional, depending on the query.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>│  Source   │───▶│  Decode  │───▶│  Filter  │───▶│  Batch   │───▶│ Aggregate│───▶│   Sink   │
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>│          │    │          │    │ (WHERE)  │    │          │    │(GROUP BY)│    │          │
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>│ stdin    │    │ JSON     │    │          │    │ Collect  │    │          │    │ TUI      │
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>│ Kafka    │    │ Avro     │    │          │    │ 1024 or  │    │ COUNT    │    │ Changelog│
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>│ --input  │    │ Protobuf │    │          │    │ 10ms     │    │ SUM      │    │ SQLite   │
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>│          │    │ CSV      │    │          │    │ flush    │    │ AVG      │    │ HTTP     │
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>│          │    │ Debezium │    │          │    │          │    │ ...      │    │          │
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>│          │    │ Parquet  │    │          │    │          │    │          │    │          │
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>└──────────┘    └──────────┘    └──────────┘    └──────────┘    └──────────┘    └──────────┘
+</code></pre></div>
+<h2 id="query-classification">Query classification<a class="headerlink" href="#query-classification" title="Permanent link">&para;</a></h2>
+<p>DBSPA classifies every query into one of three types, determining which pipeline stages are active:</p>
+<h3 id="non-accumulating-filterproject">Non-accumulating (filter/project)<a class="headerlink" href="#non-accumulating-filterproject" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="k">SELECT</span><span class="w"> </span><span class="n">name</span><span class="p">,</span><span class="w"> </span><span class="n">age</span><span class="w"> </span><span class="k">WHERE</span><span class="w"> </span><span class="n">age</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="mi">25</span>
+</code></pre></div>
+<p>No GROUP BY, no aggregates. Pipeline: decode -&gt; filter -&gt; project -&gt; sink. Records flow through one at a time. Terminates at EOF or LIMIT.</p>
+<h3 id="accumulating-group-by">Accumulating (GROUP BY)<a class="headerlink" href="#accumulating-group-by" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="k">SELECT</span><span class="w"> </span><span class="n">status</span><span class="p">,</span><span class="w"> </span><span class="k">COUNT</span><span class="p">(</span><span class="o">*</span><span class="p">)</span><span class="w"> </span><span class="k">GROUP</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">status</span>
+</code></pre></div>
+<p>Pipeline: decode -&gt; filter -&gt; accumulate -&gt; sink. The accumulator maintains a hash map of <code>group_key -&gt; accumulators</code>. Each input record updates a group. Changed results emit retraction+insertion pairs to the <a href="../../concepts/changelog-output/">changelog</a>.</p>
+<h3 id="windowed-group-by-window">Windowed (GROUP BY + WINDOW)<a class="headerlink" href="#windowed-group-by-window" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="k">SELECT</span><span class="w"> </span><span class="n">window_start</span><span class="p">,</span><span class="w"> </span><span class="n">endpoint</span><span class="p">,</span><span class="w"> </span><span class="k">COUNT</span><span class="p">(</span><span class="o">*</span><span class="p">)</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="k">GROUP</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">endpoint</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="n">WINDOW</span><span class="w"> </span><span class="n">TUMBLING</span><span class="w"> </span><span class="s1">&#39;1 minute&#39;</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="n">EVENT</span><span class="w"> </span><span class="k">TIME</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="k">timestamp</span>
+</code></pre></div>
+<p>Like accumulating, but records are assigned to <a href="../../concepts/windowing/">time windows</a>. Each window has its own set of accumulators. Windows close when the watermark advances past the window end.</p>
+<h2 id="source-layer">Source layer<a class="headerlink" href="#source-layer" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Source</th>
+<th>Implementation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>stdin</td>
+<td>Reads lines from <code>os.Stdin</code> or <code>--input</code> file. Line-based for JSON/CSV; raw reader for binary formats.</td>
+</tr>
+<tr>
+<td>Kafka</td>
+<td>Uses <code>franz-go</code>. One goroutine per partition. Fan-in to a shared channel. Offset control via URI params.</td>
+</tr>
+<tr>
+<td>File (<code>--input</code>)</td>
+<td>Opens the file, passes the reader to the decoder. Parquet requires a seekable file.</td>
+</tr>
+<tr>
+<td>DuckDB</td>
+<td>Embedded DuckDB engine for file queries. See <a href="#duckdb-integration">DuckDB Integration</a> below.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="decoder-layer">Decoder layer<a class="headerlink" href="#decoder-layer" title="Permanent link">&para;</a></h2>
+<p>Two decoder interfaces:</p>
+<table>
+<thead>
+<tr>
+<th>Interface</th>
+<th>Used by</th>
+<th>Framing</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Decoder</code></td>
+<td>JSON, CSV</td>
+<td>Line-based: <code>Decode([]byte) -&gt; Record</code></td>
+</tr>
+<tr>
+<td><code>StreamDecoder</code></td>
+<td>Avro OCF, Protobuf, Parquet</td>
+<td>Binary: <code>DecodeStream(io.Reader, chan Record)</code></td>
+</tr>
+</tbody>
+</table>
+<p>The Debezium decoder implements <code>MultiDecoder</code> — it can emit 0-2 records per input (updates emit a retraction + insertion).</p>
+<h2 id="batch-processing">Batch processing<a class="headerlink" href="#batch-processing" title="Permanent link">&para;</a></h2>
+<p>Between the filter and the accumulator, the <code>BatchChannel</code> stage collects individual records into batches. This is a key part of DBSPA's <a href="../../concepts/diff-model/">Z-set model</a> pipeline.</p>
+<h3 id="how-batching-works">How batching works<a class="headerlink" href="#how-batching-works" title="Permanent link">&para;</a></h3>
+<p><code>BatchChannel</code> reads from a <code>chan Record</code> and writes to a <code>chan Batch</code> (where <code>Batch</code> is <code>[]Record</code>). It flushes on two conditions:</p>
+<ol>
+<li><strong>Batch full</strong>: When the batch reaches <code>DefaultBatchSize</code> (1024 records), it is sent downstream immediately.</li>
+<li><strong>Timeout</strong>: If 10ms elapses without filling a batch, the partial batch is flushed. This ensures low-latency delivery for low-throughput streams.</li>
+</ol>
+<p>The output channel has a buffer of 4 batches to absorb bursts without blocking the producer.</p>
+<h3 id="why-batching-helps">Why batching helps<a class="headerlink" href="#why-batching-helps" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Fewer channel sends</strong>: 1024 records move through one channel send instead of 1024 separate sends. Channel operations have non-trivial overhead (mutex acquisition, goroutine scheduling).</li>
+<li><strong>Better cache locality</strong>: Processing a contiguous slice of records keeps data in L1/L2 cache, compared to processing records one at a time with channel recv between each.</li>
+<li><strong>Enables compaction</strong>: In a future phase, batches can be compacted before aggregation -- summing Z-set weights for identical group keys, eliminating redundant accumulator updates.</li>
+</ul>
+<h3 id="unbatching">Unbatching<a class="headerlink" href="#unbatching" title="Permanent link">&para;</a></h3>
+<p>After the accumulator, <code>UnbatchChannel</code> expands batches back into individual records for the sink layer, which processes records one at a time.</p>
+<h2 id="concurrency-model">Concurrency model<a class="headerlink" href="#concurrency-model" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>stdin goroutine ──chan Record──▶ decode+filter goroutine ──chan Record──▶ BatchChannel ──chan Batch──▶ accumulator ──chan Record──▶ sink
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>                                                                                                           │
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>                                                                                                           ├── checkpoint ticker
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>                                                                                                           └── TUI render (15fps)
+</code></pre></div>
+<p>For Kafka: one goroutine per partition -&gt; fan-in channel -&gt; <code>BatchChannel</code> -&gt; single accumulator goroutine.</p>
+<p>The accumulator is the serialization point. At 275K records/sec for O(1) aggregates, the accumulator goroutine uses ~20ms of CPU per second. The bottleneck is JSON decoding, not accumulation.</p>
+<p>Non-accumulating queries bypass both the batch stage and the accumulator -- partition goroutines write filtered/projected records directly to the output channel.</p>
+<h2 id="sink-layer">Sink layer<a class="headerlink" href="#sink-layer" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Sink</th>
+<th>When used</th>
+<th>Behavior</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>JSONSink</code></td>
+<td>Non-accumulating, piped</td>
+<td>NDJSON, one line per record</td>
+</tr>
+<tr>
+<td><code>ChangelogSink</code></td>
+<td>Accumulating, piped</td>
+<td>NDJSON with <code>"op":"+"/"−"</code>, sorted final snapshot at EOF</td>
+</tr>
+<tr>
+<td><code>TUISink</code></td>
+<td>Accumulating, TTY</td>
+<td>Live-updating table at 15fps</td>
+</tr>
+<tr>
+<td><code>SQLiteSink</code></td>
+<td><code>--state file.db</code></td>
+<td>UPSERT for accumulating, INSERT for non-accumulating</td>
+</tr>
+<tr>
+<td><code>HTTPSink</code></td>
+<td><code>dbspa serve</code></td>
+<td>In-memory state via HTTP + SSE</td>
+</tr>
+</tbody>
+</table>
+<h2 id="duckdb-integration">DuckDB Integration<a class="headerlink" href="#duckdb-integration" title="Permanent link">&para;</a></h2>
+<p>DBSPA embeds <a href="https://duckdb.org/">DuckDB</a> as the table query engine for file-based sources. DuckDB is a vectorized columnar engine optimized for batch analytics -- it handles Parquet, CSV, and JSON files orders of magnitude faster than DBSPA's own decoders.</p>
+<h3 id="when-duckdb-is-used">When DuckDB is used<a class="headerlink" href="#when-duckdb-is-used" title="Permanent link">&para;</a></h3>
+<p>File paths ending in <code>.parquet</code>, <code>.csv</code>, or <code>.json</code> are automatically routed to DuckDB. This applies to:</p>
+<ul>
+<li><strong>Direct file queries:</strong> <code>FROM '/path/to/file.parquet'</code> executes in DuckDB.</li>
+<li><strong>Join table side:</strong> <code>JOIN '/data/users.parquet' u ON ...</code> loads the file via DuckDB into a DD join arrangement.</li>
+</ul>
+<h3 id="how-it-works">How it works<a class="headerlink" href="#how-it-works" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>Stream source --&gt; DBSPA pipeline --&gt; DD Join --&gt; Output
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>                                       ^
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>DuckDB query --&gt; Result as Arrangement --+
+</code></pre></div>
+<ol>
+<li>DBSPA translates the relevant portion of the query (predicate pushdown, column pruning) into a DuckDB SQL query.</li>
+<li>DuckDB executes the query natively, leveraging columnar storage, SIMD vectorization, and row group statistics.</li>
+<li>Results are returned as <code>[]Record</code> and loaded into the pipeline (either directly to the sink for standalone queries, or into a DD join arrangement for joins).</li>
+</ol>
+<h3 id="predicate-pushdown-and-column-pruning">Predicate pushdown and column pruning<a class="headerlink" href="#predicate-pushdown-and-column-pruning" title="Permanent link">&para;</a></h3>
+<p>When DBSPA routes a query to DuckDB, it pushes down:</p>
+<ul>
+<li><strong>WHERE predicates</strong> -- DuckDB skips entire row groups using column statistics, achieving nearly 2M records/sec on filters vs 277K for NDJSON.</li>
+<li><strong>Column references</strong> -- only columns referenced by the query are read from the file. For wide Parquet files, this dramatically reduces I/O.</li>
+</ul>
+<h3 id="duckdb-scans-dbspa-aggregates">DuckDB scans, DBSPA aggregates<a class="headerlink" href="#duckdb-scans-dbspa-aggregates" title="Permanent link">&para;</a></h3>
+<p>For <code>GROUP BY</code> queries on files, DuckDB handles the scan and DBSPA handles the aggregation. This is because DBSPA's accumulator supports incremental updates and Z-set semantics, which DuckDB's batch engine does not. The scan is fast (DuckDB), and the aggregation throughput is dominated by accumulator updates regardless of the decoder (~110K records/sec).</p>
+<h3 id="syntax">Syntax<a class="headerlink" href="#syntax" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="c1">-- DuckDB handles the file query natively</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="k">SELECT</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="s1">&#39;/data/orders.parquet&#39;</span><span class="w"> </span><span class="k">WHERE</span><span class="w"> </span><span class="n">region</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">&#39;us-east&#39;</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="c1">-- Stream joined against DuckDB-loaded table</span>
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="k">SELECT</span><span class="w"> </span><span class="n">e</span><span class="p">.</span><span class="o">*</span><span class="p">,</span><span class="w"> </span><span class="n">u</span><span class="p">.</span><span class="n">name</span>
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="k">FROM</span><span class="w"> </span><span class="s1">&#39;kafka://broker/events&#39;</span><span class="w"> </span><span class="n">e</span>
+<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="k">JOIN</span><span class="w"> </span><span class="s1">&#39;/data/users.parquet&#39;</span><span class="w"> </span><span class="n">u</span><span class="w"> </span><span class="k">ON</span><span class="w"> </span><span class="n">e</span><span class="p">.</span><span class="n">user_id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">u</span><span class="p">.</span><span class="n">id</span>
+<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a>
+<a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a><span class="c1">-- Works with CSV and JSON too</span>
+<a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a><span class="k">SELECT</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="s1">&#39;/data/logs.csv&#39;</span><span class="w"> </span><span class="k">WHERE</span><span class="w"> </span><span class="k">level</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">&#39;ERROR&#39;</span>
+</code></pre></div>
+<h2 id="streaming-subquery-execution">Streaming Subquery Execution<a class="headerlink" href="#streaming-subquery-execution" title="Permanent link">&para;</a></h2>
+<p>When a JOIN subquery's FROM source is a Kafka topic, DBSPA runs the inner and outer queries concurrently. This avoids the materialization deadlock (Kafka never reaches EOF, so a materialized subquery would block forever).</p>
+<h3 id="concurrent-pipeline">Concurrent pipeline<a class="headerlink" href="#concurrent-pipeline" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>                    ┌─────────────────────────────────────────────────┐
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>                    │  Inner query goroutine                          │
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>                    │                                                 │
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>                    │  Kafka CDC ──▶ Decode ──▶ Filter ──▶ Accumulate │
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>                    │                                          │      │
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>                    └──────────────────────────────────────────┼──────┘
+<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a>                                                               │
+<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a>                                                        Z-set deltas
+<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a>                                                        (chan Record)
+<a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a>                                                               │
+<a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a>                                                               ▼
+<a id="__codelineno-8-12" name="__codelineno-8-12" href="#__codelineno-8-12"></a>┌──────────────────────────────────────────────────────────────────────────┐
+<a id="__codelineno-8-13" name="__codelineno-8-13" href="#__codelineno-8-13"></a>│  Outer query goroutine                                                   │
+<a id="__codelineno-8-14" name="__codelineno-8-14" href="#__codelineno-8-14"></a>│                                                                          │
+<a id="__codelineno-8-15" name="__codelineno-8-15" href="#__codelineno-8-15"></a>│  Kafka events ──▶ Decode ──▶ ProcessLeftDelta ──┐                        │
+<a id="__codelineno-8-16" name="__codelineno-8-16" href="#__codelineno-8-16"></a>│                                                 ├──▶ DDJoinOp ──▶ Sink   │
+<a id="__codelineno-8-17" name="__codelineno-8-17" href="#__codelineno-8-17"></a>│                      ProcessRightDelta ◀────────┘       │                │
+<a id="__codelineno-8-18" name="__codelineno-8-18" href="#__codelineno-8-18"></a>│                      (from inner channel)            mutex-protected     │
+<a id="__codelineno-8-19" name="__codelineno-8-19" href="#__codelineno-8-19"></a>└──────────────────────────────────────────────────────────────────────────┘
+</code></pre></div>
+<h3 id="execution-flow">Execution flow<a class="headerlink" href="#execution-flow" title="Permanent link">&para;</a></h3>
+<ol>
+<li><code>buildStreamingSubqueryJoinOp</code> creates a DDJoinOp with an empty right arrangement (<code>RightIsStatic = false</code>) and starts the inner query via <code>executeStreamingSubquery</code>.</li>
+<li><code>applyStreamingSubqueryJoin</code> spawns two goroutines:<ul>
+<li><strong>Right feeder:</strong> reads from the inner query's output channel and calls <code>ProcessRightDelta</code> for each record.</li>
+<li><strong>Left feeder:</strong> reads from the outer query's source and calls <code>ProcessLeftDeltaStream</code>.</li>
+</ul>
+</li>
+<li>Both goroutines share the DDJoinOp, which is mutex-protected. When either side produces a delta, it is joined against the other side's arrangement.</li>
+<li>The output channel is closed only when both goroutines finish (tracked by a <code>sync.WaitGroup</code>).</li>
+</ol>
+<h3 id="delta-semantics">Delta semantics<a class="headerlink" href="#delta-semantics" title="Permanent link">&para;</a></h3>
+<p>The inner query's accumulator emits retraction+insertion pairs for every group change. For example, if region "us-east" revenue goes from 100 to 105:</p>
+<ul>
+<li>Emit <code>{region: "us-east", revenue: 100, weight: -1}</code> (retraction)</li>
+<li>Emit <code>{region: "us-east", revenue: 105, weight: +1}</code> (insertion)</li>
+</ul>
+<p>The DDJoinOp processes these as right-side deltas. The retraction removes the old revenue from the arrangement and produces retractions for all matching left records. The insertion adds the new revenue and produces updated join results. The output weight follows the standard DD formula: <code>output_weight = left_weight * right_weight</code>.</p>
+<h2 id="seed-from">SEED FROM<a class="headerlink" href="#seed-from" title="Permanent link">&para;</a></h2>
+<p>For cold starts when Kafka retention is insufficient:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="k">FROM</span><span class="w"> </span><span class="s1">&#39;kafka://broker/topic&#39;</span><span class="w"> </span><span class="n">SEED</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="s1">&#39;/path/to/snapshot.parquet&#39;</span>
+</code></pre></div>
+<h3 id="how-it-works-importinitialstate">How it works: ImportInitialState<a class="headerlink" href="#how-it-works-importinitialstate" title="Permanent link">&para;</a></h3>
+<p>SEED FROM does <strong>not</strong> replay raw records through the pipeline. Instead, it injects pre-computed accumulator state directly:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>┌──────────┐     ┌─────────────────┐     ┌─────────────────────────┐     ┌──────────┐
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>│ Seed     │────▶│ Parse seed rows │────▶│ Map columns to          │────▶│ Kafka    │
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>│ source   │     │ (file or EXEC)  │     │ accumulator.SetInitial  │     │ stream   │
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>│          │     │                 │     │ per group key            │     │ begins   │
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>└──────────┘     └─────────────────┘     └─────────────────────────┘     └──────────┘
+</code></pre></div>
+<ol>
+<li><strong>Load seed data</strong> from a file or EXEC command (synchronous, blocking).</li>
+<li><strong>Map seed columns to accumulators.</strong> Each seed row's columns are matched to the outer query's GROUP BY keys and aggregate aliases. For each group key, <code>SetInitial</code> is called on the corresponding accumulator with the seed value.</li>
+<li><strong>Start streaming from Kafka.</strong> Accumulators continue from the seeded state -- new records update the pre-existing values.</li>
+</ol>
+<h3 id="column-mapping-rules">Column mapping rules<a class="headerlink" href="#column-mapping-rules" title="Permanent link">&para;</a></h3>
+<ul>
+<li>GROUP BY columns in the seed identify the group key.</li>
+<li>Aggregate alias columns (e.g., <code>total</code> for <code>SUM(amount) AS total</code>) set the initial accumulator value.</li>
+<li>Missing seed columns log a warning and leave the accumulator at its zero value.</li>
+<li>Extra seed columns are ignored.</li>
+</ul>
+<h3 id="why-avg-cannot-be-seeded">Why AVG cannot be seeded<a class="headerlink" href="#why-avg-cannot-be-seeded" title="Permanent link">&para;</a></h3>
+<p><code>AVG</code> is internally derived from <code>SUM / COUNT</code>. A single pre-computed average cannot be decomposed back into its component sum and count without knowing the original count. To seed an average, use separate <code>SUM</code> and <code>COUNT</code> accumulators and compute the average in the SELECT list:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="k">SELECT</span><span class="w"> </span><span class="n">region</span><span class="p">,</span><span class="w"> </span><span class="k">SUM</span><span class="p">(</span><span class="n">amount</span><span class="p">)</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="k">COUNT</span><span class="p">(</span><span class="o">*</span><span class="p">)</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">avg_amount</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="k">FROM</span><span class="w"> </span><span class="s1">&#39;kafka://broker/orders.cdc&#39;</span><span class="w"> </span><span class="n">CHANGELOG</span><span class="w"> </span><span class="n">DEBEZIUM</span>
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="n">SEED</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="k">EXEC</span><span class="p">(</span><span class="s1">&#39;bq query --format=json &quot;SELECT region, SUM(amount) AS sum_amount, COUNT(*) AS cnt FROM orders GROUP BY region&quot;&#39;</span><span class="p">)</span>
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="k">GROUP</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">region</span>
+</code></pre></div>
+<h3 id="checkpoint-vs-seed-precedence">Checkpoint vs seed precedence<a class="headerlink" href="#checkpoint-vs-seed-precedence" title="Permanent link">&para;</a></h3>
+<p>If a checkpoint exists, it takes precedence over the seed (checkpoint is more recent). The seed is skipped entirely when valid checkpoint state is found.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.sections", "navigation.expand", "navigation.top", "content.code.copy", "search.highlight"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>
