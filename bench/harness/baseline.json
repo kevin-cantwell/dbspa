@@ -1,6 +1,6 @@
 {
   "timestamp": "2026-04-03T01:53:44Z",
-  "folddb_version": "folddb 111f6d8-dirty",
+  "dbspa_version": "dbspa 111f6d8-dirty",
   "go_version": "go1.25.7",
   "os": "darwin",
   "arch": "arm64",

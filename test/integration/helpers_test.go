@@ -20,7 +20,7 @@ import (
 )
 
 var (
-	folddbBinary string
+	dbspaBinary string
 	buildOnce    sync.Once
 	buildErr     error
 )
@@ -30,22 +30,22 @@ const (
 	defaultTimeout = 30 * time.Second
 )
 
-// TestMain builds the folddb binary once before all integration tests.
+// TestMain builds the dbspa binary once before all integration tests.
 func TestMain(m *testing.M) {
 	buildOnce.Do(func() {
 		// Build the binary into a temp location
-		tmpDir, err := os.MkdirTemp("", "folddb-integration-*")
+		tmpDir, err := os.MkdirTemp("", "dbspa-integration-*")
 		if err != nil {
 			buildErr = fmt.Errorf("cannot create temp dir: %w", err)
 			return
 		}
-		folddbBinary = filepath.Join(tmpDir, "folddb")
-		cmd := exec.Command("go", "build", "-o", folddbBinary, "./cmd/folddb")
+		dbspaBinary = filepath.Join(tmpDir, "dbspa")
+		cmd := exec.Command("go", "build", "-o", dbspaBinary, "./cmd/dbspa")
 		cmd.Dir = repoRoot()
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		if err := cmd.Run(); err != nil {
-			buildErr = fmt.Errorf("cannot build folddb: %w", err)
+			buildErr = fmt.Errorf("cannot build dbspa: %w", err)
 			return
 		}
 	})
@@ -53,8 +53,8 @@ func TestMain(m *testing.M) {
 	code := m.Run()
 
 	// Cleanup
-	if folddbBinary != "" {
-		os.RemoveAll(filepath.Dir(folddbBinary))
+	if dbspaBinary != "" {
+		os.RemoveAll(filepath.Dir(dbspaBinary))
 	}
 	os.Exit(code)
 }
@@ -86,11 +86,11 @@ func skipIfShort(t *testing.T) {
 	}
 }
 
-// requireBuild fails the test if the folddb binary could not be built.
+// requireBuild fails the test if the dbspa binary could not be built.
 func requireBuild(t *testing.T) {
 	t.Helper()
 	if buildErr != nil {
-		t.Fatalf("folddb build failed: %v", buildErr)
+		t.Fatalf("dbspa build failed: %v", buildErr)
 	}
 }
 
@@ -250,9 +250,9 @@ func produceToPartition(t *testing.T, topic string, partition int32, messages []
 	}
 }
 
-// runFoldDB executes the folddb binary with the given SQL and options.
+// runDBSPA executes the dbspa binary with the given SQL and options.
 // Returns captured stdout, stderr, and any error.
-func runFoldDB(t *testing.T, sql string, opts ...string) (stdout, stderr string, err error) {
+func runDBSPA(t *testing.T, sql string, opts ...string) (stdout, stderr string, err error) {
 	t.Helper()
 	requireBuild(t)
 
@@ -260,7 +260,7 @@ func runFoldDB(t *testing.T, sql string, opts ...string) (stdout, stderr string,
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, folddbBinary, args...)
+	cmd := exec.CommandContext(ctx, dbspaBinary, args...)
 	var outBuf, errBuf bytes.Buffer
 	cmd.Stdout = &outBuf
 	cmd.Stderr = &errBuf
@@ -269,8 +269,8 @@ func runFoldDB(t *testing.T, sql string, opts ...string) (stdout, stderr string,
 	return outBuf.String(), errBuf.String(), err
 }
 
-// runFoldDBWithTimeout is like runFoldDB but with a custom timeout.
-func runFoldDBWithTimeout(t *testing.T, timeout time.Duration, sql string, opts ...string) (stdout, stderr string, err error) {
+// runDBSPAWithTimeout is like runDBSPA but with a custom timeout.
+func runDBSPAWithTimeout(t *testing.T, timeout time.Duration, sql string, opts ...string) (stdout, stderr string, err error) {
 	t.Helper()
 	requireBuild(t)
 
@@ -278,7 +278,7 @@ func runFoldDBWithTimeout(t *testing.T, timeout time.Duration, sql string, opts 
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, folddbBinary, args...)
+	cmd := exec.CommandContext(ctx, dbspaBinary, args...)
 	var outBuf, errBuf bytes.Buffer
 	cmd.Stdout = &outBuf
 	cmd.Stderr = &errBuf
@@ -287,8 +287,8 @@ func runFoldDBWithTimeout(t *testing.T, timeout time.Duration, sql string, opts 
 	return outBuf.String(), errBuf.String(), err
 }
 
-// runFoldDBWithStdin executes the folddb binary with the given SQL and stdin input.
-func runFoldDBWithStdin(t *testing.T, sql string, input string, opts ...string) (stdout string, err error) {
+// runDBSPAWithStdin executes the dbspa binary with the given SQL and stdin input.
+func runDBSPAWithStdin(t *testing.T, sql string, input string, opts ...string) (stdout string, err error) {
 	t.Helper()
 	requireBuild(t)
 
@@ -296,7 +296,7 @@ func runFoldDBWithStdin(t *testing.T, sql string, input string, opts ...string) 
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, folddbBinary, args...)
+	cmd := exec.CommandContext(ctx, dbspaBinary, args...)
 	cmd.Stdin = strings.NewReader(input)
 	var outBuf, errBuf bytes.Buffer
 	cmd.Stdout = &outBuf
@@ -309,14 +309,14 @@ func runFoldDBWithStdin(t *testing.T, sql string, input string, opts ...string) 
 	return outBuf.String(), nil
 }
 
-// runFoldDBStreaming starts folddb and returns the process, allowing callers to
+// runDBSPAStreaming starts dbspa and returns the process, allowing callers to
 // read output incrementally or kill the process.
-func runFoldDBStreaming(t *testing.T, sql string, opts ...string) *exec.Cmd {
+func runDBSPAStreaming(t *testing.T, sql string, opts ...string) *exec.Cmd {
 	t.Helper()
 	requireBuild(t)
 
 	args := append([]string{sql}, opts...)
-	cmd := exec.Command(folddbBinary, args...)
+	cmd := exec.Command(dbspaBinary, args...)
 	return cmd
 }
 

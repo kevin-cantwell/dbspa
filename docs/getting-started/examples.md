@@ -4,14 +4,14 @@
 
 ```bash
 # Filter API errors from a log stream
-tail -f /var/log/api.json | folddb "SELECT endpoint, status_code, latency_ms
+tail -f /var/log/api.json | dbspa "SELECT endpoint, status_code, latency_ms
                                      WHERE status_code >= 400"
 
 # Project specific fields from Kubernetes logs
-kubectl logs my-pod -f | folddb "SELECT message WHERE level = 'ERROR'"
+kubectl logs my-pod -f | dbspa "SELECT message WHERE level = 'ERROR'"
 
 # JSON path extraction
-cat events.ndjson | folddb "SELECT payload->'user'->>'email' AS email,
+cat events.ndjson | dbspa "SELECT payload->'user'->>'email' AS email,
                                     payload->'user'->>'name' AS name
                              WHERE payload->'user'->>'role' = 'admin'"
 ```
@@ -20,23 +20,23 @@ cat events.ndjson | folddb "SELECT payload->'user'->>'email' AS email,
 
 ```bash
 # Count by status
-cat orders.ndjson | folddb "SELECT status, COUNT(*) AS cnt GROUP BY status"
+cat orders.ndjson | dbspa "SELECT status, COUNT(*) AS cnt GROUP BY status"
 
 # Multiple aggregates
-cat orders.ndjson | folddb "SELECT region, COUNT(*) AS cnt,
+cat orders.ndjson | dbspa "SELECT region, COUNT(*) AS cnt,
                                     SUM(total) AS revenue,
                                     AVG(total) AS avg_order
                              GROUP BY region"
 
 # Multi-key GROUP BY
-cat orders.ndjson | folddb "SELECT product, region,
+cat orders.ndjson | dbspa "SELECT product, region,
                                     COUNT(*) AS cnt,
                                     SUM(total) AS revenue
                              GROUP BY product, region
                              ORDER BY revenue DESC"
 
 # HAVING filter on aggregates
-cat orders.ndjson | folddb "SELECT status, COUNT(*) AS cnt
+cat orders.ndjson | dbspa "SELECT status, COUNT(*) AS cnt
                              GROUP BY status
                              HAVING COUNT(*) > 100"
 ```
@@ -45,18 +45,18 @@ cat orders.ndjson | folddb "SELECT status, COUNT(*) AS cnt
 
 ```bash
 # Live order counts from a CDC stream
-folddb "SELECT _after->>'status' AS status, COUNT(*) AS orders
+dbspa "SELECT _after->>'status' AS status, COUNT(*) AS orders
         FROM 'kafka://broker:9092/orders.cdc' FORMAT DEBEZIUM
         GROUP BY _after->>'status'"
 
 # Revenue by region — updates correctly when orders change status
-folddb "SELECT _after->>'region' AS region,
+dbspa "SELECT _after->>'region' AS region,
                SUM((_after->>'total')::float) AS revenue
         FROM 'kafka://broker:9092/orders.cdc' FORMAT DEBEZIUM
         GROUP BY _after->>'region'"
 
 # Filter only updates
-folddb "SELECT _after->>'order_id' AS id,
+dbspa "SELECT _after->>'order_id' AS id,
                _before->>'status' AS old_status,
                _after->>'status' AS new_status
         FROM 'kafka://broker:9092/orders.cdc' FORMAT DEBEZIUM
@@ -67,14 +67,14 @@ folddb "SELECT _after->>'order_id' AS id,
 
 ```bash
 # Tumbling window: per-minute request counts
-folddb "SELECT window_start, endpoint, COUNT(*) AS reqs
+dbspa "SELECT window_start, endpoint, COUNT(*) AS reqs
         FROM 'kafka://broker/api_requests'
         GROUP BY endpoint
         WINDOW TUMBLING '1 minute'
         EVENT TIME BY timestamp"
 
 # Sliding window: 10-minute average with 1-minute slide
-folddb "SELECT window_start, endpoint,
+dbspa "SELECT window_start, endpoint,
                COUNT(*) AS reqs,
                AVG(latency_ms) AS avg_lat
         FROM 'kafka://broker/api_requests'
@@ -83,7 +83,7 @@ folddb "SELECT window_start, endpoint,
         EVENT TIME BY timestamp"
 
 # Session window: user activity sessions with 5-minute gap
-folddb "SELECT window_start, window_end, user_id,
+dbspa "SELECT window_start, window_end, user_id,
                COUNT(*) AS events
         FROM 'kafka://broker/clicks'
         GROUP BY user_id
@@ -91,7 +91,7 @@ folddb "SELECT window_start, window_end, user_id,
         EVENT TIME BY event_time"
 
 # Early emissions: see partial results every 10 seconds
-folddb "SELECT window_start, endpoint, COUNT(*) AS reqs
+dbspa "SELECT window_start, endpoint, COUNT(*) AS reqs
         FROM 'kafka://broker/api_requests'
         GROUP BY endpoint
         WINDOW TUMBLING '1 hour'
@@ -104,12 +104,12 @@ Enrich streaming events with reference data from files:
 
 ```bash
 # Join stream with a Parquet lookup table
-cat events.ndjson | folddb "SELECT e.user_id, u.name, e.action
+cat events.ndjson | dbspa "SELECT e.user_id, u.name, e.action
                              FROM stdin e
                              JOIN '/data/users.parquet' u ON e.user_id = u.id"
 
 # LEFT JOIN — keep events even if no user match
-cat events.ndjson | folddb "SELECT e.user_id,
+cat events.ndjson | dbspa "SELECT e.user_id,
                                     COALESCE(u.name, 'unknown') AS name,
                                     e.action
                              FROM stdin e
@@ -122,12 +122,12 @@ Use subqueries as derived tables or as JOIN sources:
 
 ```bash
 # Derived table: pre-aggregate then filter
-folddb -i orders.ndjson \
+dbspa -i orders.ndjson \
   "SELECT * FROM (SELECT status, COUNT(*) AS cnt GROUP BY status) t
    WHERE cnt > 10"
 
 # Join stream against pre-aggregated file
-cat events.ndjson | folddb \
+cat events.ndjson | dbspa \
   "SELECT e.customer_id, e.action, r.order_count
    FROM stdin e
    JOIN (SELECT customer_id, COUNT(*) AS order_count
@@ -136,7 +136,7 @@ cat events.ndjson | folddb \
      ON e.customer_id = r.customer_id"
 
 # Nested subquery: filter then project
-folddb -i data.ndjson \
+dbspa -i data.ndjson \
   "SELECT name, total
    FROM (SELECT name, SUM(amount) AS total
          FROM (SELECT * FROM '/data/transactions.ndjson' WHERE status = 'complete') t1
@@ -150,24 +150,24 @@ Use `EXEC()` to run any CLI tool and query its output with SQL:
 
 ```bash
 # Query kubectl logs with SQL
-folddb "SELECT level, message FROM EXEC('kubectl logs my-pod --output=json') AS STREAM
+dbspa "SELECT level, message FROM EXEC('kubectl logs my-pod --output=json') AS STREAM
         WHERE level = 'ERROR'"
 
 # Join stream against a Postgres table via psql
-cat events.json | folddb \
+cat events.json | dbspa \
   "SELECT e.*, u.name
    FROM stdin e
    JOIN EXEC('psql -c \"COPY users TO STDOUT WITH (FORMAT csv, HEADER)\"') u FORMAT CSV(header=true)
      ON e.user_id = u.id"
 
 # Seed accumulator from BigQuery, then stream from Kafka
-folddb "SELECT region, SUM(amount) AS total
+dbspa "SELECT region, SUM(amount) AS total
         FROM 'kafka://broker/orders.cdc' FORMAT DEBEZIUM
         SEED FROM EXEC('bq query --format=json \"SELECT * FROM orders_snapshot\"')
         GROUP BY region"
 
 # Pipe shell commands together
-folddb "SELECT status, COUNT(*) AS cnt
+dbspa "SELECT status, COUNT(*) AS cnt
         FROM EXEC('cat access.log | grep POST')
         GROUP BY status"
 ```
@@ -175,7 +175,7 @@ folddb "SELECT status, COUNT(*) AS cnt
 EXEC runs the command through `/bin/sh -c`, so pipes, redirects, and shell features work. For commands that run indefinitely (like `tail -f` or `kubectl logs -f`), use `AS STREAM` to process output concurrently instead of waiting for the command to exit.
 
 !!! note
-    EXEC is disabled in `folddb serve` mode for security.
+    EXEC is disabled in `dbspa serve` mode for security.
 
 ## Streaming subqueries
 
@@ -183,7 +183,7 @@ Join a live event stream against a concurrently-running CDC aggregation:
 
 ```bash
 # Enrich events with live revenue-per-region from a CDC stream
-folddb "SELECT e.user_id, r.revenue
+dbspa "SELECT e.user_id, r.revenue
         FROM 'kafka://broker/events' e
         JOIN (
             SELECT region, SUM(amount) AS revenue
@@ -200,7 +200,7 @@ Use a Kafka-based subquery as a derived table with outer filtering:
 
 ```bash
 # Live order status counts, filtered for statuses with > 100 orders
-folddb "SELECT * FROM (SELECT status, COUNT(*) AS cnt
+dbspa "SELECT * FROM (SELECT status, COUNT(*) AS cnt
                         FROM 'kafka://broker/orders.cdc' FORMAT DEBEZIUM
                         GROUP BY status) t
         WHERE cnt > 100"
@@ -214,7 +214,7 @@ Use a static file as reference data with a live streaming subquery on the JOIN s
 
 ```bash
 # Enrich a static customer list with live order counts
-folddb "SELECT c.name, c.tier, r.order_count
+dbspa "SELECT c.name, c.tier, r.order_count
         FROM '/data/customers.parquet' c
         JOIN (
             SELECT customer_id, COUNT(*) AS order_count
@@ -229,12 +229,12 @@ The customer file is loaded once. The query keeps running after the file is full
 
 ```bash
 # Explicit spill-to-disk
-folddb --spill-to-disk \
+dbspa --spill-to-disk \
   "SELECT o.*, c.name FROM 'kafka://broker/orders' o
    JOIN '/data/customers.parquet' c ON o.customer_id = c.id"
 
 # With memory budget
-folddb --max-memory 512MB \
+dbspa --max-memory 512MB \
   "SELECT o.*, c.name FROM 'kafka://broker/orders' o
    JOIN '/data/customers.parquet' c ON o.customer_id = c.id"
 ```
@@ -245,12 +245,12 @@ Stream-stream joins auto-enable spill-to-disk to prevent OOM.
 
 ```bash
 # Deduplicate by order_id within a 10-minute window
-folddb "SELECT _after->>'order_id' AS id, _after->>'status' AS status
+dbspa "SELECT _after->>'order_id' AS id, _after->>'status' AS status
         FROM 'kafka://broker/orders.cdc' FORMAT DEBEZIUM
         DEDUPLICATE BY _after->>'order_id' WITHIN '10 minutes'"
 
 # With custom cache capacity
-folddb "SELECT *
+dbspa "SELECT *
         FROM 'kafka://broker/events'
         DEDUPLICATE BY event_id WITHIN '1 hour' CAPACITY 500000"
 ```
@@ -260,7 +260,7 @@ folddb "SELECT *
 Bootstrap aggregation state from a snapshot before streaming:
 
 ```bash
-folddb "SELECT region, COUNT(*) AS orders
+dbspa "SELECT region, COUNT(*) AS orders
         FROM 'kafka://broker/orders.cdc' FORMAT DEBEZIUM
         SEED FROM '/data/orders-snapshot.parquet'
         GROUP BY region"
@@ -272,78 +272,78 @@ Use EXEC to pull pre-aggregated state from a data warehouse, then continue with 
 
 ```bash
 # Seed from BigQuery, continue from Kafka CDC
-folddb "SELECT region, SUM(amount) AS total
+dbspa "SELECT region, SUM(amount) AS total
         FROM 'kafka://broker/orders.cdc?offset=2026-04-01' FORMAT DEBEZIUM
         SEED FROM EXEC('bq query --format=json \"SELECT region, SUM(amount) AS total FROM orders WHERE ts < ''2026-04-01'' GROUP BY region\"')
         GROUP BY region"
 ```
 
-The seed query's columns (`region`, `total`) match the outer query's GROUP BY key and aggregate alias. FoldDB injects the pre-computed sums directly into the accumulators, then streaming picks up from the Kafka offset where the seed left off.
+The seed query's columns (`region`, `total`) match the outer query's GROUP BY key and aggregate alias. DBSPA injects the pre-computed sums directly into the accumulators, then streaming picks up from the Kafka offset where the seed left off.
 
 ## Stateful checkpointing
 
 Survive restarts without replaying from the beginning:
 
 ```bash
-folddb --stateful \
+dbspa --stateful \
   "SELECT region, COUNT(*)
    FROM 'kafka://broker/orders.cdc' FORMAT DEBEZIUM
    GROUP BY region"
 
 # Inspect checkpoint state
-folddb state list
-folddb state inspect a1b2c3d4
-folddb state reset a1b2c3d4
+dbspa state list
+dbspa state inspect a1b2c3d4
+dbspa state reset a1b2c3d4
 ```
 
 ## Format examples
 
 ```bash
 # CSV input
-cat data.csv | folddb "SELECT name, age WHERE age > 25 FORMAT CSV"
+cat data.csv | dbspa "SELECT name, age WHERE age > 25 FORMAT CSV"
 
 # CSV with options
-cat data.csv | folddb "SELECT * FORMAT CSV(delimiter='|', header=true)"
+cat data.csv | dbspa "SELECT * FORMAT CSV(delimiter='|', header=true)"
 
 # Avro from Kafka with schema registry
-folddb "SELECT * FROM 'kafka://broker/events?registry=http://registry:8081' FORMAT AVRO"
+dbspa "SELECT * FROM 'kafka://broker/events?registry=http://registry:8081' FORMAT AVRO"
 
 # Avro-encoded Debezium CDC (replaces deprecated FORMAT DEBEZIUM_AVRO)
-folddb "SELECT * FROM 'kafka://broker/orders.cdc?registry=http://registry:8081' FORMAT AVRO DEBEZIUM"
+dbspa "SELECT * FROM 'kafka://broker/orders.cdc?registry=http://registry:8081' FORMAT AVRO DEBEZIUM"
 
 # Protobuf with typed messages
-cat data.pb | folddb "SELECT * FORMAT PROTOBUF(message='Order')"
+cat data.pb | dbspa "SELECT * FORMAT PROTOBUF(message='Order')"
 
 # Parquet file
-folddb -i users.parquet "SELECT * WHERE country = 'US' FORMAT PARQUET"
+dbspa -i users.parquet "SELECT * WHERE country = 'US' FORMAT PARQUET"
 ```
 
-## FoldDB changelog piping
+## DBSPA changelog piping
 
-Compose FoldDB instances by piping one changelog into another using `FORMAT FOLDDB`:
+Compose DBSPA instances by piping one changelog into another using `FORMAT DBSPA`:
 
 ```bash
 # Instance 1: aggregate orders by status, emit changelog
-folddb "SELECT status, COUNT(*) AS cnt
+dbspa "SELECT status, COUNT(*) AS cnt
         FROM 'kafka://broker/orders' GROUP BY status" | \
 
 # Instance 2: consume changelog, filter for high-count statuses
-folddb "SELECT * FROM stdin FORMAT FOLDDB WHERE cnt > 100"
+dbspa "SELECT * FROM stdin FORMAT DBSPA WHERE cnt > 100"
 ```
 
-The `FORMAT FOLDDB` envelope reads the `weight` field and unwraps the `data` object from the Feldera weighted format, preserving retraction/insertion semantics across the pipe.
+The `FORMAT DBSPA` envelope reads the `weight` field and unwraps the `data` object from the Feldera weighted format, preserving retraction/insertion semantics across the pipe.
 
 ## Output to SQLite
 
 ```bash
 # Accumulating query: result table is UPSERTed
-folddb --state metrics.db \
+dbspa --state metrics.db \
   "SELECT endpoint, COUNT(*) AS reqs, AVG(latency_ms) AS avg_lat
    FROM 'kafka://broker/api_requests'
    GROUP BY endpoint"
 
 # Non-accumulating query: records are appended
-folddb --state errors.db \
+dbspa --state errors.db \
   "SELECT endpoint, status_code, latency_ms
    FROM 'kafka://broker/api_requests'
    WHERE status_code >= 500"
@@ -353,15 +353,15 @@ folddb --state errors.db \
 
 ```bash
 # Print query plan without executing
-folddb --dry-run "SELECT status, COUNT(*) GROUP BY status"
+dbspa --dry-run "SELECT status, COUNT(*) GROUP BY status"
 
 # Print plan then execute
-folddb --explain "SELECT status, COUNT(*) GROUP BY status"
+dbspa --explain "SELECT status, COUNT(*) GROUP BY status"
 
 # Route bad records to a dead letter file
-folddb --dead-letter errors.ndjson \
+dbspa --dead-letter errors.ndjson \
   "SELECT * FROM 'kafka://broker/events'"
 
 # Infer schema from a source
-folddb schema 'kafka://broker/orders.cdc'
+dbspa schema 'kafka://broker/orders.cdc'
 ```

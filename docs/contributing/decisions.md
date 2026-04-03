@@ -64,11 +64,11 @@ The checkpoint is a performance optimization, not a correctness requirement. If 
 
 ---
 
-## 4. folddb serve (HTTP sidecar)
+## 4. dbspa serve (HTTP sidecar)
 
-**Problem:** FoldDB was CLI-only. For sidecar deployments (Kubernetes, etc.), users needed an HTTP API to query accumulated state.
+**Problem:** DBSPA was CLI-only. For sidecar deployments (Kubernetes, etc.), users needed an HTTP API to query accumulated state.
 
-**Decision:** `folddb serve` starts an HTTP server that runs a streaming query in the background and exposes the result set via HTTP.
+**Decision:** `dbspa serve` starts an HTTP server that runs a streaming query in the background and exposes the result set via HTTP.
 
 Endpoints:
 
@@ -120,7 +120,7 @@ GROUP BY region
 
 ## 7. Z-set formalization
 
-**Problem:** FoldDB's diff model (`Diff int8`, limited to +1/-1) was an informal version of Z-sets from DBSP (Feldera's foundation). The informal approach worked for simple operators but became fragile for complex queries (HAVING with retractions, multi-way joins, nested aggregation). It also prevented batch processing, which is needed to close the performance gap with DuckDB.
+**Problem:** DBSPA's diff model (`Diff int8`, limited to +1/-1) was an informal version of Z-sets from DBSP (Feldera's foundation). The informal approach worked for simple operators but became fragile for complex queries (HAVING with retractions, multi-way joins, nested aggregation). It also prevented batch processing, which is needed to close the performance gap with DuckDB.
 
 **Decision:** Formalize the data model as Z-sets with full integer weights (`Record.Weight int`), and introduce a batch pipeline.
 
@@ -129,7 +129,7 @@ GROUP BY region
 - **Phase 3 -- Batch compaction** (planned): Before aggregation, compact per group key -- sum weights for identical keys, eliminating redundant accumulator updates.
 - **Phase 4 -- Operator fusion** (planned): Fuse filter+project, filter+project+aggregate for common cases.
 
-**Why now:** The whole point of FoldDB is to close the gap between streaming and batch. Z-sets are the mathematical foundation that makes this possible. Deferring it accumulates tech debt.
+**Why now:** The whole point of DBSPA is to close the gap between streaming and batch. Z-sets are the mathematical foundation that makes this possible. Deferring it accumulates tech debt.
 
 **Reference:** Budiu et al., "DBSP: Automatic Incremental View Maintenance" (VLDB 2023). Z-sets = multisets with integer weights. Every relational operator has a provably correct incremental version over Z-set deltas.
 
@@ -139,7 +139,7 @@ GROUP BY region
 
 ## 8. At-least-once delivery
 
-**Problem:** Should FoldDB provide exactly-once output semantics?
+**Problem:** Should DBSPA provide exactly-once output semantics?
 
 **Decision:** No. v0 is at-least-once.
 
@@ -170,11 +170,11 @@ At 200K records/sec with O(1) aggregates, the accumulator goroutine consumes ~20
 
 ## 10. PostgreSQL dialect alignment
 
-**Problem:** Which SQL dialect should FoldDB follow?
+**Problem:** Which SQL dialect should DBSPA follow?
 
 **Decision:** PostgreSQL. It's the most widely known SQL dialect, and it's what DuckDB aligns to (relevant for future integration).
 
-Streaming extensions (`WINDOW TUMBLING`, `EMIT`, `EVENT TIME BY`, etc.) are FoldDB-specific — neither Flink SQL nor Spark SQL syntax fits a zero-config CLI.
+Streaming extensions (`WINDOW TUMBLING`, `EMIT`, `EVENT TIME BY`, etc.) are DBSPA-specific — neither Flink SQL nor Spark SQL syntax fits a zero-config CLI.
 
 ---
 

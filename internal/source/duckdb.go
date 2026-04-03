@@ -1,4 +1,4 @@
-// Package source provides stream source implementations for FoldDB.
+// Package source provides stream source implementations for DBSPA.
 package source
 
 import (
@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kevin-cantwell/folddb/internal/engine"
+	"github.com/kevin-cantwell/dbspa/internal/engine"
 
 	_ "github.com/marcboeker/go-duckdb" // DuckDB database/sql driver
 )
@@ -186,7 +186,7 @@ func IsDuckDBSupported(path string) bool {
 	return false
 }
 
-// TranslateToDuckDB converts a FoldDB source URI or file path into a DuckDB
+// TranslateToDuckDB converts a DBSPA source URI or file path into a DuckDB
 // SQL table expression (e.g., "read_parquet('/path/to/file.parquet')").
 func TranslateToDuckDB(uri string) (string, error) {
 	// S3 paths — DuckDB reads them natively via httpfs extension

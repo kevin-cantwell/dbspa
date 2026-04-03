@@ -285,8 +285,8 @@ func TestNegativeSQL(t *testing.T) {
 			errContains: "')'",
 		},
 		{
-			name:        "FORMAT two envelopes (DEBEZIUM FOLDDB)",
-			sql:         "SELECT * FROM stdin FORMAT DEBEZIUM FOLDDB",
+			name:        "FORMAT two envelopes (DEBEZIUM DBSPA)",
+			sql:         "SELECT * FROM stdin FORMAT DEBEZIUM DBSPA",
 			errContains: "unexpected token",
 		},
 		{

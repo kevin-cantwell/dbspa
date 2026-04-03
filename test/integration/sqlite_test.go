@@ -19,7 +19,7 @@ func TestSQLite_AccumulatingState(t *testing.T) {
 	skipIfShort(t)
 	requireBuild(t)
 
-	dbFile, err := os.CreateTemp("", "folddb-sqlite-*.db")
+	dbFile, err := os.CreateTemp("", "dbspa-sqlite-*.db")
 	if err != nil {
 		t.Fatalf("cannot create temp db: %v", err)
 	}
@@ -34,13 +34,13 @@ func TestSQLite_AccumulatingState(t *testing.T) {
 {"region":"us-east","amount":300}
 `
 
-	_, err = runFoldDBWithStdin(t,
+	_, err = runDBSPAWithStdin(t,
 		"SELECT region, COUNT(*) AS cnt, SUM(amount::float) AS total GROUP BY region",
 		input,
 		"--state", dbPath,
 	)
 	if err != nil {
-		t.Fatalf("folddb failed: %v", err)
+		t.Fatalf("dbspa failed: %v", err)
 	}
 
 	// Open SQLite and verify
@@ -102,7 +102,7 @@ func TestSQLite_ConcurrentRead(t *testing.T) {
 	topic := uniqueTopic(t, "sqlite-concurrent")
 	createTopic(t, topic, 1)
 
-	dbFile, err := os.CreateTemp("", "folddb-sqlite-concurrent-*.db")
+	dbFile, err := os.CreateTemp("", "dbspa-sqlite-concurrent-*.db")
 	if err != nil {
 		t.Fatalf("cannot create temp db: %v", err)
 	}
@@ -118,7 +118,7 @@ func TestSQLite_ConcurrentRead(t *testing.T) {
 	}
 	time.Sleep(500 * time.Millisecond)
 
-	// Start folddb writing to SQLite in a goroutine
+	// Start dbspa writing to SQLite in a goroutine
 	var wg sync.WaitGroup
 	wg.Add(1)
 
@@ -128,10 +128,10 @@ func TestSQLite_ConcurrentRead(t *testing.T) {
 			"SELECT region, COUNT(*) AS cnt, SUM(amount::float) AS total FROM 'kafka://%s/%s?offset=earliest' GROUP BY region LIMIT 40",
 			kafkaBroker, topic,
 		)
-		runFoldDBWithTimeout(t, 15*time.Second, sql, "--state", dbPath)
+		runDBSPAWithTimeout(t, 15*time.Second, sql, "--state", dbPath)
 	}()
 
-	// Give folddb a moment to start writing
+	// Give dbspa a moment to start writing
 	time.Sleep(2 * time.Second)
 
 	// Concurrent read: should not block
@@ -176,7 +176,7 @@ func TestSQLite_NonAccumulatingAppend(t *testing.T) {
 	skipIfShort(t)
 	requireBuild(t)
 
-	dbFile, err := os.CreateTemp("", "folddb-sqlite-append-*.db")
+	dbFile, err := os.CreateTemp("", "dbspa-sqlite-append-*.db")
 	if err != nil {
 		t.Fatalf("cannot create temp db: %v", err)
 	}
@@ -189,13 +189,13 @@ func TestSQLite_NonAccumulatingAppend(t *testing.T) {
 {"name":"charlie","age":35}
 `
 
-	_, err = runFoldDBWithStdin(t,
+	_, err = runDBSPAWithStdin(t,
 		"SELECT name, age",
 		input,
 		"--state", dbPath,
 	)
 	if err != nil {
-		t.Fatalf("folddb failed: %v", err)
+		t.Fatalf("dbspa failed: %v", err)
 	}
 
 	// Open SQLite and verify append-mode behavior
@@ -223,7 +223,7 @@ func TestSQLite_KafkaAccumulating(t *testing.T) {
 	topic := uniqueTopic(t, "sqlite-kafka")
 	createTopic(t, topic, 1)
 
-	dbFile, err := os.CreateTemp("", "folddb-sqlite-kafka-*.db")
+	dbFile, err := os.CreateTemp("", "dbspa-sqlite-kafka-*.db")
 	if err != nil {
 		t.Fatalf("cannot create temp db: %v", err)
 	}
@@ -245,7 +245,7 @@ func TestSQLite_KafkaAccumulating(t *testing.T) {
 		"SELECT region, COUNT(*) AS cnt, SUM(val::float) AS total FROM 'kafka://%s/%s?offset=earliest' GROUP BY region LIMIT 10",
 		kafkaBroker, topic,
 	)
-	stdout, stderr, err := runFoldDBWithTimeout(t, 15*time.Second, sqlQ, "--state", dbPath)
+	stdout, stderr, err := runDBSPAWithTimeout(t, 15*time.Second, sqlQ, "--state", dbPath)
 	t.Logf("kafka sqlite stdout:\n%s", stdout)
 	t.Logf("kafka sqlite stderr:\n%s", stderr)
 
@@ -297,7 +297,7 @@ func TestSQLite_WALMode(t *testing.T) {
 	skipIfShort(t)
 	requireBuild(t)
 
-	dbFile, err := os.CreateTemp("", "folddb-sqlite-wal-*.db")
+	dbFile, err := os.CreateTemp("", "dbspa-sqlite-wal-*.db")
 	if err != nil {
 		t.Fatalf("cannot create temp db: %v", err)
 	}
@@ -309,13 +309,13 @@ func TestSQLite_WALMode(t *testing.T) {
 {"x":2}
 `
 
-	_, err = runFoldDBWithStdin(t,
+	_, err = runDBSPAWithStdin(t,
 		"SELECT x",
 		input,
 		"--state", dbPath,
 	)
 	if err != nil {
-		t.Fatalf("folddb failed: %v", err)
+		t.Fatalf("dbspa failed: %v", err)
 	}
 
 	// Verify WAL mode
@@ -331,9 +331,9 @@ func TestSQLite_WALMode(t *testing.T) {
 		t.Fatalf("cannot check journal_mode: %v", err)
 	}
 
-	// WAL mode should be set by folddb
+	// WAL mode should be set by dbspa
 	t.Logf("journal_mode: %s", journalMode)
 	if journalMode != "wal" {
-		t.Logf("note: expected WAL mode, got %q (folddb may use a different mode)", journalMode)
+		t.Logf("note: expected WAL mode, got %q (dbspa may use a different mode)", journalMode)
 	}
 }

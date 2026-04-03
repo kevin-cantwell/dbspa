@@ -1,4 +1,4 @@
-// Command bench-harness runs the FoldDB benchmark suite and outputs JSON results.
+// Command bench-harness runs the DBSPA benchmark suite and outputs JSON results.
 //
 // This is a standalone program (not go test -bench) for full control over
 // fixture generation, measurement, and output format.
@@ -34,7 +34,7 @@ type BenchmarkResult struct {
 
 type SuiteResult struct {
 	Timestamp    string            `json:"timestamp"`
-	FoldDBVer    string            `json:"folddb_version"`
+	DBSPAVer    string            `json:"dbspa_version"`
 	GoVersion    string            `json:"go_version"`
 	OS           string            `json:"os"`
 	Arch         string            `json:"arch"`
@@ -45,7 +45,7 @@ type SuiteResult struct {
 // --- Global config ---
 
 var (
-	folddbBin string
+	dbspaBin string
 	genBin    string
 	runsPerBench = 3
 	recordCount  = 100_000
@@ -56,8 +56,8 @@ var (
 )
 
 func main() {
-	flag.StringVar(&folddbBin, "folddb", "", "Path to folddb binary (auto-detected if empty)")
-	flag.StringVar(&genBin, "folddb-gen", "", "Path to folddb-gen binary (auto-detected if empty)")
+	flag.StringVar(&dbspaBin, "dbspa", "", "Path to dbspa binary (auto-detected if empty)")
+	flag.StringVar(&genBin, "dbspa-gen", "", "Path to dbspa-gen binary (auto-detected if empty)")
 	flag.IntVar(&runsPerBench, "runs", 3, "Number of runs per benchmark")
 	flag.IntVar(&recordCount, "records", 100_000, "Number of records per benchmark")
 	flag.BoolVar(&withKafka, "with-kafka", false, "Include Kafka benchmarks")
@@ -66,29 +66,29 @@ func main() {
 	flag.Parse()
 
 	// Find binaries
-	if folddbBin == "" {
-		folddbBin = findBinary("folddb")
+	if dbspaBin == "" {
+		dbspaBin = findBinary("dbspa")
 	}
 	if genBin == "" {
-		genBin = findBinary("folddb-gen")
+		genBin = findBinary("dbspa-gen")
 	}
 
 	// Verify binaries exist
-	for _, bin := range []string{folddbBin, genBin} {
+	for _, bin := range []string{dbspaBin, genBin} {
 		if _, err := os.Stat(bin); err != nil {
 			fatalf("Binary not found: %s (run 'make build' first)", bin)
 		}
 	}
 
-	fmt.Fprintf(os.Stderr, "folddb:     %s\n", folddbBin)
-	fmt.Fprintf(os.Stderr, "folddb-gen: %s\n", genBin)
+	fmt.Fprintf(os.Stderr, "dbspa:     %s\n", dbspaBin)
+	fmt.Fprintf(os.Stderr, "dbspa-gen: %s\n", genBin)
 	fmt.Fprintf(os.Stderr, "records:    %d\n", recordCount)
 	fmt.Fprintf(os.Stderr, "runs:       %d\n", runsPerBench)
 	fmt.Fprintf(os.Stderr, "\n")
 
 	suite := &SuiteResult{
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
-		FoldDBVer: getFoldDBVersion(),
+		DBSPAVer: getDBSPAVersion(),
 		GoVersion: runtime.Version(),
 		OS:        runtime.GOOS,
 		Arch:      runtime.GOARCH,
@@ -119,57 +119,57 @@ func main() {
 	// --- Format benchmarks ---
 
 	suite.run("format/ndjson/passthrough", recordCount, ndjsonData, func() {
-		runFoldDB(ndjsonData, "SELECT *")
+		runDBSPA(ndjsonData, "SELECT *")
 	})
 
 	suite.run("format/ndjson/filter", recordCount, ndjsonData, func() {
-		runFoldDB(ndjsonData, "SELECT * WHERE status = 'confirmed'")
+		runDBSPA(ndjsonData, "SELECT * WHERE status = 'confirmed'")
 	})
 
 	suite.run("format/ndjson/groupby", recordCount, ndjsonData, func() {
-		runFoldDB(ndjsonData, "SELECT product, region, COUNT(*), SUM(total) GROUP BY product, region")
+		runDBSPA(ndjsonData, "SELECT product, region, COUNT(*), SUM(total) GROUP BY product, region")
 	})
 
 	suite.run("format/avro/passthrough", recordCount, avroData, func() {
-		runFoldDB(avroData, "SELECT * FORMAT AVRO")
+		runDBSPA(avroData, "SELECT * FORMAT AVRO")
 	})
 
 	suite.run("format/parquet/passthrough", recordCount, nil, func() {
-		runFoldDBFile(parquetFile, "SELECT * FORMAT PARQUET")
+		runDBSPAFile(parquetFile, "SELECT * FORMAT PARQUET")
 	})
 
 	suite.run("format/parquet/filter", recordCount, nil, func() {
-		runFoldDBFile(parquetFile, "SELECT * WHERE status = 'confirmed' FORMAT PARQUET")
+		runDBSPAFile(parquetFile, "SELECT * WHERE status = 'confirmed' FORMAT PARQUET")
 	})
 
 	suite.run("format/parquet/groupby", recordCount, nil, func() {
-		runFoldDBFile(parquetFile, "SELECT product, region, COUNT(*), SUM(total) GROUP BY product, region FORMAT PARQUET")
+		runDBSPAFile(parquetFile, "SELECT product, region, COUNT(*), SUM(total) GROUP BY product, region FORMAT PARQUET")
 	})
 
 	suite.run("format/csv/passthrough", recordCount, csvData, func() {
-		runFoldDB(csvData, "SELECT * FORMAT CSV")
+		runDBSPA(csvData, "SELECT * FORMAT CSV")
 	})
 
 	// --- CDC benchmarks ---
 
 	suite.run("cdc/json/groupby", recordCount, cdcJSONData, func() {
-		runFoldDB(cdcJSONData, "SELECT _after->>'status' AS status, COUNT(*) GROUP BY _after->>'status' FORMAT DEBEZIUM")
+		runDBSPA(cdcJSONData, "SELECT _after->>'status' AS status, COUNT(*) GROUP BY _after->>'status' FORMAT DEBEZIUM")
 	})
 
 	suite.run("cdc/avro/groupby", recordCount, cdcAvroData, func() {
-		runFoldDB(cdcAvroData, "SELECT status, COUNT(*) GROUP BY status FORMAT DEBEZIUM_AVRO")
+		runDBSPA(cdcAvroData, "SELECT status, COUNT(*) GROUP BY status FORMAT DEBEZIUM_AVRO")
 	})
 
 	// --- Join benchmarks ---
 
 	joinSQL := fmt.Sprintf("SELECT e.action, u.tier FROM stdin e JOIN '%s' u ON e.customer_id = u.id", tableFile)
 	suite.run("join/file/simple", recordCount, streamData, func() {
-		runFoldDB(streamData, joinSQL)
+		runDBSPA(streamData, joinSQL)
 	})
 
 	joinGroupBySQL := fmt.Sprintf("SELECT u.tier, COUNT(*) AS cnt, SUM(e.value) AS total FROM stdin e JOIN '%s' u ON e.customer_id = u.id GROUP BY u.tier", tableFile)
 	suite.run("join/file/groupby", recordCount, streamData, func() {
-		runFoldDB(streamData, joinGroupBySQL)
+		runDBSPA(streamData, joinGroupBySQL)
 	})
 
 	complexJoinSQL := fmt.Sprintf(`SELECT
@@ -188,7 +188,7 @@ func main() {
 	HAVING COUNT(*) > 10
 	ORDER BY total_value DESC`, tableFile)
 	suite.run("join/file/complex", recordCount, streamData, func() {
-		runFoldDB(streamData, complexJoinSQL)
+		runDBSPA(streamData, complexJoinSQL)
 	})
 
 	subquerySQL := fmt.Sprintf(`SELECT s.tier, s.cnt, e.action
@@ -196,17 +196,17 @@ func main() {
 	JOIN (SELECT u.id, u.tier, COUNT(*) AS cnt FROM '%s' u GROUP BY u.id, u.tier) s
 	ON e.customer_id = s.id`, tableFile)
 	suite.run("join/subquery", recordCount, streamData, func() {
-		runFoldDB(streamData, subquerySQL)
+		runDBSPA(streamData, subquerySQL)
 	})
 
 	// --- Pipeline benchmarks ---
 
 	suite.run("pipeline/batch_compaction", recordCount, batchHighDup, func() {
-		runFoldDB(batchHighDup, "SELECT g, COUNT(*) AS cnt, SUM(v) AS total GROUP BY g")
+		runDBSPA(batchHighDup, "SELECT g, COUNT(*) AS cnt, SUM(v) AS total GROUP BY g")
 	})
 
 	suite.run("pipeline/operator_fusion", recordCount, batchLowDup, func() {
-		runFoldDB(batchLowDup, "SELECT g, COUNT(*) AS cnt, SUM(v) AS total GROUP BY g")
+		runDBSPA(batchLowDup, "SELECT g, COUNT(*) AS cnt, SUM(v) AS total GROUP BY g")
 	})
 
 	// --- Kafka benchmarks ---
@@ -298,7 +298,7 @@ func generateFixture(dataset string, count int, format string) []byte {
 	cmd.Stdout = &out
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
-		fatalf("folddb-gen %s --format %s failed: %v", dataset, format, err)
+		fatalf("dbspa-gen %s --format %s failed: %v", dataset, format, err)
 	}
 	return out.Bytes()
 }
@@ -314,7 +314,7 @@ func generateParquetFixture(dataset string, count int) string {
 	cmd := exec.Command(genBin, dataset, "--count", fmt.Sprintf("%d", count), "--seed", "42", "--format", "parquet", "--output", path)
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
-		fatalf("folddb-gen parquet failed: %v", err)
+		fatalf("dbspa-gen parquet failed: %v", err)
 	}
 	return path
 }
@@ -417,29 +417,29 @@ func generateCSVFixture(count int) []byte {
 	return buf.Bytes()
 }
 
-// --- FoldDB execution ---
+// --- DBSPA execution ---
 
-func runFoldDB(input []byte, sql string) []byte {
-	cmd := exec.Command(folddbBin, "query", sql)
+func runDBSPA(input []byte, sql string) []byte {
+	cmd := exec.Command(dbspaBin, "query", sql)
 	cmd.Stdin = bytes.NewReader(input)
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	var errBuf bytes.Buffer
 	cmd.Stderr = &errBuf
 	if err := cmd.Run(); err != nil {
-		fatalf("folddb query failed: %v\nSQL: %s\nstderr: %s", err, sql, errBuf.String())
+		fatalf("dbspa query failed: %v\nSQL: %s\nstderr: %s", err, sql, errBuf.String())
 	}
 	return out.Bytes()
 }
 
-func runFoldDBFile(inputFile string, sql string) []byte {
-	cmd := exec.Command(folddbBin, "query", "--input", inputFile, sql)
+func runDBSPAFile(inputFile string, sql string) []byte {
+	cmd := exec.Command(dbspaBin, "query", "--input", inputFile, sql)
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	var errBuf bytes.Buffer
 	cmd.Stderr = &errBuf
 	if err := cmd.Run(); err != nil {
-		fatalf("folddb --input failed: %v\nSQL: %s\nstderr: %s", err, sql, errBuf.String())
+		fatalf("dbspa --input failed: %v\nSQL: %s\nstderr: %s", err, sql, errBuf.String())
 	}
 	return out.Bytes()
 }
@@ -453,7 +453,7 @@ func runKafkaBenchmarks(suite *SuiteResult) {
 	avroData := generateFixture("orders", recordCount, "avro")
 
 	suite.run("kafka/produce", recordCount, avroData, func() {
-		cmd := exec.Command(folddbBin, "query",
+		cmd := exec.Command(dbspaBin, "query",
 			"SELECT * FORMAT AVRO",
 			"--output", "kafka://localhost:9092/bench-orders",
 		)
@@ -465,7 +465,7 @@ func runKafkaBenchmarks(suite *SuiteResult) {
 	})
 
 	suite.run("kafka/consume/passthrough", recordCount, nil, func() {
-		cmd := exec.Command(folddbBin, "query",
+		cmd := exec.Command(dbspaBin, "query",
 			"SELECT * FROM 'kafka://localhost:9092/bench-orders' FORMAT AVRO",
 			"--limit", fmt.Sprintf("%d", recordCount),
 		)
@@ -478,7 +478,7 @@ func runKafkaBenchmarks(suite *SuiteResult) {
 	})
 
 	suite.run("kafka/consume/groupby", recordCount, nil, func() {
-		cmd := exec.Command(folddbBin, "query",
+		cmd := exec.Command(dbspaBin, "query",
 			"SELECT status, COUNT(*), SUM(total) FROM 'kafka://localhost:9092/bench-orders' FORMAT AVRO GROUP BY status",
 			"--limit", fmt.Sprintf("%d", recordCount),
 		)
@@ -493,7 +493,7 @@ func runKafkaBenchmarks(suite *SuiteResult) {
 	// Burst: produce + consume concurrently
 	suite.run("kafka/live/burst", recordCount*2, avroData, func() {
 		// Start consumer first
-		consumer := exec.Command(folddbBin, "query",
+		consumer := exec.Command(dbspaBin, "query",
 			"SELECT * FROM 'kafka://localhost:9092/bench-burst' FORMAT AVRO",
 			"--limit", fmt.Sprintf("%d", recordCount),
 		)
@@ -503,7 +503,7 @@ func runKafkaBenchmarks(suite *SuiteResult) {
 		consumer.Start()
 
 		// Produce
-		producer := exec.Command(folddbBin, "query",
+		producer := exec.Command(dbspaBin, "query",
 			"SELECT * FORMAT AVRO",
 			"--output", "kafka://localhost:9092/bench-burst",
 		)
@@ -638,8 +638,8 @@ func findBinary(name string) string {
 	return name
 }
 
-func getFoldDBVersion() string {
-	cmd := exec.Command(folddbBin, "version")
+func getDBSPAVersion() string {
+	cmd := exec.Command(dbspaBin, "version")
 	out, err := cmd.Output()
 	if err != nil {
 		return "unknown"

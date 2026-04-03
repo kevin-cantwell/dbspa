@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kevin-cantwell/folddb/internal/engine"
+	"github.com/kevin-cantwell/dbspa/internal/engine"
 )
 
 // DebeziumDecoder decodes Debezium JSON envelope records.

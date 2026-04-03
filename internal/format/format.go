@@ -6,8 +6,8 @@ import (
 	"io"
 	"strings"
 
-	"github.com/kevin-cantwell/folddb/internal/engine"
-	"github.com/kevin-cantwell/folddb/internal/registry"
+	"github.com/kevin-cantwell/dbspa/internal/engine"
+	"github.com/kevin-cantwell/dbspa/internal/registry"
 )
 
 // Decoder converts raw bytes into an engine Record.
@@ -49,8 +49,8 @@ func NewDecoderWithOptions(formatStr string, opts map[string]string) (Decoder, e
 		return &DebeziumDecoder{}, nil
 	case "DEBEZIUM_AVRO":
 		return &DebeziumAvroDecoder{}, nil
-	case "FOLDDB":
-		return &FoldDBChangelogDecoder{}, nil
+	case "DBSPA":
+		return &DBSPAChangelogDecoder{}, nil
 	case "CSV":
 		return newCSVDecoder(opts), nil
 	case "AVRO":

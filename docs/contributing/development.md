@@ -9,10 +9,10 @@
 ## Project structure
 
 ```
-folddb/
+dbspa/
 ├── cmd/
-│   ├── folddb/          # CLI binary
-│   ├── folddb-gen/      # Data generator utility
+│   ├── dbspa/          # CLI binary
+│   ├── dbspa-gen/      # Data generator utility
 │   └── demo/            # Interactive web demo
 ├── internal/
 │   ├── sql/
@@ -48,7 +48,7 @@ folddb/
 ## Build
 
 ```bash
-make build    # Builds folddb and folddb-gen binaries
+make build    # Builds dbspa and dbspa-gen binaries
 ```
 
 ## Testing
@@ -57,7 +57,7 @@ make build    # Builds folddb and folddb-gen binaries
 make test                # Unit tests (go test ./...)
 make test-integration    # Integration tests (requires Docker for Kafka)
 make test-all            # Unit + integration + verify
-make verify              # Compare folddb results against DuckDB
+make verify              # Compare dbspa results against DuckDB
 make bench               # Run benchmarks
 make lint                # go vet ./...
 ```
@@ -81,7 +81,7 @@ This runs `docker compose up -d`, waits for Kafka to be healthy, seeds test data
 make bench
 ```
 
-Builds both binaries, generates test data with `folddb-gen`, and runs end-to-end throughput benchmarks. Results are saved to `bench/results.txt`.
+Builds both binaries, generates test data with `dbspa-gen`, and runs end-to-end throughput benchmarks. Results are saved to `bench/results.txt`.
 
 To run a specific benchmark:
 
@@ -91,7 +91,7 @@ go test -tags bench -bench BenchmarkGroupBy_1M -benchtime 1x -timeout 10m ./benc
 
 ## Verification
 
-The verify script compares FoldDB output against DuckDB for correctness:
+The verify script compares DBSPA output against DuckDB for correctness:
 
 ```bash
 make verify    # Generates 10,000 records and compares results

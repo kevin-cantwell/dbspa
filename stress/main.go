@@ -1,6 +1,6 @@
-// Command stress runs the FoldDB stress test suite.
+// Command stress runs the DBSPA stress test suite.
 //
-// This is a standalone binary that exercises folddb with adversarial data patterns,
+// This is a standalone binary that exercises dbspa with adversarial data patterns,
 // sustained load, and boundary conditions. It monitors RSS and throughput over time
 // to detect memory leaks and performance degradation.
 package main
@@ -21,7 +21,7 @@ import (
 
 type SuiteResult struct {
 	Timestamp string          `json:"timestamp"`
-	FoldDBVer string          `json:"folddb_version"`
+	DBSPAVer string          `json:"dbspa_version"`
 	GoVersion string          `json:"go_version"`
 	OS        string          `json:"os"`
 	Arch      string          `json:"arch"`
@@ -31,28 +31,28 @@ type SuiteResult struct {
 
 func main() {
 	var (
-		folddbBin  string
+		dbspaBin  string
 		genBin     string
 		duration   string
 		outputFile string
 		filter     string
 	)
 
-	flag.StringVar(&folddbBin, "folddb", "", "Path to folddb binary")
-	flag.StringVar(&genBin, "folddb-gen", "", "Path to folddb-gen binary")
+	flag.StringVar(&dbspaBin, "dbspa", "", "Path to dbspa binary")
+	flag.StringVar(&genBin, "dbspa-gen", "", "Path to dbspa-gen binary")
 	flag.StringVar(&duration, "duration", "5m", "Duration for sustained tests")
 	flag.StringVar(&outputFile, "output", "", "Write JSON results to file")
 	flag.StringVar(&filter, "scenarios", "", "Regex filter for scenario names")
 	flag.Parse()
 
-	if folddbBin == "" {
-		folddbBin = findBinary("folddb")
+	if dbspaBin == "" {
+		dbspaBin = findBinary("dbspa")
 	}
 	if genBin == "" {
-		genBin = findBinary("folddb-gen")
+		genBin = findBinary("dbspa-gen")
 	}
 
-	for _, bin := range []string{folddbBin} {
+	for _, bin := range []string{dbspaBin} {
 		if _, err := os.Stat(bin); err != nil {
 			fatalf("binary not found: %s (run 'make build' first)", bin)
 		}
@@ -63,20 +63,20 @@ func main() {
 		fatalf("invalid duration %q: %v", duration, err)
 	}
 
-	tmpDir, err := os.MkdirTemp("", "folddb-stress-*")
+	tmpDir, err := os.MkdirTemp("", "dbspa-stress-*")
 	if err != nil {
 		fatalf("cannot create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tmpDir)
 
 	cfg := &Config{
-		FoldDBBin: folddbBin,
+		DBSPABin: dbspaBin,
 		GenBin:    genBin,
 		Duration:  dur,
 		TempDir:   tmpDir,
 	}
 
-	fmt.Fprintf(os.Stderr, "folddb:   %s\n", folddbBin)
+	fmt.Fprintf(os.Stderr, "dbspa:   %s\n", dbspaBin)
 	fmt.Fprintf(os.Stderr, "tempdir:  %s\n", tmpDir)
 	fmt.Fprintf(os.Stderr, "\n")
 
@@ -90,7 +90,7 @@ func main() {
 
 	suite := &SuiteResult{
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
-		FoldDBVer: getFoldDBVersion(folddbBin),
+		DBSPAVer: getDBSPAVersion(dbspaBin),
 		GoVersion: runtime.Version(),
 		OS:        runtime.GOOS,
 		Arch:      runtime.GOARCH,
@@ -100,7 +100,7 @@ func main() {
 	scenarios := AllScenarios()
 	passed, failed, skipped := 0, 0, 0
 
-	fmt.Fprintf(os.Stderr, "=== FoldDB Stress Tests ===\n\n")
+	fmt.Fprintf(os.Stderr, "=== DBSPA Stress Tests ===\n\n")
 
 	for _, s := range scenarios {
 		if filterRe != nil && !filterRe.MatchString(s.Name) {
@@ -178,7 +178,7 @@ func findBinary(name string) string {
 	return name
 }
 
-func getFoldDBVersion(bin string) string {
+func getDBSPAVersion(bin string) string {
 	out, err := exec.Command(bin, "version").Output()
 	if err != nil {
 		return "unknown"

@@ -6,7 +6,7 @@ import (
 	"math"
 	"time"
 
-	"github.com/kevin-cantwell/folddb/internal/engine"
+	"github.com/kevin-cantwell/dbspa/internal/engine"
 )
 
 // JSONDecoder decodes NDJSON lines into Records.

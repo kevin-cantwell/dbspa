@@ -1,6 +1,6 @@
 # Configuration
 
-FoldDB is configured through CLI flags and an optional credentials file. There is no configuration file for general settings.
+DBSPA is configured through CLI flags and an optional credentials file. There is no configuration file for general settings.
 
 ## CLI flags
 
@@ -9,11 +9,11 @@ All configuration is passed via flags. See the [CLI reference](cli.md) for the c
 Key flags:
 
 ```bash
-folddb [flags] <SQL>
+dbspa [flags] <SQL>
   -i, --input <file>              # Input file (instead of stdin)
   --state <file.db>               # SQLite state file
   --stateful                      # Enable checkpointing
-  --state-dir <path>              # Checkpoint directory (default: ~/.folddb/state)
+  --state-dir <path>              # Checkpoint directory (default: ~/.dbspa/state)
   --checkpoint-interval <dur>     # Checkpoint flush interval (default: 5s)
   --timeout <duration>            # Query timeout
   --limit <n>                     # Max output records
@@ -24,7 +24,7 @@ folddb [flags] <SQL>
 
 ## Credentials file
 
-Kafka credentials are stored in `~/.folddb/credentials` (TOML format):
+Kafka credentials are stored in `~/.dbspa/credentials` (TOML format):
 
 ```toml
 [kafka.production]
@@ -68,7 +68,7 @@ FROM 'kafka://broker/topic?registry=http://schema-registry:8081' FORMAT AVRO
 FROM 'kafka://broker/topic?registry=http://schema-registry:8081' FORMAT AVRO CHANGELOG DEBEZIUM
 ```
 
-When a registry is configured, FoldDB auto-detects the [Confluent wire format](formats.md#confluent-wire-format) (magic byte `0x00` + 4-byte schema ID) and fetches the schema on first encounter. Schemas are cached locally since schema IDs are immutable in the Confluent registry.
+When a registry is configured, DBSPA auto-detects the [Confluent wire format](formats.md#confluent-wire-format) (magic byte `0x00` + 4-byte schema ID) and fetches the schema on first encounter. Schemas are cached locally since schema IDs are immutable in the Confluent registry.
 
 ### Supported authentication methods
 
@@ -89,20 +89,20 @@ FROM 'kafka://broker/topic?tls_cert=/path/cert.pem&tls_key=/path/key.pem&tls_ca=
 
 ## State directory
 
-Checkpoint state is stored in `~/.folddb/state/<query-hash>/` by default.
+Checkpoint state is stored in `~/.dbspa/state/<query-hash>/` by default.
 
 Override with `--state-dir`:
 
 ```bash
-folddb --stateful --state-dir /var/lib/folddb/state "..."
+dbspa --stateful --state-dir /var/lib/dbspa/state "..."
 ```
 
 Manage checkpoints:
 
 ```bash
-folddb state list                    # List all checkpointed queries
-folddb state inspect <hash>          # Show checkpoint details
-folddb state reset <hash>            # Delete checkpoint
+dbspa state list                    # List all checkpointed queries
+dbspa state inspect <hash>          # Show checkpoint details
+dbspa state reset <hash>            # Delete checkpoint
 ```
 
 ## SQLite state store
@@ -110,10 +110,10 @@ folddb state reset <hash>            # Delete checkpoint
 The `--state` flag writes the current aggregation result to a SQLite file:
 
 ```bash
-folddb --state orders.db "SELECT region, COUNT(*) GROUP BY region"
+dbspa --state orders.db "SELECT region, COUNT(*) GROUP BY region"
 ```
 
-The SQLite file uses WAL mode for concurrent read access. Other processes can read the file while FoldDB is writing:
+The SQLite file uses WAL mode for concurrent read access. Other processes can read the file while DBSPA is writing:
 
 ```bash
 sqlite3 orders.db "SELECT * FROM result ORDER BY cnt DESC"
@@ -123,18 +123,18 @@ sqlite3 orders.db "SELECT * FROM result ORDER BY cnt DESC"
 
 **Non-accumulating queries:** Records are INSERTed (append-only) with auto-increment `_rowid` and `_ingested_at` columns.
 
-**File locking:** If another process holds a write lock, FoldDB retries with exponential backoff (100ms to 5s). After 30 seconds total, it exits with an error.
+**File locking:** If another process holds a write lock, DBSPA retries with exponential backoff (100ms to 5s). After 30 seconds total, it exits with an error.
 
 ## Memory limit
 
-FoldDB keeps all accumulator state in memory. The default limit is 1GB. When exceeded, a warning is logged but processing continues.
+DBSPA keeps all accumulator state in memory. The default limit is 1GB. When exceeded, a warning is logged but processing continues.
 
 ## Arrangement memory limit
 
 For joins and windowed queries, the `--arrangement-mem-limit` flag controls how many records are kept in memory per arrangement before spilling to disk (via [Badger](https://github.com/dgraph-io/badger)):
 
 ```bash
-folddb --arrangement-mem-limit 10000 "SELECT ... FROM ... JOIN ..."
+dbspa --arrangement-mem-limit 10000 "SELECT ... FROM ... JOIN ..."
 ```
 
 When unset (default), arrangements are fully in-memory. When set, records beyond the limit are spilled to a Badger LSM-tree on disk. Lookups merge results from memory and disk transparently. See [Disk-Backed Arrangements](../architecture/performance.md#disk-backed-arrangements) for benchmarks.

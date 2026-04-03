@@ -235,7 +235,7 @@ func genClick(rng *rand.Rand, seq int) map[string]any {
 const debeziumAvroSchema = `{
 	"type": "record",
 	"name": "Envelope",
-	"namespace": "folddb.test",
+	"namespace": "dbspa.test",
 	"fields": [
 		{"name": "op", "type": "string"},
 		{"name": "before", "type": ["null", {
@@ -310,7 +310,7 @@ func toDebeziumAvroMap(rec map[string]any) map[string]any {
 }
 
 // orderToAvroUnion converts an order map to the Avro union format.
-// null -> nil, record -> goavro.Union("folddb.test.Order", typedMap)
+// null -> nil, record -> goavro.Union("dbspa.test.Order", typedMap)
 func orderToAvroUnion(v any) any {
 	if v == nil {
 		return nil
@@ -330,7 +330,7 @@ func orderToAvroUnion(v any) any {
 		"region":      m["region"],
 		"updated_at":  m["updated_at"],
 	}
-	return goavro.Union("folddb.test.Order", typed)
+	return goavro.Union("dbspa.test.Order", typed)
 }
 
 // toAvroMap converts a generic map to Avro-compatible types.

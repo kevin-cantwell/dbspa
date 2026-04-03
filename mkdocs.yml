@@ -1,6 +1,6 @@
-site_name: FoldDB
+site_name: DBSPA
 site_description: Streaming SQL with incremental aggregation
-site_url: https://folddb.cantwell.dev
+site_url: https://kevin-cantwell.github.io/dbspa/docs/latest
 
 theme:
   name: material
@@ -17,8 +17,8 @@ theme:
   icon:
     repo: fontawesome/brands/github
 
-repo_url: https://github.com/kevin-cantwell/folddb
-repo_name: kevin-cantwell/folddb
+repo_url: https://github.com/kevin-cantwell/dbspa
+repo_name: kevin-cantwell/dbspa
 
 markdown_extensions:
   - admonition
@@ -42,7 +42,7 @@ nav:
     - Quickstart: getting-started/quickstart.md
     - Examples: getting-started/examples.md
   - Concepts:
-    - When to Use FoldDB: concepts/when-to-use.md
+    - When to Use DBSPA: concepts/when-to-use.md
     - Streams vs Tables: concepts/streams-vs-tables.md
     - The Z-Set Model: concepts/diff-model.md
     - Changelog Output: concepts/changelog-output.md

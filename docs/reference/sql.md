@@ -1,6 +1,6 @@
 # SQL Dialect
 
-FoldDB's SQL is aligned with **PostgreSQL** — the same dialect DuckDB aligns to. Streaming extensions are FoldDB-specific.
+DBSPA's SQL is aligned with **PostgreSQL** — the same dialect DuckDB aligns to. Streaming extensions are DBSPA-specific.
 
 ## Clause syntax
 
@@ -50,7 +50,7 @@ FROM 'kafka://broker/topic?group=my-group&partition=0,1,2'
 
 -- Kafka with authentication
 FROM 'kafka://broker/topic?sasl_mechanism=PLAIN&sasl_username=X&sasl_password=Y'
-FROM 'kafka://my-cluster/events'    -- resolved from ~/.folddb/credentials
+FROM 'kafka://my-cluster/events'    -- resolved from ~/.dbspa/credentials
 
 -- stdin (implicit or explicit)
 FROM 'stdin://'
@@ -154,11 +154,11 @@ FROM EXEC('cat file.json | grep error')
 FROM EXEC('psql -c "COPY users TO STDOUT WITH (FORMAT csv, HEADER)"') FORMAT CSV(header=true)
 ```
 
-Subprocess stderr is forwarded to FoldDB's stderr with an `[exec]` prefix for debugging.
+Subprocess stderr is forwarded to DBSPA's stderr with an `[exec]` prefix for debugging.
 
 ### Security
 
-EXEC is disabled in serve mode (`folddb serve`). Any query containing EXEC in FROM, JOIN, or SEED FROM positions is rejected with an error. This prevents HTTP clients from triggering arbitrary shell commands.
+EXEC is disabled in serve mode (`dbspa serve`). Any query containing EXEC in FROM, JOIN, or SEED FROM positions is rejected with an error. This prevents HTTP clients from triggering arbitrary shell commands.
 
 ## FORMAT
 
@@ -188,7 +188,7 @@ The envelope specifies how to interpret each record and derive Z-set weights:
 |---|---|
 | *(none)* | Plain records -- every record is an insert (weight=+1) |
 | `DEBEZIUM` | Debezium CDC envelope with `op`/`before`/`after` fields; derives Z-set weights from operations |
-| `FOLDDB` | Feldera weighted format with `weight` and `data` fields; reads weight directly and unwraps data |
+| `DBSPA` | Feldera weighted format with `weight` and `data` fields; reads weight directly and unwraps data |
 
 ### Examples
 
@@ -198,7 +198,7 @@ FORMAT AVRO                             -- plain Avro records
 FORMAT AVRO DEBEZIUM                    -- Avro-encoded Debezium CDC
 FORMAT JSON DEBEZIUM                    -- JSON-encoded Debezium CDC
 FORMAT DEBEZIUM                         -- shorthand: JSON + Debezium
-FORMAT FOLDDB                           -- Feldera weighted format (weight + data)
+FORMAT DBSPA                           -- Feldera weighted format (weight + data)
 FORMAT CSV(header=true, delimiter='|')  -- CSV with options
 FORMAT AVRO(registry='http://...') DEBEZIUM  -- Avro with registry + Debezium
 FORMAT PROTOBUF(message='Order')        -- typed Protobuf
@@ -206,11 +206,11 @@ FORMAT PROTOBUF(message='Order')        -- typed Protobuf
 
 ### Shorthand
 
-If the first token is an envelope name (`DEBEZIUM`, `FOLDDB`), JSON encoding is assumed:
+If the first token is an envelope name (`DEBEZIUM`, `DBSPA`), JSON encoding is assumed:
 
 ```sql
 FORMAT DEBEZIUM    -- equivalent to FORMAT JSON DEBEZIUM
-FORMAT FOLDDB      -- equivalent to FORMAT JSON FOLDDB
+FORMAT DBSPA      -- equivalent to FORMAT JSON DBSPA
 ```
 
 ### Deprecated syntax
@@ -257,7 +257,7 @@ HAVING SUM(total) >= 1000.0
 
 ## WINDOW
 
-FoldDB extension for time-based windowed aggregation.
+DBSPA extension for time-based windowed aggregation.
 
 ```sql
 -- Tumbling (non-overlapping)
@@ -348,7 +348,7 @@ Missing seed columns log a warning and start the corresponding accumulator at ze
 | `LAST` | No | Non-deterministic; depends on arrival order |
 
 !!! warning
-    **Bridge responsibility:** The user must ensure there is no overlap or gap between the seed cutoff and the stream offset. For example, if the seed covers data up to `2026-04-01`, the Kafka offset should start at `2026-04-01`. FoldDB does not verify continuity between seed and stream.
+    **Bridge responsibility:** The user must ensure there is no overlap or gap between the seed cutoff and the stream offset. For example, if the seed covers data up to `2026-04-01`, the Kafka offset should start at `2026-04-01`. DBSPA does not verify continuity between seed and stream.
 
 See [Checkpointing](../architecture/checkpointing.md) for interaction with `--stateful`.
 
@@ -455,7 +455,7 @@ See [Joins](../concepts/joins.md) for full details on DD joins, CDC propagation,
 
 ### JSON access
 
-FoldDB supports two syntaxes for accessing nested JSON fields:
+DBSPA supports two syntaxes for accessing nested JSON fields:
 
 **Dot notation** (recommended for readability):
 ```sql
@@ -556,7 +556,7 @@ CASE status WHEN 'active' THEN 1 WHEN 'inactive' THEN 0 ELSE -1 END
 
 ## NULL semantics
 
-FoldDB follows PostgreSQL three-valued logic.
+DBSPA follows PostgreSQL three-valued logic.
 
 - `NULL = NULL` is NULL, not TRUE. Use `IS NOT DISTINCT FROM` for NULL-safe equality.
 - `NULL IN (1, 2, NULL)` is NULL, not TRUE.

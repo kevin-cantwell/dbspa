@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/kevin-cantwell/folddb/internal/engine"
+	"github.com/kevin-cantwell/dbspa/internal/engine"
 )
 
 // ChangelogSink writes accumulating query results as changelog NDJSON.

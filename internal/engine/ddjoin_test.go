@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kevin-cantwell/folddb/internal/sql/ast"
+	"github.com/kevin-cantwell/dbspa/internal/sql/ast"
 )
 
 // Helper to create a record with the given columns and weight.

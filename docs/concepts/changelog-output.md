@@ -1,6 +1,6 @@
 # Changelog Output
 
-When an accumulating query (`GROUP BY`) is piped to another process or written to a file, FoldDB emits **Z-set deltas** as NDJSON — a stream of weighted records that describe how the result set changes over time.
+When an accumulating query (`GROUP BY`) is piped to another process or written to a file, DBSPA emits **Z-set deltas** as NDJSON — a stream of weighted records that describe how the result set changes over time.
 
 ## Format
 
@@ -58,23 +58,23 @@ for line in changelog:
 # state is always the current aggregation result
 ```
 
-## Consuming a changelog with FORMAT FOLDDB
+## Consuming a changelog with FORMAT DBSPA
 
-FoldDB's changelog output can be consumed by another FoldDB instance using the `FORMAT FOLDDB` envelope. This enables composing pipelines: one instance produces a changelog, another applies further transformations while preserving the Z-set semantics.
+DBSPA's changelog output can be consumed by another DBSPA instance using the `FORMAT DBSPA` envelope. This enables composing pipelines: one instance produces a changelog, another applies further transformations while preserving the Z-set semantics.
 
 ```bash
 # Instance 1: produce a changelog of order counts by status
-folddb "SELECT status, COUNT(*) FROM 'kafka://broker/orders' GROUP BY status" | \
+dbspa "SELECT status, COUNT(*) FROM 'kafka://broker/orders' GROUP BY status" | \
 
 # Instance 2: consume the changelog, apply further filtering
-folddb "SELECT * FROM stdin FORMAT FOLDDB WHERE status = 'pending'"
+dbspa "SELECT * FROM stdin FORMAT DBSPA WHERE status = 'pending'"
 ```
 
-The `FORMAT FOLDDB` envelope reads the `weight` field from the Feldera weighted format and unwraps the `data` object, instead of treating every record as an insert. This means retractions flow through correctly -- when Instance 1 retracts an old count and inserts a new one, Instance 2 sees both the retraction and insertion, keeping its own state consistent.
+The `FORMAT DBSPA` envelope reads the `weight` field from the Feldera weighted format and unwraps the `data` object, instead of treating every record as an insert. This means retractions flow through correctly -- when Instance 1 retracts an old count and inserts a new one, Instance 2 sees both the retraction and insertion, keeping its own state consistent.
 
-Without `FORMAT FOLDDB`, the downstream instance would treat every line (including retractions) as a plain insert with weight=+1, which would produce incorrect results.
+Without `FORMAT DBSPA`, the downstream instance would treat every line (including retractions) as a plain insert with weight=+1, which would produce incorrect results.
 
-See [FORMAT FOLDDB](../reference/formats.md#folddb-changelog) for the full envelope reference.
+See [FORMAT DBSPA](../reference/formats.md#dbspa-changelog) for the full envelope reference.
 
 ## Non-accumulating queries
 
@@ -87,13 +87,13 @@ For non-accumulating queries (no `GROUP BY`), every line is a plain insertion. T
 
 ## Final snapshot at EOF
 
-For bounded inputs (stdin from a file, `--input`), when the input ends and `ORDER BY` is specified, FoldDB emits a sorted final snapshot after the streaming deltas. The final snapshot contains one positive-weight line per group key, sorted by the ORDER BY clause.
+For bounded inputs (stdin from a file, `--input`), when the input ends and `ORDER BY` is specified, DBSPA emits a sorted final snapshot after the streaming deltas. The final snapshot contains one positive-weight line per group key, sorted by the ORDER BY clause.
 
 During streaming, deltas are emitted in arrival order (not sorted). The final snapshot gives you a clean, deterministic view of the end state.
 
 ## When changelog mode is used
 
-FoldDB auto-detects the output mode:
+DBSPA auto-detects the output mode:
 
 | Context | Accumulating query | Non-accumulating query |
 |---|---|---|
@@ -103,6 +103,6 @@ FoldDB auto-detects the output mode:
 
 ## Relationship to the Z-set model
 
-The changelog is the external representation of FoldDB's internal [Z-set model](diff-model.md). Internally, every record carries a `Weight` field — a Z-set multiplicity. The changelog serializes this using the Feldera weighted format: `{"weight": N, "data": {...}}`. This aligns with [Feldera's](https://github.com/feldera/feldera) "weighted" input format for interoperability.
+The changelog is the external representation of DBSPA's internal [Z-set model](diff-model.md). Internally, every record carries a `Weight` field — a Z-set multiplicity. The changelog serializes this using the Feldera weighted format: `{"weight": N, "data": {...}}`. This aligns with [Feldera's](https://github.com/feldera/feldera) "weighted" input format for interoperability.
 
 The [TUI mode](../reference/cli.md) consumes the same Z-set delta stream internally but renders it as a live-updating table — retractions are invisible because the row updates in place.

@@ -5,7 +5,7 @@ import (
 	"encoding/binary"
 	"testing"
 
-	"github.com/kevin-cantwell/folddb/internal/engine"
+	"github.com/kevin-cantwell/dbspa/internal/engine"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/structpb"
 )

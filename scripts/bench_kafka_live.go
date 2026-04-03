@@ -1,6 +1,6 @@
 //go:build ignore
 
-// bench_kafka_live.go benchmarks FoldDB's live Kafka consumption by
+// bench_kafka_live.go benchmarks DBSPA's live Kafka consumption by
 // producing and consuming concurrently. Measures end-to-end latency
 // and throughput for the real-world streaming use case.
 //
@@ -75,7 +75,7 @@ func main() {
 	fmt.Printf("Created topic %s (3 partitions)\n", topic)
 
 	// Register schema
-	schema := `{"type":"record","name":"Order","namespace":"folddb.bench","fields":[{"name":"order_id","type":"int"},{"name":"customer_id","type":"int"},{"name":"product","type":"string"},{"name":"quantity","type":"int"},{"name":"price","type":"double"},{"name":"total","type":"double"},{"name":"status","type":"string"},{"name":"region","type":"string"},{"name":"created_at","type":"string"}]}`
+	schema := `{"type":"record","name":"Order","namespace":"dbspa.bench","fields":[{"name":"order_id","type":"int"},{"name":"customer_id","type":"int"},{"name":"product","type":"string"},{"name":"quantity","type":"int"},{"name":"price","type":"double"},{"name":"total","type":"double"},{"name":"status","type":"string"},{"name":"region","type":"string"},{"name":"created_at","type":"string"}]}`
 
 	schemaID := registerSchema(registryURL, topic+"-value", schema)
 	fmt.Printf("Registered schema ID: %d\n\n", schemaID)
@@ -85,11 +85,11 @@ func main() {
 		fatal("codec: %v", err)
 	}
 
-	// Build folddb binary
-	folddbPath := "/tmp/folddb"
-	if _, err := os.Stat(folddbPath); os.IsNotExist(err) {
-		fmt.Println("Building folddb...")
-		cmd := exec.Command("go", "build", "-o", folddbPath, "./cmd/folddb")
+	// Build dbspa binary
+	dbspaPath := "/tmp/dbspa"
+	if _, err := os.Stat(dbspaPath); os.IsNotExist(err) {
+		fmt.Println("Building dbspa...")
+		cmd := exec.Command("go", "build", "-o", dbspaPath, "./cmd/dbspa")
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		if err := cmd.Run(); err != nil {
@@ -97,7 +97,7 @@ func main() {
 		}
 	}
 
-	// Start FoldDB consumer FIRST (so it's ready when messages arrive)
+	// Start DBSPA consumer FIRST (so it's ready when messages arrive)
 	sql := fmt.Sprintf("SELECT status, region, COUNT(*) AS cnt, SUM(total) AS revenue FROM 'kafka://%s/%s?offset=earliest&registry=%s' FORMAT AVRO GROUP BY status, region", broker, topic, registryURL)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -107,7 +107,7 @@ func main() {
 	var consumerDone sync.WaitGroup
 	consumerDone.Add(1)
 
-	consumerCmd := exec.CommandContext(ctx, folddbPath, "query", sql)
+	consumerCmd := exec.CommandContext(ctx, dbspaPath, "query", sql)
 	consumerOut, err := consumerCmd.StdoutPipe()
 	if err != nil {
 		fatal("stdout pipe: %v", err)
@@ -115,7 +115,7 @@ func main() {
 	consumerCmd.Stderr = os.Stderr
 
 	if err := consumerCmd.Start(); err != nil {
-		fatal("start folddb: %v", err)
+		fatal("start dbspa: %v", err)
 	}
 
 	// Count output lines in background
@@ -140,7 +140,7 @@ func main() {
 
 	// Give consumer a moment to connect
 	time.Sleep(2 * time.Second)
-	fmt.Println("FoldDB consumer started, producing messages...")
+	fmt.Println("DBSPA consumer started, producing messages...")
 
 	// Start producer
 	producerCl, err := kgo.NewClient(kgo.SeedBrokers(broker))

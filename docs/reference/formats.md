@@ -1,6 +1,6 @@
 # Formats
 
-FoldDB uses a two-tier format model: **encoding** (how bytes are serialized) and **envelope** (how to interpret the record and derive Z-set weights). The format is declared with the `FORMAT` clause or auto-detected from the source.
+DBSPA uses a two-tier format model: **encoding** (how bytes are serialized) and **envelope** (how to interpret the record and derive Z-set weights). The format is declared with the `FORMAT` clause or auto-detected from the source.
 
 ```sql
 FORMAT <encoding> [<envelope>] [(<options>)]
@@ -19,7 +19,7 @@ Encodings define the wire serialization of each record.
 Newline-delimited JSON. One JSON object per line.
 
 ```bash
-cat data.ndjson | folddb "SELECT name, age WHERE age > 25"
+cat data.ndjson | dbspa "SELECT name, age WHERE age > 25"
 ```
 
 No `FORMAT` clause needed -- NDJSON is the default for both stdin and Kafka.
@@ -41,8 +41,8 @@ FORMAT CSV(delimiter=',', header=true, quote='"', null_string='')
 | `null_string` | `''` | String representation of NULL |
 
 ```bash
-cat data.csv | folddb "SELECT name, age WHERE age > 25 FORMAT CSV"
-cat data.tsv | folddb "SELECT * FORMAT CSV(delimiter='\t')"
+cat data.csv | dbspa "SELECT name, age WHERE age > 25 FORMAT CSV"
+cat data.tsv | dbspa "SELECT * FORMAT CSV(delimiter='\t')"
 ```
 
 When `header=true`, column names come from the header row. When `header=false`, columns are named `col1`, `col2`, etc.
@@ -61,7 +61,7 @@ FORMAT AVRO(registry='http://registry:8081')
 **Without registry:** stdin or file input must be Avro OCF (self-contained with embedded schema).
 
 ```bash
-cat data.avro | folddb "SELECT * FORMAT AVRO"
+cat data.avro | dbspa "SELECT * FORMAT AVRO"
 ```
 
 ### Protobuf
@@ -81,8 +81,8 @@ FORMAT PROTOBUF(message='Order')
 **Typed Protobuf** uses a pre-registered message name. The schema must be available (via schema registry or compiled into the data generator).
 
 ```bash
-cat data.pb | folddb "SELECT * FORMAT PROTOBUF"
-cat data.pb | folddb "SELECT order_id, status FORMAT PROTOBUF(message='Order')"
+cat data.pb | dbspa "SELECT * FORMAT PROTOBUF"
+cat data.pb | dbspa "SELECT order_id, status FORMAT PROTOBUF(message='Order')"
 ```
 
 ### Parquet
@@ -96,7 +96,7 @@ FORMAT PARQUET
 Use with `--input` or in a JOIN:
 
 ```bash
-folddb -i data.parquet "SELECT * WHERE status = 'active' FORMAT PARQUET"
+dbspa -i data.parquet "SELECT * WHERE status = 'active' FORMAT PARQUET"
 ```
 
 ```sql
@@ -121,9 +121,9 @@ FORMAT AVRO DEBEZIUM          -- Avro-encoded Debezium CDC
 FORMAT DEBEZIUM               -- shorthand for FORMAT JSON DEBEZIUM
 ```
 
-Debezium records have an `op` field and `before`/`after` payloads. FoldDB unwraps the envelope and derives weights from the `op` field:
+Debezium records have an `op` field and `before`/`after` payloads. DBSPA unwraps the envelope and derives weights from the `op` field:
 
-| Debezium `op` | FoldDB records emitted |
+| Debezium `op` | DBSPA records emitted |
 |---|---|
 | `c` (create) | 1 record: `(after, weight=+1)` |
 | `u` (update) | 2 records: `(before, weight=-1)` then `(after, weight=+1)` |
@@ -134,7 +134,7 @@ Debezium records have an `op` field and `before`/`after` payloads. FoldDB unwrap
 When a Debezium envelope is specified, [virtual columns](sql.md#debezium-virtual-columns) (`_op`, `_before`, `_after`, `_table`, `_db`, `_ts`, `_source`) are available.
 
 !!! note
-    If `_before` is NULL on an update (common without `REPLICA IDENTITY FULL`), the retraction is skipped. FoldDB logs a warning on the first occurrence. Accumulators may drift over time without full replica identity.
+    If `_before` is NULL on an update (common without `REPLICA IDENTITY FULL`), the retraction is skipped. DBSPA logs a warning on the first occurrence. Accumulators may drift over time without full replica identity.
 
 **Avro-encoded Debezium** (`FORMAT AVRO DEBEZIUM`) combines the CDC semantics with the compact binary encoding of Avro. Debezium Avro messages use the Confluent wire format and require a schema registry:
 
@@ -151,23 +151,23 @@ Benefits over JSON Debezium:
 !!! note "Deprecated syntax"
     `FORMAT DEBEZIUM_AVRO` still works but logs a deprecation warning. Use `FORMAT AVRO DEBEZIUM` instead.
 
-### FoldDB Changelog
+### DBSPA Changelog
 
-The FoldDB envelope reads the Feldera weighted format — a JSON object with a `weight` field (integer) and a `data` field (object containing the columns). This is the native format of FoldDB's [changelog output](../concepts/changelog-output.md), aligned with [Feldera's](https://github.com/feldera/feldera) "weighted" input format for interoperability.
+The DBSPA envelope reads the Feldera weighted format — a JSON object with a `weight` field (integer) and a `data` field (object containing the columns). This is the native format of DBSPA's [changelog output](../concepts/changelog-output.md), aligned with [Feldera's](https://github.com/feldera/feldera) "weighted" input format for interoperability.
 
 ```sql
-FORMAT FOLDDB                 -- shorthand for FORMAT JSON FOLDDB
-FORMAT JSON FOLDDB            -- explicit encoding + envelope
+FORMAT DBSPA                 -- shorthand for FORMAT JSON DBSPA
+FORMAT JSON DBSPA            -- explicit encoding + envelope
 ```
 
-The primary use case is **composing FoldDB instances**: one instance produces a changelog, another consumes it with further transformations.
+The primary use case is **composing DBSPA instances**: one instance produces a changelog, another consumes it with further transformations.
 
 ```bash
 # Instance 1: produce a changelog of order counts by status
-folddb "SELECT status, COUNT(*) FROM 'kafka://broker/orders' GROUP BY status" | \
+dbspa "SELECT status, COUNT(*) FROM 'kafka://broker/orders' GROUP BY status" | \
 
 # Instance 2: consume the changelog and filter for pending orders
-folddb "SELECT * FROM stdin FORMAT FOLDDB WHERE status = 'pending'"
+dbspa "SELECT * FROM stdin FORMAT DBSPA WHERE status = 'pending'"
 ```
 
 Each record must be a JSON object with a `weight` field (integer) and a `data` field (object). Positive weights are insertions, negative weights are retractions. For example: `{"weight":1,"data":{"status":"pending","cnt":42}}`. Records without a `weight` field default to weight=+1 with the entire object treated as data.
@@ -182,7 +182,7 @@ Production Kafka deployments using the Confluent Schema Registry encode messages
 | 4 | Schema ID (big-endian `uint32`) |
 | remaining | Avro (or Protobuf) payload |
 
-When FoldDB detects this header on a Kafka message, it:
+When DBSPA detects this header on a Kafka message, it:
 
 1. Extracts the 4-byte schema ID.
 2. Fetches the schema from the registry via HTTP (`GET /schemas/ids/{id}`).

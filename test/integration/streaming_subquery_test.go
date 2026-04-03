@@ -14,7 +14,7 @@ import (
 // Two topics: events + orders-cdc, join with subquery, verify results.
 
 // debeziumEventFlat constructs a Debezium event in the flat format expected
-// by FoldDB's DebeziumDecoder: {"op", "before", "after", "source"} at the
+// by DBSPA's DebeziumDecoder: {"op", "before", "after", "source"} at the
 // top level (no schema/payload wrapper).
 func debeziumEventFlat(op string, before, after map[string]any, tsMs int64) string {
 	evt := map[string]any{
@@ -80,7 +80,7 @@ func TestStreamingSubquery_JoinWithDebeziumCDC(t *testing.T) {
 	produceMessages(t, eventsTopic, events)
 	time.Sleep(1 * time.Second)
 
-	// Step 3: Run FoldDB with streaming subquery join
+	// Step 3: Run DBSPA with streaming subquery join
 	// Note: With FORMAT DEBEZIUM, the Debezium decoder unwraps the _after (or _before
 	// for deletes) payload into top-level columns. The GROUP BY uses the top-level
 	// customer_id column which is present in both create and delete records.
@@ -89,13 +89,13 @@ func TestStreamingSubquery_JoinWithDebeziumCDC(t *testing.T) {
 		kafkaBroker, ordersCDCTopic,
 	)
 
-	stdout, stderr, err := runFoldDBWithTimeout(t, 30*time.Second, sql, "--timeout", "10s")
-	t.Logf("folddb stderr: %s", stderr)
-	t.Logf("folddb exit: %v", err)
+	stdout, stderr, err := runDBSPAWithTimeout(t, 30*time.Second, sql, "--timeout", "10s")
+	t.Logf("dbspa stderr: %s", stderr)
+	t.Logf("dbspa exit: %v", err)
 	if err != nil {
 		// Timeout exit is expected for streaming queries
 		if stdout == "" && !strings.Contains(stderr, "timeout") {
-			t.Fatalf("folddb produced no output: %v\nstderr: %s", err, stderr)
+			t.Fatalf("dbspa produced no output: %v\nstderr: %s", err, stderr)
 		}
 	}
 
@@ -181,7 +181,7 @@ func TestStreamingSubquery_CDCRetraction(t *testing.T) {
 	produceMessages(t, ordersCDCTopic, []string{retraction})
 	time.Sleep(500 * time.Millisecond)
 
-	// Step 3: Run FoldDB with subquery join
+	// Step 3: Run DBSPA with subquery join
 	// Use top-level customer_id (unwrapped from _after/_before by Debezium decoder)
 	// so that both creates and deletes group correctly.
 	sql := fmt.Sprintf(`SELECT e.user_id, e.name, r.cnt FROM 'kafka://%s/%s?offset=earliest' e JOIN (SELECT customer_id, COUNT(*) AS cnt FROM 'kafka://%s/%s?offset=earliest' FORMAT DEBEZIUM GROUP BY customer_id) r ON e.user_id = r.customer_id`,
@@ -189,11 +189,11 @@ func TestStreamingSubquery_CDCRetraction(t *testing.T) {
 		kafkaBroker, ordersCDCTopic,
 	)
 
-	stdout, stderr, err := runFoldDBWithTimeout(t, 30*time.Second, sql, "--timeout", "10s")
+	stdout, stderr, err := runDBSPAWithTimeout(t, 30*time.Second, sql, "--timeout", "10s")
 	if err != nil {
-		t.Logf("folddb stderr: %s", stderr)
+		t.Logf("dbspa stderr: %s", stderr)
 		if stdout == "" {
-			t.Fatalf("folddb produced no output: %v", err)
+			t.Fatalf("dbspa produced no output: %v", err)
 		}
 	}
 

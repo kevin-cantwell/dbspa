@@ -1,8 +1,8 @@
 syntax = "proto3";
 
-package folddb;
+package dbspa;
 
-option go_package = "github.com/kevin-cantwell/folddb/proto/pb";
+option go_package = "github.com/kevin-cantwell/dbspa/proto/pb";
 
 message Order {
   int64 order_id = 1;

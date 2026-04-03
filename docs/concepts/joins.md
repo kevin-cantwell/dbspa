@@ -1,6 +1,6 @@
 # Joins
 
-FoldDB supports joins between streams and tables, between streams and CDC sources, and between two live streams. All joins use a **differential dataflow** (DD) operator built on the [Z-set model](diff-model.md).
+DBSPA supports joins between streams and tables, between streams and CDC sources, and between two live streams. All joins use a **differential dataflow** (DD) operator built on the [Z-set model](diff-model.md).
 
 ## How it works
 
@@ -22,7 +22,7 @@ FROM stdin e
 JOIN '/data/users.parquet' u ON e.user_id = u.id
 ```
 
-1. FoldDB loads `users.parquet` into the right arrangement, indexed by `u.id`.
+1. DBSPA loads `users.parquet` into the right arrangement, indexed by `u.id`.
 2. For each record from stdin, the DD join operator looks up matching rows in the right arrangement.
 3. Matched records are merged (stream columns + table columns) with `output_weight = left_weight * right_weight`, and flow to the next pipeline stage.
 
@@ -54,7 +54,7 @@ FROM 'kafka://broker/events' e
 JOIN '/data/users.parquet' u ON e.user_id = u.id
 ```
 
-FoldDB applies a **RightIsStatic** optimization: since the right arrangement never receives deltas, the left arrangement is skipped entirely. This eliminates `json.Marshal` fingerprinting on every stream record.
+DBSPA applies a **RightIsStatic** optimization: since the right arrangement never receives deltas, the left arrangement is skipped entirely. This eliminates `json.Marshal` fingerprinting on every stream record.
 
 ### Stream-to-CDC (mutable right side)
 
@@ -101,7 +101,7 @@ Both source goroutines feed deltas into the DD join operator, which is protected
 
 ## Table source formats
 
-The table file can be any format FoldDB supports:
+The table file can be any format DBSPA supports:
 
 - Parquet (`.parquet`) -- routed through DuckDB for fast loading
 - NDJSON (`.json`, `.ndjson`)
@@ -166,12 +166,12 @@ Without subqueries, you would need to pre-compute the aggregation in a separate 
 
 ### How it works
 
-1. FoldDB parses the inner `SELECT` and executes it as a standalone query.
-2. For file sources, DuckDB handles the scan; for GROUP BY, FoldDB's aggregation engine computes the final state.
+1. DBSPA parses the inner `SELECT` and executes it as a standalone query.
+2. For file sources, DuckDB handles the scan; for GROUP BY, DBSPA's aggregation engine computes the final state.
 3. The materialized results are loaded into the right-side join arrangement.
 4. Stream processing begins, joining each incoming record against the pre-computed table.
 
-The subquery supports the full FoldDB SQL dialect (WHERE, GROUP BY, HAVING, LIMIT, nested JOINs). For file-based subqueries, Kafka sources are not supported (they would block forever). For Kafka-based subqueries, see Streaming Subqueries below.
+The subquery supports the full DBSPA SQL dialect (WHERE, GROUP BY, HAVING, LIMIT, nested JOINs). For file-based subqueries, Kafka sources are not supported (they would block forever). For Kafka-based subqueries, see Streaming Subqueries below.
 
 ## FROM Streaming Subqueries
 
@@ -253,10 +253,10 @@ Retractions flow end-to-end through the pipeline:
 
 ### Requirements and limitations
 
-- **GROUP BY is mandatory.** The inner subquery must have a GROUP BY clause (or aggregates that imply a single group). Without accumulation, raw Kafka events do not form a useful join table -- each event would insert a row that is never retracted, growing the arrangement unboundedly. If GROUP BY is absent, FoldDB prints a warning and falls back to materialized execution (which blocks forever on Kafka).
-- **Not supported in serve mode.** Streaming subqueries are not yet available when running `folddb serve`.
+- **GROUP BY is mandatory.** The inner subquery must have a GROUP BY clause (or aggregates that imply a single group). Without accumulation, raw Kafka events do not form a useful join table -- each event would insert a row that is never retracted, growing the arrangement unboundedly. If GROUP BY is absent, DBSPA prints a warning and falls back to materialized execution (which blocks forever on Kafka).
+- **Not supported in serve mode.** Streaming subqueries are not yet available when running `dbspa serve`.
 
 ## Limitations
 
 - **Only simple equi-joins.** Composite keys (multiple conditions with AND) are not supported in v0.
-- **Stream-to-stream requires WITHIN.** FoldDB errors at parse time if `WITHIN INTERVAL` is missing for a stream-stream join.
+- **Stream-to-stream requires WITHIN.** DBSPA errors at parse time if `WITHIN INTERVAL` is missing for a stream-stream join.

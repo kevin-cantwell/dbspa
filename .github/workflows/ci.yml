@@ -52,4 +52,4 @@ jobs:
         run: |
           cd stress
           go build -o stress-harness .
-          ./stress-harness --folddb ../folddb --scenarios "sustained/passthrough|adversarial/high_card|adversarial/schema_drift|boundary/large_orderby"
+          ./stress-harness --dbspa ../dbspa --scenarios "sustained/passthrough|adversarial/high_card|adversarial/schema_drift|boundary/large_orderby"

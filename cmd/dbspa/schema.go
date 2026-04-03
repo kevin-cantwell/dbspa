@@ -9,8 +9,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/kevin-cantwell/folddb/internal/format"
-	"github.com/kevin-cantwell/folddb/internal/source"
+	"github.com/kevin-cantwell/dbspa/internal/format"
+	"github.com/kevin-cantwell/dbspa/internal/source"
 )
 
 func runSchema(args []string) error {

@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kevin-cantwell/folddb/internal/engine"
-	"github.com/kevin-cantwell/folddb/internal/source"
+	"github.com/kevin-cantwell/dbspa/internal/engine"
+	"github.com/kevin-cantwell/dbspa/internal/source"
 )
 
 func TestInjectKafkaVirtuals(t *testing.T) {

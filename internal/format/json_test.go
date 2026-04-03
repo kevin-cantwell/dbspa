@@ -3,7 +3,7 @@ package format
 import (
 	"testing"
 
-	"github.com/kevin-cantwell/folddb/internal/engine"
+	"github.com/kevin-cantwell/dbspa/internal/engine"
 )
 
 func TestJSONDecodeSimpleObject(t *testing.T) {

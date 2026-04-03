@@ -5,7 +5,7 @@ import (
 	"math/rand"
 	"os"
 
-	pb "github.com/kevin-cantwell/folddb/proto/pb"
+	pb "github.com/kevin-cantwell/dbspa/proto/pb"
 	"google.golang.org/protobuf/proto"
 )
 

@@ -3,8 +3,8 @@ package grammar_test
 import (
 	"testing"
 
-	"github.com/kevin-cantwell/folddb/internal/sql/grammar"
-	"github.com/kevin-cantwell/folddb/internal/sql/parser"
+	"github.com/kevin-cantwell/dbspa/internal/sql/grammar"
+	"github.com/kevin-cantwell/dbspa/internal/sql/parser"
 )
 
 // positiveQueries are all SQL strings from parser_positive_test.go that MUST parse.
@@ -159,8 +159,8 @@ var positiveQueries = []string{
 	// Two-token FORMAT syntax
 	"SELECT * FROM 'kafka://b/t' FORMAT AVRO DEBEZIUM",
 	"SELECT * FROM 'kafka://b/t' FORMAT JSON DEBEZIUM",
-	"SELECT * FROM stdin FORMAT FOLDDB",
-	"SELECT * FROM stdin FORMAT JSON FOLDDB",
+	"SELECT * FROM stdin FORMAT DBSPA",
+	"SELECT * FROM stdin FORMAT JSON DBSPA",
 	"SELECT * FROM 'kafka://b/t' FORMAT AVRO(registry='http://reg:8081') DEBEZIUM",
 	"SELECT a + b * c",
 	"SELECT a OR b AND c",

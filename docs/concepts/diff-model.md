@@ -1,6 +1,6 @@
 # The Z-Set Model
 
-This is the most important concept in FoldDB. Everything else follows from it.
+This is the most important concept in DBSPA. Everything else follows from it.
 
 ## What is a Z-set?
 
@@ -14,7 +14,7 @@ In a Z-set, every element has an integer **weight**:
 - Weight `-N` means "N copies retracted"
 - Weight `0` means the element has been fully cancelled out
 
-Inside FoldDB, every record flowing through the pipeline is a Z-set entry:
+Inside DBSPA, every record flowing through the pipeline is a Z-set entry:
 
 | Part | Description |
 |---|---|
@@ -28,7 +28,7 @@ The weight field matters when you use **Debezium CDC**, when the **accumulator e
 
 ## Why Z-sets?
 
-FoldDB's earlier "diff model" used a `Diff int8` field that was limited to `+1` and `-1`. Z-sets generalize this with full integer weights, which unlocks several capabilities:
+DBSPA's earlier "diff model" used a `Diff int8` field that was limited to `+1` and `-1`. Z-sets generalize this with full integer weights, which unlocks several capabilities:
 
 **Compositional incrementalization.** Every relational operator (filter, project, join, aggregate) has a provably correct incremental version when applied to Z-set deltas. This means you can compose operators freely and the result is always correct -- you don't need to special-case retraction handling per operator.
 
@@ -44,7 +44,7 @@ FoldDB's earlier "diff model" used a `Diff int8` field that was limited to `+1` 
 
 Debezium watches a database's transaction log and publishes changes to Kafka. Each change has an `op` field:
 
-| Debezium `op` | What happened | FoldDB records emitted |
+| Debezium `op` | What happened | DBSPA records emitted |
 |---|---|---|
 | `c` (create) | Row inserted | 1 record: `(after, weight=+1)` |
 | `u` (update) | Row changed | 2 records: `(before, weight=-1)` then `(after, weight=+1)` |
@@ -83,7 +83,7 @@ When records are batched (see [pipeline](../architecture/pipeline.md)), multiple
 
 ### Correct aggregation over mutable data
 
-Traditional stream processors (Kafka Streams, Flink) handle retractions with "retract mode" as a special case. In FoldDB, it's the default -- **every operator processes weighted records natively**.
+Traditional stream processors (Kafka Streams, Flink) handle retractions with "retract mode" as a special case. In DBSPA, it's the default -- **every operator processes weighted records natively**.
 
 Consider: "How many orders are in each status right now?"
 
@@ -107,7 +107,7 @@ Every operator (filter, project, aggregate, join) handles weights. A retraction 
 
 ### Multiset semantics
 
-Because weights are full integers (not just +1/-1), FoldDB naturally supports multiset semantics. A weight of `+3` means "three identical copies of this row." This arises naturally from batch compaction and from certain join patterns. Accumulators handle this correctly: `Add` is called with the weight, so `COUNT(*)` increments by the weight value, `SUM` adds `value * weight`, etc.
+Because weights are full integers (not just +1/-1), DBSPA naturally supports multiset semantics. A weight of `+3` means "three identical copies of this row." This arises naturally from batch compaction and from certain join patterns. Accumulators handle this correctly: `Add` is called with the weight, so `COUNT(*)` increments by the weight value, `SUM` adds `value * weight`, etc.
 
 ## Output modes
 
@@ -118,7 +118,7 @@ The Z-set model surfaces differently depending on the output mode:
 | **TUI** (terminal) | You see a live-updating table. Retractions are invisible -- the row just updates in place. |
 | **Changelog NDJSON** (piped) | Every line uses the Feldera weighted format: `{"weight": N, "data": {...}}`. Retraction+insertion pairs are always adjacent. |
 | **SQLite** (`--state file.db`) | The `result` table is UPSERTed. You always see the current state. |
-| **HTTP** (`folddb serve`) | `GET /` returns current state. `GET /stream` returns SSE changelog entries. |
+| **HTTP** (`dbspa serve`) | `GET /` returns current state. `GET /stream` returns SSE changelog entries. |
 
 ## Accumulator state cost
 

@@ -1,12 +1,12 @@
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -ldflags "-X main.Version=$(VERSION)"
-BINARY := folddb
+BINARY := dbspa
 
 .PHONY: build test test-unit test-integration test-all verify bench bench-full bench-full-kafka bench-compare stress stress-quick lint release clean docker-up docker-down testdata grammar
 
 build:
-	go build $(LDFLAGS) -o $(BINARY) ./cmd/folddb
-	go build -o folddb-gen ./cmd/folddb-gen
+	go build $(LDFLAGS) -o $(BINARY) ./cmd/dbspa
+	go build -o dbspa-gen ./cmd/dbspa-gen
 
 test: test-unit
 
@@ -52,16 +52,16 @@ lint:
 	go vet ./...
 
 release: clean
-	GOOS=linux   GOARCH=amd64 go build $(LDFLAGS) -o dist/$(BINARY)-linux-amd64   ./cmd/folddb
-	GOOS=linux   GOARCH=arm64 go build $(LDFLAGS) -o dist/$(BINARY)-linux-arm64   ./cmd/folddb
-	GOOS=darwin  GOARCH=amd64 go build $(LDFLAGS) -o dist/$(BINARY)-darwin-amd64  ./cmd/folddb
-	GOOS=darwin  GOARCH=arm64 go build $(LDFLAGS) -o dist/$(BINARY)-darwin-arm64  ./cmd/folddb
+	GOOS=linux   GOARCH=amd64 go build $(LDFLAGS) -o dist/$(BINARY)-linux-amd64   ./cmd/dbspa
+	GOOS=linux   GOARCH=arm64 go build $(LDFLAGS) -o dist/$(BINARY)-linux-arm64   ./cmd/dbspa
+	GOOS=darwin  GOARCH=amd64 go build $(LDFLAGS) -o dist/$(BINARY)-darwin-amd64  ./cmd/dbspa
+	GOOS=darwin  GOARCH=arm64 go build $(LDFLAGS) -o dist/$(BINARY)-darwin-arm64  ./cmd/dbspa
 
 testdata:
 	go run testdata/gen.go
 
 grammar:
-	pigeon -o internal/sql/grammar/folddb.go internal/sql/grammar/folddb.peg
+	pigeon -o internal/sql/grammar/dbspa.go internal/sql/grammar/dbspa.peg
 
 bench-full: build
 	./bench/harness/run.sh --output bench/harness/results/$$(date +%Y%m%d_%H%M%S).json
@@ -81,4 +81,4 @@ stress-quick: build
 	./stress/run.sh --duration 1m --scenarios "sustained/passthrough|adversarial/high_card|adversarial/schema" --output stress/results/$$(date +%Y%m%d_%H%M%S).json
 
 clean:
-	rm -rf dist/ $(BINARY) folddb-gen
+	rm -rf dist/ $(BINARY) dbspa-gen

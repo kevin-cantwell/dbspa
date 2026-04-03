@@ -1,7 +1,7 @@
-// Package sink provides output writers for FoldDB query results.
+// Package sink provides output writers for DBSPA query results.
 package sink
 
-import "github.com/kevin-cantwell/folddb/internal/engine"
+import "github.com/kevin-cantwell/dbspa/internal/engine"
 
 // Sink writes records to an output destination.
 type Sink interface {

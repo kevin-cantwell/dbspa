@@ -95,9 +95,9 @@ func TestDetectChangelog(t *testing.T) {
 		wantErr bool
 	}{
 		{
-			name:   "FoldDB changelog (has weight + data)",
+			name:   "DBSPA changelog (has weight + data)",
 			fields: map[string]any{"weight": float64(1), "data": map[string]any{"name": "Alice"}},
-			want:   "FOLDDB",
+			want:   "DBSPA",
 		},
 		{
 			name:   "Debezium (has op + after)",

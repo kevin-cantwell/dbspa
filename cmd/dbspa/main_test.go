@@ -13,54 +13,54 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kevin-cantwell/folddb/internal/engine"
-	"github.com/kevin-cantwell/folddb/internal/format"
-	"github.com/kevin-cantwell/folddb/internal/sink"
-	"github.com/kevin-cantwell/folddb/internal/sql/ast"
-	"github.com/kevin-cantwell/folddb/internal/sql/parser"
+	"github.com/kevin-cantwell/dbspa/internal/engine"
+	"github.com/kevin-cantwell/dbspa/internal/format"
+	"github.com/kevin-cantwell/dbspa/internal/sink"
+	"github.com/kevin-cantwell/dbspa/internal/sql/ast"
+	"github.com/kevin-cantwell/dbspa/internal/sql/parser"
 
 	_ "modernc.org/sqlite"
 )
 
-// folddbBin holds the path to the compiled folddb binary for E2E exec tests.
-var folddbBin string
+// dbspaBin holds the path to the compiled dbspa binary for E2E exec tests.
+var dbspaBin string
 
-// folddbGenBin holds the path to the compiled folddb-gen binary for data generation tests.
-var folddbGenBin string
+// dbspaGenBin holds the path to the compiled dbspa-gen binary for data generation tests.
+var dbspaGenBin string
 
 func TestMain(m *testing.M) {
-	// Build the folddb binary once for all tests that need it.
-	tmp, err := os.MkdirTemp("", "folddb-test-*")
+	// Build the dbspa binary once for all tests that need it.
+	tmp, err := os.MkdirTemp("", "dbspa-test-*")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "TestMain: cannot create temp dir: %v\n", err)
 		os.Exit(1)
 	}
 	defer os.RemoveAll(tmp)
 
-	folddbBin = filepath.Join(tmp, "folddb")
-	cmd := exec.Command("go", "build", "-o", folddbBin, ".")
+	dbspaBin = filepath.Join(tmp, "dbspa")
+	cmd := exec.Command("go", "build", "-o", dbspaBin, ".")
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "TestMain: go build failed: %v\n", err)
 		os.Exit(1)
 	}
 
-	folddbGenBin = filepath.Join(tmp, "folddb-gen")
-	cmd = exec.Command("go", "build", "-o", folddbGenBin, "../folddb-gen")
+	dbspaGenBin = filepath.Join(tmp, "dbspa-gen")
+	cmd = exec.Command("go", "build", "-o", dbspaGenBin, "../dbspa-gen")
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
-		fmt.Fprintf(os.Stderr, "TestMain: go build folddb-gen failed: %v\n", err)
+		fmt.Fprintf(os.Stderr, "TestMain: go build dbspa-gen failed: %v\n", err)
 		os.Exit(1)
 	}
 
 	os.Exit(m.Run())
 }
 
-// runFolddb runs the compiled folddb binary with the given SQL query and
+// runFolddb runs the compiled dbspa binary with the given SQL query and
 // optional stdin input. Returns stdout, stderr, and any error.
 func runFolddb(t *testing.T, sql string, stdin string) (stdout, stderr string, err error) {
 	t.Helper()
-	cmd := exec.Command(folddbBin, sql)
+	cmd := exec.Command(dbspaBin, sql)
 	if stdin != "" {
 		cmd.Stdin = strings.NewReader(stdin)
 	}
@@ -71,11 +71,11 @@ func runFolddb(t *testing.T, sql string, stdin string) (stdout, stderr string, e
 	return outBuf.String(), errBuf.String(), err
 }
 
-// runFolddbWithArgs runs the compiled folddb binary with extra CLI flags before the SQL query.
+// runFolddbWithArgs runs the compiled dbspa binary with extra CLI flags before the SQL query.
 // Returns stdout, stderr, and any error.
 func runFolddbWithArgs(t *testing.T, args []string, stdin string) (stdout, stderr string, err error) {
 	t.Helper()
-	cmd := exec.Command(folddbBin, args...)
+	cmd := exec.Command(dbspaBin, args...)
 	if stdin != "" {
 		cmd.Stdin = strings.NewReader(stdin)
 	}
@@ -2513,7 +2513,7 @@ func TestE2E_JoinSubqueryWithGroupBy(t *testing.T) {
 
 // TestE2E_FromSubqueryWithDuckDB: subquery reads Parquet via DuckDB
 func TestE2E_FromSubqueryWithDuckDB(t *testing.T) {
-	// Write a Parquet file using folddb-gen or create a simple NDJSON and convert.
+	// Write a Parquet file using dbspa-gen or create a simple NDJSON and convert.
 	// For simplicity, create an NDJSON file (DuckDB handles it) with region data.
 	tmpFile := t.TempDir() + "/data.ndjson"
 	data := `{"region":"us","amount":1}
@@ -3247,7 +3247,7 @@ func TestE2E_ExecFrom_CatFile(t *testing.T) {
 	sql := fmt.Sprintf("SELECT name, age FROM EXEC('cat %s') WHERE age > 28", dataFile)
 	stdout, stderr, err := runFolddb(t, sql, "")
 	if err != nil {
-		t.Fatalf("folddb failed: %v\nstderr: %s", err, stderr)
+		t.Fatalf("dbspa failed: %v\nstderr: %s", err, stderr)
 	}
 
 	results := parseFolddbOutput(t, stdout)
@@ -3283,7 +3283,7 @@ func TestE2E_ExecFrom_GroupBy(t *testing.T) {
 	sql := fmt.Sprintf("SELECT status, COUNT(*) AS cnt, SUM(amount) AS total FROM EXEC('cat %s') GROUP BY status", dataFile)
 	stdout, stderr, err := runFolddb(t, sql, "")
 	if err != nil {
-		t.Fatalf("folddb failed: %v\nstderr: %s", err, stderr)
+		t.Fatalf("dbspa failed: %v\nstderr: %s", err, stderr)
 	}
 
 	results := parseChangelogOutput(t, stdout)
@@ -3333,7 +3333,7 @@ func TestE2E_ExecJoin(t *testing.T) {
 	sql := fmt.Sprintf("SELECT e.user_id, u.name, e.action FROM stdin e JOIN EXEC('cat %s') u ON e.user_id = u.id", usersFile)
 	stdout, stderr, err := runFolddb(t, sql, stdinData)
 	if err != nil {
-		t.Fatalf("folddb failed: %v\nstderr: %s", err, stderr)
+		t.Fatalf("dbspa failed: %v\nstderr: %s", err, stderr)
 	}
 
 	results := parseFolddbOutput(t, stdout)
@@ -3376,7 +3376,7 @@ carol,35,la
 	sql := fmt.Sprintf("SELECT name, city FROM EXEC('cat %s') FORMAT CSV(header=true) WHERE age::int > 28", csvFile)
 	stdout, stderr, err := runFolddb(t, sql, "")
 	if err != nil {
-		t.Fatalf("folddb failed: %v\nstderr: %s", err, stderr)
+		t.Fatalf("dbspa failed: %v\nstderr: %s", err, stderr)
 	}
 
 	results := parseFolddbOutput(t, stdout)
@@ -3409,7 +3409,7 @@ func TestE2E_ExecFrom_AsStream(t *testing.T) {
 	sql := fmt.Sprintf("SELECT x FROM EXEC('cat %s') AS STREAM WHERE x > 1", dataFile)
 	stdout, stderr, err := runFolddb(t, sql, "")
 	if err != nil {
-		t.Fatalf("folddb failed: %v\nstderr: %s", err, stderr)
+		t.Fatalf("dbspa failed: %v\nstderr: %s", err, stderr)
 	}
 
 	results := parseFolddbOutput(t, stdout)
@@ -3434,7 +3434,7 @@ func TestE2E_ExecServeBlocked(t *testing.T) {
 	}
 
 	sql := fmt.Sprintf("SELECT * FROM EXEC('cat %s')", dataFile)
-	cmd := exec.Command(folddbBin, "serve", sql)
+	cmd := exec.Command(dbspaBin, "serve", sql)
 	var errBuf bytes.Buffer
 	cmd.Stderr = &errBuf
 	err := cmd.Run()
@@ -3468,7 +3468,7 @@ func TestE2E_SeedFromExec(t *testing.T) {
 	sql := fmt.Sprintf("SELECT region, SUM(amount) AS total SEED FROM EXEC('cat %s') GROUP BY region", snapshotFile)
 	stdout, stderr, err := runFolddb(t, sql, stdinData)
 	if err != nil {
-		t.Fatalf("folddb failed: %v\nstderr: %s", err, stderr)
+		t.Fatalf("dbspa failed: %v\nstderr: %s", err, stderr)
 	}
 
 	results := parseChangelogOutput(t, stdout)
@@ -3503,17 +3503,17 @@ func TestE2E_ExecLargeOutput(t *testing.T) {
 		t.Skip("skipping large output test in short mode")
 	}
 
-	sql := fmt.Sprintf("SELECT COUNT(*) AS cnt FROM EXEC('%s orders --count 100000 --seed 42') GROUP BY 1", folddbGenBin)
+	sql := fmt.Sprintf("SELECT COUNT(*) AS cnt FROM EXEC('%s orders --count 100000 --seed 42') GROUP BY 1", dbspaGenBin)
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, folddbBin, sql)
+	cmd := exec.CommandContext(ctx, dbspaBin, sql)
 	var outBuf, errBuf bytes.Buffer
 	cmd.Stdout = &outBuf
 	cmd.Stderr = &errBuf
 
 	if err := cmd.Run(); err != nil {
-		t.Fatalf("folddb failed: %v\nstderr: %s", err, errBuf.String())
+		t.Fatalf("dbspa failed: %v\nstderr: %s", err, errBuf.String())
 	}
 
 	results := parseChangelogOutput(t, outBuf.String())
@@ -3567,7 +3567,7 @@ echo 'warning: something happened' >&2
 	sql := fmt.Sprintf("SELECT x FROM EXEC('%s')", script)
 	stdout, stderr, err := runFolddb(t, sql, "")
 	if err != nil {
-		t.Fatalf("folddb failed: %v\nstderr: %s", err, stderr)
+		t.Fatalf("dbspa failed: %v\nstderr: %s", err, stderr)
 	}
 
 	// Verify stdout has the record
@@ -3610,7 +3610,7 @@ exit 1
 }
 
 // TestE2E_ExecEmptyOutput: EXEC command that produces no stdout.
-// Verify FoldDB handles gracefully (no crash, no output).
+// Verify DBSPA handles gracefully (no crash, no output).
 func TestE2E_ExecEmptyOutput(t *testing.T) {
 	tmpDir := t.TempDir()
 	script := filepath.Join(tmpDir, "empty.sh")
@@ -3621,7 +3621,7 @@ func TestE2E_ExecEmptyOutput(t *testing.T) {
 	sql := fmt.Sprintf("SELECT * FROM EXEC('%s')", script)
 	stdout, stderr, err := runFolddb(t, sql, "")
 	if err != nil {
-		t.Fatalf("folddb failed: %v\nstderr: %s", err, stderr)
+		t.Fatalf("dbspa failed: %v\nstderr: %s", err, stderr)
 	}
 	if strings.TrimSpace(stdout) != "" {
 		t.Errorf("expected empty output, got: %s", stdout)
@@ -3636,17 +3636,17 @@ func TestE2E_ExecGroupByLarge(t *testing.T) {
 	}
 
 	const totalRecords = 50000
-	sql := fmt.Sprintf("SELECT status, COUNT(*) AS cnt FROM EXEC('%s orders --count %d --seed 42') GROUP BY status", folddbGenBin, totalRecords)
+	sql := fmt.Sprintf("SELECT status, COUNT(*) AS cnt FROM EXEC('%s orders --count %d --seed 42') GROUP BY status", dbspaGenBin, totalRecords)
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, folddbBin, sql)
+	cmd := exec.CommandContext(ctx, dbspaBin, sql)
 	var outBuf, errBuf bytes.Buffer
 	cmd.Stdout = &outBuf
 	cmd.Stderr = &errBuf
 
 	if err := cmd.Run(); err != nil {
-		t.Fatalf("folddb failed: %v\nstderr: %s", err, errBuf.String())
+		t.Fatalf("dbspa failed: %v\nstderr: %s", err, errBuf.String())
 	}
 
 	results := parseChangelogOutput(t, outBuf.String())
@@ -3684,7 +3684,7 @@ func TestE2E_ExecWithJoin(t *testing.T) {
 	sql := fmt.Sprintf("SELECT e.id, u.name FROM stdin e JOIN EXEC('cat %s') u ON e.id = u.id", usersFile)
 	stdout, stderr, err := runFolddb(t, sql, stdinData)
 	if err != nil {
-		t.Fatalf("folddb failed: %v\nstderr: %s", err, stderr)
+		t.Fatalf("dbspa failed: %v\nstderr: %s", err, stderr)
 	}
 
 	results := parseFolddbOutput(t, stdout)
@@ -3708,7 +3708,7 @@ func TestE2E_ExecFormatCSV(t *testing.T) {
 	sql := fmt.Sprintf("SELECT name, age FROM EXEC('cat %s') FORMAT CSV(header=true) WHERE age::int > 28", csvFile)
 	stdout, stderr, err := runFolddb(t, sql, "")
 	if err != nil {
-		t.Fatalf("folddb failed: %v\nstderr: %s", err, stderr)
+		t.Fatalf("dbspa failed: %v\nstderr: %s", err, stderr)
 	}
 
 	results := parseFolddbOutput(t, stdout)
@@ -3730,7 +3730,7 @@ func TestE2E_StateNonAccumulating(t *testing.T) {
 
 	stdout, stderr, err := runFolddbWithArgs(t, []string{"--state", dbPath, "SELECT x"}, stdinData)
 	if err != nil {
-		t.Fatalf("folddb failed: %v\nstderr: %s\nstdout: %s", err, stderr, stdout)
+		t.Fatalf("dbspa failed: %v\nstderr: %s\nstdout: %s", err, stderr, stdout)
 	}
 
 	// Verify the SQLite file was created and has 3 rows
@@ -3776,7 +3776,7 @@ func TestE2E_StateNonAccumulatingWithWhere(t *testing.T) {
 
 	_, stderr, err := runFolddbWithArgs(t, []string{"--state", dbPath, "SELECT x WHERE x > 2"}, stdinData)
 	if err != nil {
-		t.Fatalf("folddb failed: %v\nstderr: %s", err, stderr)
+		t.Fatalf("dbspa failed: %v\nstderr: %s", err, stderr)
 	}
 
 	db, err := sql.Open("sqlite", dbPath)
@@ -3803,7 +3803,7 @@ func TestE2E_FormatJSON_PlainRecords(t *testing.T) {
 	stdin := "{\"x\":1}\n{\"x\":2}\n"
 	stdout, stderr, err := runFolddb(t, "SELECT x FROM stdin FORMAT JSON", stdin)
 	if err != nil {
-		t.Fatalf("folddb failed: %v\nstderr: %s", err, stderr)
+		t.Fatalf("dbspa failed: %v\nstderr: %s", err, stderr)
 	}
 	results := parseFolddbOutput(t, stdout)
 	if len(results) != 2 {
@@ -3822,7 +3822,7 @@ func TestE2E_FormatCSV_PlainRecords(t *testing.T) {
 	stdin := "x\n1\n2\n"
 	stdout, stderr, err := runFolddb(t, "SELECT x FROM stdin FORMAT CSV(header=true)", stdin)
 	if err != nil {
-		t.Fatalf("folddb failed: %v\nstderr: %s", err, stderr)
+		t.Fatalf("dbspa failed: %v\nstderr: %s", err, stderr)
 	}
 	results := parseFolddbOutput(t, stdout)
 	if len(results) != 2 {
@@ -3836,12 +3836,12 @@ func TestE2E_FormatCSV_PlainRecords(t *testing.T) {
 	}
 }
 
-// TestE2E_FormatJSON_WeightIsRegularColumn: _weight without FOLDDB envelope is just a column
+// TestE2E_FormatJSON_WeightIsRegularColumn: _weight without DBSPA envelope is just a column
 func TestE2E_FormatJSON_WeightIsRegularColumn(t *testing.T) {
 	stdin := "{\"_weight\":-1,\"x\":1}\n"
 	stdout, stderr, err := runFolddb(t, "SELECT _weight, x FROM stdin FORMAT JSON", stdin)
 	if err != nil {
-		t.Fatalf("folddb failed: %v\nstderr: %s", err, stderr)
+		t.Fatalf("dbspa failed: %v\nstderr: %s", err, stderr)
 	}
 	results := parseFolddbOutput(t, stdout)
 	if len(results) != 1 {
@@ -3861,7 +3861,7 @@ func TestE2E_FormatDebezium_Create(t *testing.T) {
 	stdin := "{\"op\":\"c\",\"after\":{\"id\":1,\"name\":\"alice\"}}\n"
 	stdout, stderr, err := runFolddb(t, "SELECT id, name FROM stdin FORMAT DEBEZIUM", stdin)
 	if err != nil {
-		t.Fatalf("folddb failed: %v\nstderr: %s", err, stderr)
+		t.Fatalf("dbspa failed: %v\nstderr: %s", err, stderr)
 	}
 	results := parseFolddbOutput(t, stdout)
 	if len(results) != 1 {
@@ -3880,7 +3880,7 @@ func TestE2E_FormatJSONDebezium_Explicit(t *testing.T) {
 	stdin := "{\"op\":\"c\",\"after\":{\"id\":1,\"name\":\"bob\"}}\n"
 	stdout, stderr, err := runFolddb(t, "SELECT id, name FROM stdin FORMAT JSON DEBEZIUM", stdin)
 	if err != nil {
-		t.Fatalf("folddb failed: %v\nstderr: %s", err, stderr)
+		t.Fatalf("dbspa failed: %v\nstderr: %s", err, stderr)
 	}
 	results := parseFolddbOutput(t, stdout)
 	if len(results) != 1 {
@@ -3899,7 +3899,7 @@ func TestE2E_FormatDebezium_UpdateRetraction(t *testing.T) {
 	stdin := "{\"op\":\"u\",\"before\":{\"id\":1,\"status\":\"pending\"},\"after\":{\"id\":1,\"status\":\"shipped\"}}\n"
 	stdout, stderr, err := runFolddb(t, "SELECT status FROM stdin FORMAT DEBEZIUM", stdin)
 	if err != nil {
-		t.Fatalf("folddb failed: %v\nstderr: %s", err, stderr)
+		t.Fatalf("dbspa failed: %v\nstderr: %s", err, stderr)
 	}
 	results := parseFolddbOutput(t, stdout)
 	if len(results) != 2 {
@@ -3915,12 +3915,12 @@ func TestE2E_FormatDebezium_UpdateRetraction(t *testing.T) {
 	}
 }
 
-// TestE2E_FormatFoldDB_WeightConsumed: FORMAT FOLDDB consumes weight as z-set weight
-func TestE2E_FormatFoldDB_WeightConsumed(t *testing.T) {
+// TestE2E_FormatDBSPA_WeightConsumed: FORMAT DBSPA consumes weight as z-set weight
+func TestE2E_FormatDBSPA_WeightConsumed(t *testing.T) {
 	stdin := "{\"weight\":1,\"data\":{\"x\":10}}\n{\"weight\":-1,\"data\":{\"x\":10}}\n"
-	stdout, stderr, err := runFolddb(t, "SELECT x, COUNT(*) AS cnt FROM stdin FORMAT FOLDDB GROUP BY x", stdin)
+	stdout, stderr, err := runFolddb(t, "SELECT x, COUNT(*) AS cnt FROM stdin FORMAT DBSPA GROUP BY x", stdin)
 	if err != nil {
-		t.Fatalf("folddb failed: %v\nstderr: %s", err, stderr)
+		t.Fatalf("dbspa failed: %v\nstderr: %s", err, stderr)
 	}
 	results := parseChangelogOutput(t, stdout)
 	// Insert (weight=1) produces cnt=1, then retraction (weight=-1) removes the group.
@@ -3941,12 +3941,12 @@ func TestE2E_FormatFoldDB_WeightConsumed(t *testing.T) {
 	}
 }
 
-// TestE2E_FormatJSONFoldDB_Explicit: FORMAT JSON FOLDDB (explicit encoding)
-func TestE2E_FormatJSONFoldDB_Explicit(t *testing.T) {
+// TestE2E_FormatJSONDBSPA_Explicit: FORMAT JSON DBSPA (explicit encoding)
+func TestE2E_FormatJSONDBSPA_Explicit(t *testing.T) {
 	stdin := "{\"weight\":1,\"data\":{\"x\":10}}\n{\"weight\":-1,\"data\":{\"x\":10}}\n"
-	stdout, stderr, err := runFolddb(t, "SELECT x, COUNT(*) AS cnt FROM stdin FORMAT JSON FOLDDB GROUP BY x", stdin)
+	stdout, stderr, err := runFolddb(t, "SELECT x, COUNT(*) AS cnt FROM stdin FORMAT JSON DBSPA GROUP BY x", stdin)
 	if err != nil {
-		t.Fatalf("folddb failed: %v\nstderr: %s", err, stderr)
+		t.Fatalf("dbspa failed: %v\nstderr: %s", err, stderr)
 	}
 	results := parseChangelogOutput(t, stdout)
 	if len(results) < 2 {
@@ -3960,12 +3960,12 @@ func TestE2E_FormatJSONFoldDB_Explicit(t *testing.T) {
 	}
 }
 
-// TestE2E_FormatFoldDB_DefaultWeight: FORMAT FOLDDB without weight envelope defaults to +1
-func TestE2E_FormatFoldDB_DefaultWeight(t *testing.T) {
+// TestE2E_FormatDBSPA_DefaultWeight: FORMAT DBSPA without weight envelope defaults to +1
+func TestE2E_FormatDBSPA_DefaultWeight(t *testing.T) {
 	stdin := "{\"x\":1}\n"
-	stdout, stderr, err := runFolddb(t, "SELECT x FROM stdin FORMAT FOLDDB", stdin)
+	stdout, stderr, err := runFolddb(t, "SELECT x FROM stdin FORMAT DBSPA", stdin)
 	if err != nil {
-		t.Fatalf("folddb failed: %v\nstderr: %s", err, stderr)
+		t.Fatalf("dbspa failed: %v\nstderr: %s", err, stderr)
 	}
 	results := parseFolddbOutput(t, stdout)
 	if len(results) != 1 {
@@ -3976,12 +3976,12 @@ func TestE2E_FormatFoldDB_DefaultWeight(t *testing.T) {
 	}
 }
 
-// TestE2E_FormatFoldDB_MultisetWeight: FORMAT FOLDDB with weight > 1 (multiset)
-func TestE2E_FormatFoldDB_MultisetWeight(t *testing.T) {
+// TestE2E_FormatDBSPA_MultisetWeight: FORMAT DBSPA with weight > 1 (multiset)
+func TestE2E_FormatDBSPA_MultisetWeight(t *testing.T) {
 	stdin := "{\"weight\":3,\"data\":{\"x\":1}}\n"
-	stdout, stderr, err := runFolddb(t, "SELECT x, COUNT(*) AS cnt FROM stdin FORMAT FOLDDB GROUP BY x", stdin)
+	stdout, stderr, err := runFolddb(t, "SELECT x, COUNT(*) AS cnt FROM stdin FORMAT DBSPA GROUP BY x", stdin)
 	if err != nil {
-		t.Fatalf("folddb failed: %v\nstderr: %s", err, stderr)
+		t.Fatalf("dbspa failed: %v\nstderr: %s", err, stderr)
 	}
 	results := parseChangelogOutput(t, stdout)
 	// With weight=3, COUNT should be 3
@@ -3997,22 +3997,22 @@ func TestE2E_FormatFoldDB_MultisetWeight(t *testing.T) {
 	}
 }
 
-// TestE2E_FormatFoldDB_PipedComposition: output of GROUP BY piped as FOLDDB input
-func TestE2E_FormatFoldDB_PipedComposition(t *testing.T) {
+// TestE2E_FormatDBSPA_PipedComposition: output of GROUP BY piped as DBSPA input
+func TestE2E_FormatDBSPA_PipedComposition(t *testing.T) {
 	// First query: GROUP BY s, producing changelog in Feldera weighted format
-	// Second query: consume as FOLDDB envelope, filter cnt > 1
+	// Second query: consume as DBSPA envelope, filter cnt > 1
 	stdin := "{\"s\":\"a\"}\n{\"s\":\"b\"}\n{\"s\":\"a\"}\n"
 
 	// Run first query, capture its output
 	stdout1, stderr1, err := runFolddb(t, "SELECT s, COUNT(*) AS cnt GROUP BY s", stdin)
 	if err != nil {
-		t.Fatalf("first folddb failed: %v\nstderr: %s", err, stderr1)
+		t.Fatalf("first dbspa failed: %v\nstderr: %s", err, stderr1)
 	}
 
-	// Pipe that output to second query with FORMAT FOLDDB
-	stdout2, stderr2, err := runFolddb(t, "SELECT s, cnt FROM stdin FORMAT FOLDDB WHERE cnt::int > 1", stdout1)
+	// Pipe that output to second query with FORMAT DBSPA
+	stdout2, stderr2, err := runFolddb(t, "SELECT s, cnt FROM stdin FORMAT DBSPA WHERE cnt::int > 1", stdout1)
 	if err != nil {
-		t.Fatalf("second folddb failed: %v\nstderr: %s", err, stderr2)
+		t.Fatalf("second dbspa failed: %v\nstderr: %s", err, stderr2)
 	}
 
 	results := parseFolddbOutput(t, stdout2)

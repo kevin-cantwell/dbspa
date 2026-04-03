@@ -2,7 +2,7 @@
 
 ## The Pipeline
 
-Every FoldDB query flows through the same pipeline:
+Every DBSPA query flows through the same pipeline:
 
 ```
 Source → Decode → [Seed] → [Dedup] → [Join] → Filter → [Batch] → [Aggregate] → Sink
@@ -37,7 +37,7 @@ The **Batch** stage collects individual records into slices of up to 1024 entrie
 
 ## Query Types
 
-FoldDB classifies every query into one of three types:
+DBSPA classifies every query into one of three types:
 
 ### Non-accumulating (filter/project)
 
@@ -144,7 +144,7 @@ The key insight: **Add and Retract are symmetric**. Every accumulator handles bo
 | **ChangelogSink** | Accumulating, piped | NDJSON with `"op":"+"/"−"`, sorted final snapshot at EOF |
 | **TUISink** | Accumulating, TTY | Live-updating table at 15fps, sorted by ORDER BY |
 | **SQLiteSink** | `--state file.db` | UPSERT for accumulating, INSERT for non-accumulating |
-| **HTTPSink** | `folddb serve` | In-memory state served via HTTP + SSE |
+| **HTTPSink** | `dbspa serve` | In-memory state served via HTTP + SSE |
 
 ## Concurrency Model
 

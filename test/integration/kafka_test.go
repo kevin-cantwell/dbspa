@@ -31,9 +31,9 @@ func TestKafka_ProduceAndConsumeNDJSON(t *testing.T) {
 		"SELECT name, age FROM 'kafka://%s/%s?offset=earliest' LIMIT 3",
 		kafkaBroker, topic,
 	)
-	stdout, stderr, err := runFoldDBWithTimeout(t, 15*time.Second, sql)
+	stdout, stderr, err := runDBSPAWithTimeout(t, 15*time.Second, sql)
 	if err != nil {
-		t.Fatalf("folddb failed: %v\nstderr: %s", err, stderr)
+		t.Fatalf("dbspa failed: %v\nstderr: %s", err, stderr)
 	}
 
 	lines := outputLines(stdout)
@@ -69,9 +69,9 @@ func TestKafka_DebeziumCDC(t *testing.T) {
 		"SELECT _op, _after->>'name' AS name, _after->>'status' AS status FROM 'kafka://%s/%s?offset=earliest' FORMAT DEBEZIUM LIMIT 3",
 		kafkaBroker, topic,
 	)
-	stdout, stderr, err := runFoldDBWithTimeout(t, 15*time.Second, sql)
+	stdout, stderr, err := runDBSPAWithTimeout(t, 15*time.Second, sql)
 	if err != nil {
-		t.Fatalf("folddb failed: %v\nstderr: %s", err, stderr)
+		t.Fatalf("dbspa failed: %v\nstderr: %s", err, stderr)
 	}
 
 	lines := outputLines(stdout)
@@ -110,9 +110,9 @@ func TestKafka_OffsetEarliest(t *testing.T) {
 		"SELECT x FROM 'kafka://%s/%s?offset=earliest' LIMIT 3",
 		kafkaBroker, topic,
 	)
-	stdout, _, err := runFoldDBWithTimeout(t, 15*time.Second, sql)
+	stdout, _, err := runDBSPAWithTimeout(t, 15*time.Second, sql)
 	if err != nil {
-		t.Fatalf("folddb failed: %v", err)
+		t.Fatalf("dbspa failed: %v", err)
 	}
 
 	lines := outputLines(stdout)
@@ -139,7 +139,7 @@ func TestKafka_OffsetLatest(t *testing.T) {
 		kafkaBroker, topic,
 	)
 	// Use a short timeout - if no new messages arrive, the process times out
-	stdout, _, _ := runFoldDBWithTimeout(t, 5*time.Second, sql)
+	stdout, _, _ := runDBSPAWithTimeout(t, 5*time.Second, sql)
 
 	lines := outputLines(stdout)
 	if len(lines) != 0 {
@@ -168,9 +168,9 @@ func TestKafka_MultiPartition(t *testing.T) {
 		"SELECT partition, seq FROM 'kafka://%s/%s?offset=earliest' LIMIT 6",
 		kafkaBroker, topic,
 	)
-	stdout, stderr, err := runFoldDBWithTimeout(t, 15*time.Second, sql)
+	stdout, stderr, err := runDBSPAWithTimeout(t, 15*time.Second, sql)
 	if err != nil {
-		t.Fatalf("folddb failed: %v\nstderr: %s", err, stderr)
+		t.Fatalf("dbspa failed: %v\nstderr: %s", err, stderr)
 	}
 
 	lines := outputLines(stdout)
@@ -208,9 +208,9 @@ func TestKafka_VirtualColumns(t *testing.T) {
 		"SELECT _offset, _partition, _key, val FROM 'kafka://%s/%s?offset=earliest' LIMIT 1",
 		kafkaBroker, topic,
 	)
-	stdout, stderr, err := runFoldDBWithTimeout(t, 15*time.Second, sql)
+	stdout, stderr, err := runDBSPAWithTimeout(t, 15*time.Second, sql)
 	if err != nil {
-		t.Fatalf("folddb failed: %v\nstderr: %s", err, stderr)
+		t.Fatalf("dbspa failed: %v\nstderr: %s", err, stderr)
 	}
 
 	lines := outputLines(stdout)
@@ -271,7 +271,7 @@ func TestKafka_ConsumerGroupOffsetCommit(t *testing.T) {
 		"SELECT n FROM 'kafka://%s/%s?offset=earliest&group=%s' LIMIT 5",
 		kafkaBroker, topic, group,
 	)
-	stdout, _, err := runFoldDBWithTimeout(t, 15*time.Second, sql)
+	stdout, _, err := runDBSPAWithTimeout(t, 15*time.Second, sql)
 	if err != nil {
 		t.Fatalf("first run failed: %v", err)
 	}
@@ -294,7 +294,7 @@ func TestKafka_ConsumerGroupOffsetCommit(t *testing.T) {
 		"SELECT n FROM 'kafka://%s/%s?group=%s' LIMIT 2",
 		kafkaBroker, topic, group,
 	)
-	stdout2, _, err := runFoldDBWithTimeout(t, 15*time.Second, sql2)
+	stdout2, _, err := runDBSPAWithTimeout(t, 15*time.Second, sql2)
 	if err != nil {
 		// It is acceptable if this times out or returns fewer results --
 		// consumer group offset commit is best-effort per the spec.

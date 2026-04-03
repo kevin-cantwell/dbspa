@@ -92,7 +92,7 @@ FormatClause <- FORMAT __ FormatName
 
 ChangelogClause <- CHANGELOG ( __ ChangelogFamily )?
 
-ChangelogFamily <- DEBEZIUM / FOLDDB
+ChangelogFamily <- DEBEZIUM / DBSPA
 
 // ============================================================================
 // JOIN clause
@@ -199,10 +199,10 @@ LimitClause <- __ LIMIT __ IntegerLiteral
 // ============================================================================
 
 // FormatName supports two-token syntax: FORMAT <encoding> [<envelope>]
-// e.g., FORMAT AVRO DEBEZIUM, FORMAT JSON FOLDDB, FORMAT DEBEZIUM (shorthand)
+// e.g., FORMAT AVRO DEBEZIUM, FORMAT JSON DBSPA, FORMAT DEBEZIUM (shorthand)
 FormatName <- ( Identifier / KeywordAsIdent ) FormatOptions? ( __ EnvelopeName )?
 
-EnvelopeName <- DEBEZIUM / FOLDDB
+EnvelopeName <- DEBEZIUM / DBSPA
 
 FormatOptions <- _ '(' _ FormatOptionList? _ ')'
 
@@ -412,7 +412,7 @@ EXEC       <- [Ee][Xx][Ee][Cc] !IdentChar
 STREAM     <- [Ss][Tt][Rr][Ee][Aa][Mm] !IdentChar
 TABLE      <- [Tt][Aa][Bb][Ll][Ee] !IdentChar
 DEBEZIUM   <- [Dd][Ee][Bb][Ee][Zz][Ii][Uu][Mm] !IdentChar
-FOLDDB     <- [Ff][Oo][Ll][Dd][Dd][Bb] !IdentChar
+DBSPA     <- [Dd][Bb][Ss][Pp][Aa] !IdentChar
 CHANGELOG  <- [Cc][Hh][Aa][Nn][Gg][Ee][Ll][Oo][Gg] !IdentChar
 
 // Aggregate functions
@@ -477,7 +477,7 @@ ReservedKeyword <- ( SELECT / DISTINCT / FROM / WHERE / GROUP / BY / HAVING
     / CAPACITY / FORMAT / CHANGELOG / AS / AND / OR / NOT / IN / BETWEEN / IS / NULL
     / TRUE / FALSE / LIKE / ILIKE / CASE / WHEN / THEN / ELSE / END / INTERVAL
     / CAST / SEED / JOIN / LEFT / ON / EXEC / STREAM / TABLE
-    / DEBEZIUM / FOLDDB
+    / DEBEZIUM / DBSPA
     / COUNT / SUM / AVG / MIN / MAX / MEDIAN / FIRST / LAST
     / ARRAY_AGG / APPROX_COUNT_DISTINCT
     / COALESCE / NULLIF / LENGTH / UPPER / LOWER / TRIM / LTRIM / RTRIM

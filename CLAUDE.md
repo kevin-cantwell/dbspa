@@ -1,4 +1,4 @@
-# FoldDB Development Instructions
+# DBSPA Development Instructions
 
 ## Commit Discipline
 
@@ -14,13 +14,13 @@ Do not batch multiple unrelated changes into one commit. One logical change = on
 - `make test` — run unit tests
 - `make test-integration` — run integration tests (requires Docker)
 - `make bench` — run benchmarks
-- `make verify` — compare folddb results against DuckDB
+- `make verify` — compare dbspa results against DuckDB
 - Always run `go test ./...` after any code change before committing
 
 ## Project Structure
 
-- `cmd/folddb/` — the main CLI binary
-- `cmd/folddb-gen/` — data generator utility (separate from folddb)
+- `cmd/dbspa/` — the main CLI binary
+- `cmd/dbspa-gen/` — data generator utility (separate from dbspa)
 - `cmd/demo/` — interactive web demo
 - `internal/` — core engine, parser, sources, sinks, formats
 - `test/integration/` — integration tests (build tag: `integration`)

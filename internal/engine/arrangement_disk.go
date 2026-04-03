@@ -9,7 +9,7 @@ import (
 	"time"
 
 	badger "github.com/dgraph-io/badger/v4"
-	"github.com/kevin-cantwell/folddb/internal/sql/ast"
+	"github.com/kevin-cantwell/dbspa/internal/sql/ast"
 )
 
 // DiskArrangement is a hybrid arrangement that keeps hot data in memory

@@ -3,7 +3,7 @@ package engine
 import (
 	"time"
 
-	"github.com/kevin-cantwell/folddb/internal/sql/ast"
+	"github.com/kevin-cantwell/dbspa/internal/sql/ast"
 )
 
 // Batch is a slice of Z-set entries processed together through the pipeline.

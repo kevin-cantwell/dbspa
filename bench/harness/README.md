@@ -1,4 +1,4 @@
-# FoldDB Benchmark Harness
+# DBSPA Benchmark Harness
 
 A self-contained benchmark suite that produces reproducible, machine-readable JSON results for CI regression gates and historical performance graphing.
 
@@ -70,7 +70,7 @@ Or run directly:
 
 ## How It Works
 
-1. **Builds** folddb and folddb-gen binaries from source
+1. **Builds** dbspa and dbspa-gen binaries from source
 2. **Generates** deterministic fixtures (seed=42) so results are reproducible
 3. **Runs** each benchmark 3 times and reports the median
 4. **Outputs** JSON with full run details + system metadata
@@ -81,7 +81,7 @@ Or run directly:
 ```json
 {
   "timestamp": "2026-03-28T15:00:00Z",
-  "folddb_version": "v0.1.0-213-g84294bf",
+  "dbspa_version": "v0.1.0-213-g84294bf",
   "go_version": "go1.25.7",
   "os": "darwin",
   "arch": "arm64",

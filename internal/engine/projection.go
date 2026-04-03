@@ -1,7 +1,7 @@
 package engine
 
 import (
-	"github.com/kevin-cantwell/folddb/internal/sql/ast"
+	"github.com/kevin-cantwell/dbspa/internal/sql/ast"
 )
 
 // ExtractReferencedColumns walks a SelectStatement and returns all column

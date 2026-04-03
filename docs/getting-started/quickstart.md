@@ -7,7 +7,7 @@ The simplest use: pipe JSON data through a SQL filter.
 ```bash
 echo '{"name":"alice","age":30}
 {"name":"bob","age":22}
-{"name":"carol","age":35}' | folddb "SELECT name, age WHERE age > 25"
+{"name":"carol","age":35}' | dbspa "SELECT name, age WHERE age > 25"
 ```
 
 Output:
@@ -21,10 +21,10 @@ When reading from stdin, `FROM` is optional.
 
 ## Aggregate with GROUP BY
 
-Add `GROUP BY` to get live-updating aggregations. In a terminal (TTY), FoldDB displays a TUI that redraws like `top`:
+Add `GROUP BY` to get live-updating aggregations. In a terminal (TTY), DBSPA displays a TUI that redraws like `top`:
 
 ```bash
-cat orders.ndjson | folddb "SELECT status, COUNT(*) AS cnt GROUP BY status"
+cat orders.ndjson | dbspa "SELECT status, COUNT(*) AS cnt GROUP BY status"
 ```
 
 ```
@@ -39,7 +39,7 @@ delivered | 215
 When piped (non-TTY), the output is [changelog NDJSON](../concepts/changelog-output.md):
 
 ```bash
-cat orders.ndjson | folddb "SELECT status, COUNT(*) AS cnt GROUP BY status" | head
+cat orders.ndjson | dbspa "SELECT status, COUNT(*) AS cnt GROUP BY status" | head
 ```
 
 ```json
@@ -54,27 +54,27 @@ cat orders.ndjson | folddb "SELECT status, COUNT(*) AS cnt GROUP BY status" | he
 Use `--input` (or `-i`) to read from a file instead of stdin:
 
 ```bash
-folddb -i data.ndjson "SELECT name, age WHERE age > 25"
+dbspa -i data.ndjson "SELECT name, age WHERE age > 25"
 ```
 
 This also works with Parquet files:
 
 ```bash
-folddb -i users.parquet "SELECT * WHERE country = 'US' FORMAT PARQUET"
+dbspa -i users.parquet "SELECT * WHERE country = 'US' FORMAT PARQUET"
 ```
 
 ## Query Kafka
 
-Point FoldDB at a Kafka topic using a URI in the `FROM` clause:
+Point DBSPA at a Kafka topic using a URI in the `FROM` clause:
 
 ```bash
-folddb "SELECT * FROM 'kafka://localhost:9092/events'"
+dbspa "SELECT * FROM 'kafka://localhost:9092/events'"
 ```
 
 With Debezium CDC:
 
 ```bash
-folddb "SELECT _after->>'status' AS status, COUNT(*) AS orders
+dbspa "SELECT _after->>'status' AS status, COUNT(*) AS orders
         FROM 'kafka://broker:9092/orders.cdc' FORMAT DEBEZIUM
         GROUP BY _after->>'status'"
 ```
@@ -84,7 +84,7 @@ folddb "SELECT _after->>'status' AS status, COUNT(*) AS orders
 Write the current aggregation result to a SQLite file that other processes can read concurrently:
 
 ```bash
-folddb --state orders.db \
+dbspa --state orders.db \
   "SELECT region, COUNT(*) AS cnt
    FROM 'kafka://broker/orders.cdc' FORMAT DEBEZIUM
    GROUP BY region"
@@ -101,7 +101,7 @@ sqlite3 orders.db "SELECT * FROM result ORDER BY cnt DESC"
 Run a query as an HTTP sidecar:
 
 ```bash
-folddb serve --port 8080 \
+dbspa serve --port 8080 \
   "SELECT region, COUNT(*) AS orders
    FROM 'kafka://broker/orders.cdc' FORMAT DEBEZIUM
    GROUP BY region"
@@ -117,10 +117,10 @@ curl http://localhost:8080/health    # Liveness check
 
 ## Query Parquet files with DuckDB
 
-FoldDB routes file queries through an embedded DuckDB engine for fast columnar reads:
+DBSPA routes file queries through an embedded DuckDB engine for fast columnar reads:
 
 ```bash
-folddb "SELECT region, COUNT(*) AS orders, SUM(total) AS revenue
+dbspa "SELECT region, COUNT(*) AS orders, SUM(total) AS revenue
         FROM '/data/orders.parquet'
         GROUP BY region"
 ```
@@ -134,7 +134,7 @@ Use dot notation to traverse nested JSON fields:
 ```bash
 echo '{"user":{"name":"alice","address":{"city":"NYC"}}}
 {"user":{"name":"bob","address":{"city":"SF"}}}' \
-| folddb "SELECT user.name, user.address.city WHERE user.address.city = 'NYC'"
+| dbspa "SELECT user.name, user.address.city WHERE user.address.city = 'NYC'"
 ```
 
 Output:
@@ -150,7 +150,7 @@ Dot notation resolves aliases first (e.g., `e.user_id` means column `user_id` on
 Enrich streaming events with reference data from a Parquet file:
 
 ```bash
-folddb "SELECT e.user_id, u.name, e.action
+dbspa "SELECT e.user_id, u.name, e.action
         FROM 'kafka://broker/events' e
         JOIN '/data/users.parquet' u ON e.user_id = u.id"
 ```

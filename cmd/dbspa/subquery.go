@@ -8,10 +8,10 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/kevin-cantwell/folddb/internal/engine"
-	"github.com/kevin-cantwell/folddb/internal/format"
-	"github.com/kevin-cantwell/folddb/internal/source"
-	"github.com/kevin-cantwell/folddb/internal/sql/ast"
+	"github.com/kevin-cantwell/dbspa/internal/engine"
+	"github.com/kevin-cantwell/dbspa/internal/format"
+	"github.com/kevin-cantwell/dbspa/internal/source"
+	"github.com/kevin-cantwell/dbspa/internal/sql/ast"
 )
 
 // executeSubquery runs an inner SELECT statement to completion and returns
@@ -63,12 +63,12 @@ func executeSubquery(ctx context.Context, stmt *ast.SelectStatement) ([]engine.R
 		sourceRecords = ch
 
 	case fromURI != "" && isFileSource(fromURI):
-		// File source: route to DuckDB/FoldDB decoders
+		// File source: route to DuckDB/DBSPA decoders
 		ch := make(chan engine.Record, 256)
 		go func() {
 			defer close(ch)
 			if err := duckDBScanToChannel(ctx, fromURI, ch); err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: subquery DuckDB scan error: %v, falling back to FoldDB\n", err)
+				fmt.Fprintf(os.Stderr, "Warning: subquery DuckDB scan error: %v, falling back to DBSPA\n", err)
 				// Fallback: load via table loader
 				formatHint := ""
 				if stmt.From != nil {

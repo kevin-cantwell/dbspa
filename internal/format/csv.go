@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kevin-cantwell/folddb/internal/engine"
+	"github.com/kevin-cantwell/dbspa/internal/engine"
 )
 
 // CSVDecoder decodes CSV-formatted lines into Records.

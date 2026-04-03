@@ -1,6 +1,6 @@
-# When to Use FoldDB
+# When to Use DBSPA
 
-FoldDB occupies a specific niche in the streaming data toolchain. This page is an honest comparison with other tools so you can pick the right one for your situation.
+DBSPA occupies a specific niche in the streaming data toolchain. This page is an honest comparison with other tools so you can pick the right one for your situation.
 
 ## The landscape
 
@@ -13,7 +13,7 @@ Capability
     │
     │   ─────────── complexity ceiling ───────────
     │
-    │   FoldDB
+    │   DBSPA
     │   Ad-hoc streaming SQL. Zero setup. Single machine.
     │   CDC + joins from the terminal. Prototyping.
     │
@@ -25,13 +25,13 @@ Capability
     └──────────────────────────────────────────→ Setup effort
 ```
 
-## FoldDB vs Flink
+## DBSPA vs Flink
 
 [Apache Flink](https://flink.apache.org/) is a distributed stream processing engine designed for production pipelines that run 24/7.
 
-| | FoldDB | Flink |
+| | DBSPA | Flink |
 |---|---|---|
-| Install | `brew install folddb` | Cluster: JobManager + TaskManagers + ZooKeeper |
+| Install | `brew install dbspa` | Cluster: JobManager + TaskManagers + ZooKeeper |
 | First query | 10 seconds | 30+ minutes (write job, configure, deploy) |
 | State backend | In-memory + checkpoint to disk | RocksDB (distributed, terabytes) |
 | Exactly-once | No (at-least-once) | Yes |
@@ -42,13 +42,13 @@ Capability
 
 **Use Flink when:** You need production-grade streaming with large state, exactly-once guarantees, horizontal scaling, or complex event processing at high throughput.
 
-**Use FoldDB when:** You need to answer a question about streaming data right now, from your terminal, without deploying anything. Or you're prototyping a streaming query before implementing it in Flink.
+**Use DBSPA when:** You need to answer a question about streaming data right now, from your terminal, without deploying anything. Or you're prototyping a streaming query before implementing it in Flink.
 
-## FoldDB vs Materialize
+## DBSPA vs Materialize
 
-[Materialize](https://materialize.com/) is a streaming database that maintains incrementally-updated materialized views using DBSP (the same Z-set algebra that FoldDB uses internally).
+[Materialize](https://materialize.com/) is a streaming database that maintains incrementally-updated materialized views using DBSP (the same Z-set algebra that DBSPA uses internally).
 
-| | FoldDB | Materialize |
+| | DBSPA | Materialize |
 |---|---|---|
 | Install | Single binary, no server | Docker Compose or cloud service |
 | Architecture | CLI tool (no daemon) | Server (PostgreSQL wire protocol) |
@@ -62,13 +62,13 @@ Capability
 
 **Use Materialize when:** You need a persistent streaming database with full SQL, multiple connected clients, complex view hierarchies, or recursive queries.
 
-**Use FoldDB when:** You don't want to run a server. You need a quick answer from the terminal. You're exploring data interactively. You want to pipe structured data through SQL.
+**Use DBSPA when:** You don't want to run a server. You need a quick answer from the terminal. You're exploring data interactively. You want to pipe structured data through SQL.
 
-## FoldDB vs DuckDB
+## DBSPA vs DuckDB
 
 [DuckDB](https://duckdb.org/) is an in-process analytical database optimized for batch queries on files and tables.
 
-| | FoldDB | DuckDB |
+| | DBSPA | DuckDB |
 |---|---|---|
 | Batch query speed | ~100K records/sec | ~5M+ records/sec (vectorized SIMD) |
 | Kafka / streaming | Yes (native) | No |
@@ -79,13 +79,13 @@ Capability
 
 **Use DuckDB when:** You have files and you want fast batch analytics. One-shot queries. Data exploration on static datasets.
 
-**Use FoldDB when:** You're querying live Kafka streams or CDC data. You need aggregations that update in real time. You're joining a stream against a reference table. FoldDB actually uses DuckDB internally for file scanning — you get DuckDB's read performance with streaming semantics on top.
+**Use DBSPA when:** You're querying live Kafka streams or CDC data. You need aggregations that update in real time. You're joining a stream against a reference table. DBSPA actually uses DuckDB internally for file scanning — you get DuckDB's read performance with streaming semantics on top.
 
-## FoldDB vs kafkacat / kcat + jq
+## DBSPA vs kafkacat / kcat + jq
 
 [kcat](https://github.com/edenhill/kcat) is the standard CLI for reading and writing Kafka messages. Combined with `jq`, it covers basic message inspection.
 
-| | FoldDB | kcat + jq |
+| | DBSPA | kcat + jq |
 |---|---|---|
 | Read Kafka | Yes | Yes |
 | Filter messages | SQL WHERE | jq expressions |
@@ -96,13 +96,13 @@ Capability
 
 **Use kcat + jq when:** You just need to see raw Kafka messages or do simple field extraction.
 
-**Use FoldDB when:** You need to aggregate, join, window, or apply SQL logic to the stream.
+**Use DBSPA when:** You need to aggregate, join, window, or apply SQL logic to the stream.
 
-## FoldDB vs ksqlDB
+## DBSPA vs ksqlDB
 
 [ksqlDB](https://ksqldb.io/) is Confluent's streaming SQL engine for Kafka.
 
-| | FoldDB | ksqlDB |
+| | DBSPA | ksqlDB |
 |---|---|---|
 | Install | Single binary | Requires Kafka Connect, Schema Registry, ksqlDB server |
 | Infrastructure | Zero | Significant (JVM services) |
@@ -110,13 +110,13 @@ Capability
 | Push queries | TUI / changelog / serve | Yes (native) |
 | Connectors | Kafka, files, stdin | Kafka only (via Kafka Connect) |
 | Local files | Yes | No |
-| Production deployment | `folddb serve` (lightweight) | Full cluster |
+| Production deployment | `dbspa serve` (lightweight) | Full cluster |
 
 **Use ksqlDB when:** You're already running the Confluent Platform and need persistent streaming queries with Kafka Connect integration.
 
-**Use FoldDB when:** You want streaming SQL without the Confluent Platform overhead. Or you need to query local files alongside Kafka topics.
+**Use DBSPA when:** You want streaming SQL without the Confluent Platform overhead. Or you need to query local files alongside Kafka topics.
 
-## What FoldDB is best at
+## What DBSPA is best at
 
 1. **Zero-to-answer in seconds.** No infrastructure to set up, no server to start, no source to register. Pipe data in, get SQL results out.
 
@@ -126,11 +126,11 @@ Capability
 
 4. **Prototyping streaming queries.** Write and validate your SQL locally, then port to Flink or Materialize for production.
 
-5. **Lightweight production serving.** `folddb serve` as a Kubernetes sidecar for simple streaming aggregations that don't justify a Flink cluster.
+5. **Lightweight production serving.** `dbspa serve` as a Kubernetes sidecar for simple streaming aggregations that don't justify a Flink cluster.
 
-6. **Universal SQL layer over CLI tools.** With `EXEC()`, FoldDB can query the output of any command-line tool -- `kubectl`, `psql`, `bq`, `aws`, `curl`, `jq` -- using SQL. Any tool that can produce JSON, CSV, or structured output becomes a queryable data source. This makes FoldDB a composable SQL layer for the entire Unix toolchain.
+6. **Universal SQL layer over CLI tools.** With `EXEC()`, DBSPA can query the output of any command-line tool -- `kubectl`, `psql`, `bq`, `aws`, `curl`, `jq` -- using SQL. Any tool that can produce JSON, CSV, or structured output becomes a queryable data source. This makes DBSPA a composable SQL layer for the entire Unix toolchain.
 
-## What FoldDB is not designed for
+## What DBSPA is not designed for
 
 - **Large state** (multi-GB sliding windows) — use Flink with RocksDB
 - **Exactly-once processing** — use Flink with checkpointed state

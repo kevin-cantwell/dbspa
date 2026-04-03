@@ -1,6 +1,6 @@
 # Error Handling
 
-FoldDB is designed to keep processing when individual records fail. Errors are logged to stderr, and when `--dead-letter` is configured, the offending records are routed to a file for inspection.
+DBSPA is designed to keep processing when individual records fail. Errors are logged to stderr, and when `--dead-letter` is configured, the offending records are routed to a file for inspection.
 
 ## Error types
 
@@ -46,7 +46,7 @@ The value is skipped for that aggregate (as if it were NULL). Processing continu
 
 ### Avro schema evolution
 
-When consuming from Kafka with the Confluent Schema Registry, a new schema version may appear. FoldDB compares the new schema against the previous one:
+When consuming from Kafka with the Confluent Schema Registry, a new schema version may appear. DBSPA compares the new schema against the previous one:
 
 - **Field added**: Warning (compatible).
 - **Field removed**: Error if the query references the removed field.
@@ -58,7 +58,7 @@ When consuming from Kafka with the Confluent Schema Registry, a new schema versi
 The `--dead-letter` flag routes error records to an NDJSON file for inspection:
 
 ```bash
-folddb --dead-letter errors.ndjson "SELECT SUM(amount) FROM 'kafka://broker/orders' FORMAT AVRO GROUP BY status"
+dbspa --dead-letter errors.ndjson "SELECT SUM(amount) FROM 'kafka://broker/orders' FORMAT AVRO GROUP BY status"
 ```
 
 Each line in the dead letter file is a JSON object with:
@@ -86,14 +86,14 @@ Each line in the dead letter file is a JSON object with:
 
 ### Inspecting dead letters
 
-The dead letter file is plain NDJSON — query it with FoldDB itself:
+The dead letter file is plain NDJSON — query it with DBSPA itself:
 
 ```bash
 # Count errors by type
-cat errors.ndjson | folddb "SELECT error, COUNT(*) GROUP BY error"
+cat errors.ndjson | dbspa "SELECT error, COUNT(*) GROUP BY error"
 
 # Find the most recent errors
-tail -10 errors.ndjson | folddb "SELECT error, raw"
+tail -10 errors.ndjson | dbspa "SELECT error, raw"
 ```
 
 ## Warning rate limiting
@@ -107,13 +107,13 @@ This prevents stderr from being overwhelmed when a data quality issue affects ma
 
 ## EXEC error behavior
 
-When a command run via `EXEC()` exits with a non-zero exit code, FoldDB treats it as a **fatal error** and terminates the process. The tail of the command's stderr is included in the error message to aid debugging.
+When a command run via `EXEC()` exits with a non-zero exit code, DBSPA treats it as a **fatal error** and terminates the process. The tail of the command's stderr is included in the error message to aid debugging.
 
 ```
 Fatal: EXEC command exited with code 1: ERROR: relation "orders" does not exist
 ```
 
-**Subprocess stderr** is buffered silently during normal execution -- it is only shown on failure. This keeps FoldDB's stderr clean when commands produce informational messages on stderr.
+**Subprocess stderr** is buffered silently during normal execution -- it is only shown on failure. This keeps DBSPA's stderr clean when commands produce informational messages on stderr.
 
 **Exception:** When the query is cancelled via context cancellation (e.g., Ctrl+C), the subprocess exit code is ignored. The subprocess receives SIGTERM and its exit code (typically 143) is not treated as an error.
 
@@ -126,7 +126,7 @@ Fatal: EXEC command exited with code 1: ERROR: relation "orders" does not exist
 
 ## Design philosophy
 
-FoldDB follows a **skip and continue** model:
+DBSPA follows a **skip and continue** model:
 
 1. **Don't crash.** A single bad record should not terminate a streaming query that has been running for hours.
 2. **Don't silently swallow.** Every skipped record is logged to stderr and optionally routed to the dead letter file.

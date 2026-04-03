@@ -1,4 +1,4 @@
-// Command folddb executes SQL queries against streaming data sources.
+// Command dbspa executes SQL queries against streaming data sources.
 package main
 
 import (
@@ -15,18 +15,18 @@ import (
 	"time"
 
 	"github.com/alecthomas/kong"
-	"github.com/kevin-cantwell/folddb/internal/engine"
-	"github.com/kevin-cantwell/folddb/internal/format"
-	"github.com/kevin-cantwell/folddb/internal/sink"
-	"github.com/kevin-cantwell/folddb/internal/source"
-	"github.com/kevin-cantwell/folddb/internal/sql/ast"
-	"github.com/kevin-cantwell/folddb/internal/sql/parser"
+	"github.com/kevin-cantwell/dbspa/internal/engine"
+	"github.com/kevin-cantwell/dbspa/internal/format"
+	"github.com/kevin-cantwell/dbspa/internal/sink"
+	"github.com/kevin-cantwell/dbspa/internal/source"
+	"github.com/kevin-cantwell/dbspa/internal/sql/ast"
+	"github.com/kevin-cantwell/dbspa/internal/sql/parser"
 )
 
 // Version is set at build time via -ldflags.
 var Version = "dev"
 
-// CLI defines the Kong command structure for folddb.
+// CLI defines the Kong command structure for dbspa.
 type CLI struct {
 	// Default command: execute SQL
 	Query QueryCmd `cmd:"" default:"withargs" help:"Execute a SQL query."`
@@ -54,7 +54,7 @@ type QueryCmd struct {
 
 	// Streaming
 	Stateful           bool          `help:"Enable persistent checkpoints."`
-	StateDir           string        `help:"Checkpoint directory." default:"~/.folddb/state"`
+	StateDir           string        `help:"Checkpoint directory." default:"~/.dbspa/state"`
 	CheckpointInterval time.Duration `help:"Checkpoint flush interval." default:"5s"`
 	SpillToDisk        bool          `help:"Spill large join arrangements to disk (Badger) to prevent OOM." name:"spill-to-disk"`
 	MaxMemory          string        `help:"Memory budget for arrangements before spilling to disk (e.g., 256MB, 1GB). Implies --spill-to-disk." name:"max-memory"`
@@ -140,7 +140,7 @@ func (c *StateResetCmd) Run() error {
 type VersionCmd struct{}
 
 func (c *VersionCmd) Run() error {
-	fmt.Printf("folddb %s\n", Version)
+	fmt.Printf("dbspa %s\n", Version)
 	return nil
 }
 
@@ -167,7 +167,7 @@ var activeDLWriter *deadLetterWriter
 func run() error {
 	var cli CLI
 	ctx := kong.Parse(&cli,
-		kong.Name("folddb"),
+		kong.Name("dbspa"),
 		kong.Description("Execute SQL queries against streaming data sources."),
 		kong.UsageOnError(),
 		kong.ConfigureHelp(kong.HelpOptions{Compact: true}),
@@ -523,11 +523,11 @@ func run() error {
 		}
 
 		// For accumulating/windowed queries or queries with joins, DuckDB
-		// provides the source data and FoldDB handles the rest.
+		// provides the source data and DBSPA handles the rest.
 		//
 		// OPTIMIZATION OPPORTUNITY: For bounded file queries with GROUP BY (no JOIN),
 		// DuckDB could compute the entire aggregation result directly (full pushdown).
-		// Currently we route these through "DuckDB scan → FoldDB aggregate" which
+		// Currently we route these through "DuckDB scan → DBSPA aggregate" which
 		// produces streaming changelog output (retraction/insertion pairs). This is
 		// correct behavior and consistent with how streaming sources work, but for
 		// bounded file-only queries the changelog format is surprising — users expect
@@ -644,7 +644,7 @@ func getSQL(q *QueryCmd) (string, error) {
 	if q.SQL != "" {
 		return q.SQL, nil
 	}
-	return "", fmt.Errorf("usage: folddb <SQL> or folddb -f <file.sql>")
+	return "", fmt.Errorf("usage: dbspa <SQL> or dbspa -f <file.sql>")
 }
 
 // defaultSpillRecordLimit is the default number of records to keep in memory

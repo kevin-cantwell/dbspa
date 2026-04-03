@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kevin-cantwell/folddb/internal/sql/ast"
+	"github.com/kevin-cantwell/dbspa/internal/sql/ast"
 )
 
 // DedupFilter implements bounded LRU deduplication.

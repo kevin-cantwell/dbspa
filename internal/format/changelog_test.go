@@ -4,8 +4,8 @@ import (
 	"testing"
 )
 
-func TestFoldDBChangelogDecoder_WeightedFormat(t *testing.T) {
-	dec := &FoldDBChangelogDecoder{}
+func TestDBSPAChangelogDecoder_WeightedFormat(t *testing.T) {
+	dec := &DBSPAChangelogDecoder{}
 	data := []byte(`{"weight":1,"data":{"name":"alice","age":30}}`)
 
 	rec, err := dec.Decode(data)
@@ -27,8 +27,8 @@ func TestFoldDBChangelogDecoder_WeightedFormat(t *testing.T) {
 	}
 }
 
-func TestFoldDBChangelogDecoder_Retraction(t *testing.T) {
-	dec := &FoldDBChangelogDecoder{}
+func TestDBSPAChangelogDecoder_Retraction(t *testing.T) {
+	dec := &DBSPAChangelogDecoder{}
 	data := []byte(`{"weight":-1,"data":{"name":"alice","age":30}}`)
 
 	rec, err := dec.Decode(data)
@@ -43,8 +43,8 @@ func TestFoldDBChangelogDecoder_Retraction(t *testing.T) {
 	}
 }
 
-func TestFoldDBChangelogDecoder_DefaultWeight(t *testing.T) {
-	dec := &FoldDBChangelogDecoder{}
+func TestDBSPAChangelogDecoder_DefaultWeight(t *testing.T) {
+	dec := &DBSPAChangelogDecoder{}
 	// Missing weight defaults to 1
 	data := []byte(`{"data":{"name":"alice"}}`)
 
@@ -60,8 +60,8 @@ func TestFoldDBChangelogDecoder_DefaultWeight(t *testing.T) {
 	}
 }
 
-func TestFoldDBChangelogDecoder_MultisetWeight(t *testing.T) {
-	dec := &FoldDBChangelogDecoder{}
+func TestDBSPAChangelogDecoder_MultisetWeight(t *testing.T) {
+	dec := &DBSPAChangelogDecoder{}
 	data := []byte(`{"weight":5,"data":{"x":1}}`)
 
 	rec, err := dec.Decode(data)
@@ -73,24 +73,24 @@ func TestFoldDBChangelogDecoder_MultisetWeight(t *testing.T) {
 	}
 }
 
-func TestFoldDBChangelogDecoder_EmptyInput(t *testing.T) {
-	dec := &FoldDBChangelogDecoder{}
+func TestDBSPAChangelogDecoder_EmptyInput(t *testing.T) {
+	dec := &DBSPAChangelogDecoder{}
 	_, err := dec.Decode([]byte{})
 	if err == nil {
 		t.Error("expected error on empty input")
 	}
 }
 
-func TestFoldDBChangelogDecoder_InvalidJSON(t *testing.T) {
-	dec := &FoldDBChangelogDecoder{}
+func TestDBSPAChangelogDecoder_InvalidJSON(t *testing.T) {
+	dec := &DBSPAChangelogDecoder{}
 	_, err := dec.Decode([]byte(`not json`))
 	if err == nil {
 		t.Error("expected error on invalid JSON")
 	}
 }
 
-func TestFoldDBChangelogDecoder_EmptyData(t *testing.T) {
-	dec := &FoldDBChangelogDecoder{}
+func TestDBSPAChangelogDecoder_EmptyData(t *testing.T) {
+	dec := &DBSPAChangelogDecoder{}
 	data := []byte(`{"weight":1,"data":{}}`)
 
 	rec, err := dec.Decode(data)

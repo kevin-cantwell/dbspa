@@ -3,7 +3,7 @@ package sink
 import (
 	"cmp"
 
-	"github.com/kevin-cantwell/folddb/internal/engine"
+	"github.com/kevin-cantwell/dbspa/internal/engine"
 )
 
 // OrderBySpec describes a single ORDER BY column for sorting output rows.

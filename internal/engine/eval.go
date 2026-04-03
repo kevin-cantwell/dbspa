@@ -5,7 +5,7 @@ import (
 	"math"
 	"strings"
 
-	"github.com/kevin-cantwell/folddb/internal/sql/ast"
+	"github.com/kevin-cantwell/dbspa/internal/sql/ast"
 )
 
 // FastKeyExtract extracts a join key value from a record for simple column

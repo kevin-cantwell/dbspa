@@ -28,7 +28,7 @@ func TestCheckpoint_RoundTrip10K(t *testing.T) {
 	topic := uniqueTopic(t, "qa-ckpt-roundtrip")
 	createTopic(t, topic, 1)
 
-	stateDir, err := os.MkdirTemp("", "folddb-ckpt-roundtrip-*")
+	stateDir, err := os.MkdirTemp("", "dbspa-ckpt-roundtrip-*")
 	if err != nil {
 		t.Fatalf("cannot create temp dir: %v", err)
 	}
@@ -49,14 +49,14 @@ func TestCheckpoint_RoundTrip10K(t *testing.T) {
 	// group saves the read position. Together they allow a correct resume.
 	group := uniqueTopic(t, "qa-ckpt-group")
 
-	// Step 2: Start FoldDB with --stateful, consume batch 1
+	// Step 2: Start DBSPA with --stateful, consume batch 1
 	sql := fmt.Sprintf(
 		"SELECT status, COUNT(*) AS cnt FROM 'kafka://%s/%s?offset=earliest&group=%s' GROUP BY status",
 		kafkaBroker, topic, group,
 	)
 
 	t.Log("run 1: consuming batch 1 with stateful...")
-	stdout1, stderr1 := runFoldDBStateful(t, sql, stateDir, 20*time.Second)
+	stdout1, stderr1 := runDBSPAStateful(t, sql, stateDir, 20*time.Second)
 	t.Logf("run1 stdout (%d bytes): last lines:\n%s", len(stdout1), lastNLines(stdout1, 10))
 	t.Logf("run1 stderr: %s", stderr1)
 
@@ -85,9 +85,9 @@ func TestCheckpoint_RoundTrip10K(t *testing.T) {
 	produceOrdersJSON(t, topic, batch2)
 	time.Sleep(1 * time.Second)
 
-	// Step 4: Restart FoldDB with same state-dir (should resume from checkpoint)
+	// Step 4: Restart DBSPA with same state-dir (should resume from checkpoint)
 	t.Log("run 2: resuming from checkpoint with batch 2...")
-	stdout2, stderr2 := runFoldDBStateful(t, sql, stateDir, 20*time.Second)
+	stdout2, stderr2 := runDBSPAStateful(t, sql, stateDir, 20*time.Second)
 	t.Logf("run2 stdout (%d bytes): last lines:\n%s", len(stdout2), lastNLines(stdout2, 10))
 	t.Logf("run2 stderr: %s", stderr2)
 
@@ -160,7 +160,7 @@ func produceOrdersJSON(t *testing.T, topic string, orders []orderRecord) {
 	}
 }
 
-func runFoldDBStateful(t *testing.T, sql, stateDir string, timeout time.Duration) (stdout, stderr string) {
+func runDBSPAStateful(t *testing.T, sql, stateDir string, timeout time.Duration) (stdout, stderr string) {
 	t.Helper()
 	requireBuild(t)
 
@@ -174,14 +174,14 @@ func runFoldDBStateful(t *testing.T, sql, stateDir string, timeout time.Duration
 		"--timeout", fmt.Sprintf("%ds", int(timeout.Seconds())-5),
 	}
 
-	cmd := exec.CommandContext(ctx, folddbBinary, args...)
+	cmd := exec.CommandContext(ctx, dbspaBinary, args...)
 	var outBuf, errBuf bytes.Buffer
 	cmd.Stdout = &outBuf
 	cmd.Stderr = &errBuf
 
 	err := cmd.Run()
 	if err != nil {
-		t.Logf("folddb exited: %v (expected for streaming query with timeout)", err)
+		t.Logf("dbspa exited: %v (expected for streaming query with timeout)", err)
 	}
 
 	return outBuf.String(), errBuf.String()

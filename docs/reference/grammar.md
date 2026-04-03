@@ -1,6 +1,6 @@
 # SQL Grammar (EBNF)
 
-This is the formal grammar for FoldDB's SQL dialect in Extended Backus-Naur Form (EBNF). Every valid FoldDB query can be derived from these rules. The [parser test suites](https://github.com/kevin-cantwell/folddb) validate that the parser accepts exactly this language.
+This is the formal grammar for DBSPA's SQL dialect in Extended Backus-Naur Form (EBNF). Every valid DBSPA query can be derived from these rules. The [parser test suites](https://github.com/kevin-cantwell/dbspa) validate that the parser accepts exactly this language.
 
 ## Notation
 
@@ -90,7 +90,7 @@ encoding_name
     ::= JSON | NDJSON | AVRO | CSV | PROTOBUF | PARQUET
 
 envelope_name
-    ::= DEBEZIUM | FOLDDB
+    ::= DEBEZIUM | DBSPA
 
 format_options
     ::= format_option { ',' format_option }
@@ -317,7 +317,7 @@ The following words are reserved as SQL keywords and cannot be used as unquoted 
 ```
 AND, AS, ASC, AVRO, BETWEEN, BY, CAPACITY, CASE, CAST, COUNT, CSV, DEBEZIUM,
 DEDUPLICATE, DESC, DISTINCT, EARLY, ELSE, EMIT, END, EVENT, EXEC, EXTRACT,
-FALSE, FINAL, FIRST, FOLDDB, FORMAT, FROM, GROUP, HAVING, ILIKE, IN, INTERVAL,
+FALSE, FINAL, FIRST, DBSPA, FORMAT, FROM, GROUP, HAVING, ILIKE, IN, INTERVAL,
 IS, JOIN, JSON, LAST, LEFT, LIKE, LIMIT, NDJSON, NOT, NULL, ON, OR, ORDER,
 PARQUET, PROTOBUF, SEED, SELECT, SESSION, SLIDING, STREAM, SUM, AVG, MIN,
 MAX, MEDIAN, TABLE, THEN, TIME, TRUE, TUMBLING, WATERMARK, WHEN, WHERE,

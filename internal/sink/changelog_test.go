@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kevin-cantwell/folddb/internal/engine"
+	"github.com/kevin-cantwell/dbspa/internal/engine"
 )
 
 // weightedRecord is the Feldera weighted format: {"weight": N, "data": {...}}

@@ -87,9 +87,9 @@ func TestDebeziumE2E_FullLifecycle(t *testing.T) {
 		"SELECT _op, _after->>'status' AS status FROM 'kafka://%s/%s?offset=earliest' FORMAT DEBEZIUM LIMIT 7",
 		kafkaBroker, topic,
 	)
-	stdout, stderr, err := runFoldDBWithTimeout(t, 15*time.Second, sql)
+	stdout, stderr, err := runDBSPAWithTimeout(t, 15*time.Second, sql)
 	if err != nil {
-		t.Fatalf("folddb failed: %v\nstderr: %s", err, stderr)
+		t.Fatalf("dbspa failed: %v\nstderr: %s", err, stderr)
 	}
 
 	lines := outputLines(stdout)
@@ -138,9 +138,9 @@ func TestDebeziumE2E_AccumulatingGroupBy(t *testing.T) {
 		"SELECT _after->>'region' AS region, COUNT(*) AS cnt, SUM((_after->>'amount')::float) AS total FROM 'kafka://%s/%s?offset=earliest' FORMAT DEBEZIUM GROUP BY 1 LIMIT 20",
 		kafkaBroker, topic,
 	)
-	stdout, stderr, err := runFoldDBWithTimeout(t, 15*time.Second, sql)
+	stdout, stderr, err := runDBSPAWithTimeout(t, 15*time.Second, sql)
 	if err != nil {
-		t.Fatalf("folddb failed: %v\nstderr: %s", err, stderr)
+		t.Fatalf("dbspa failed: %v\nstderr: %s", err, stderr)
 	}
 
 	t.Logf("accumulating output:\n%s", stdout)
@@ -183,9 +183,9 @@ func TestDebeziumE2E_MissingBefore(t *testing.T) {
 		"SELECT _op, _after->>'val' AS val FROM 'kafka://%s/%s?offset=earliest' FORMAT DEBEZIUM LIMIT 3",
 		kafkaBroker, topic,
 	)
-	stdout, stderr, err := runFoldDBWithTimeout(t, 15*time.Second, sql)
+	stdout, stderr, err := runDBSPAWithTimeout(t, 15*time.Second, sql)
 	if err != nil {
-		t.Fatalf("folddb failed: %v\nstderr: %s", err, stderr)
+		t.Fatalf("dbspa failed: %v\nstderr: %s", err, stderr)
 	}
 
 	lines := outputLines(stdout)
@@ -225,9 +225,9 @@ func TestDebeziumE2E_SnapshotRead(t *testing.T) {
 		"SELECT _op, _after->>'name' AS name FROM 'kafka://%s/%s?offset=earliest' FORMAT DEBEZIUM LIMIT 3",
 		kafkaBroker, topic,
 	)
-	stdout, stderr, err := runFoldDBWithTimeout(t, 15*time.Second, sql)
+	stdout, stderr, err := runDBSPAWithTimeout(t, 15*time.Second, sql)
 	if err != nil {
-		t.Fatalf("folddb failed: %v\nstderr: %s", err, stderr)
+		t.Fatalf("dbspa failed: %v\nstderr: %s", err, stderr)
 	}
 
 	lines := outputLines(stdout)

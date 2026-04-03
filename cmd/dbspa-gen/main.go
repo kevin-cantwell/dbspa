@@ -1,4 +1,4 @@
-// Command folddb-gen generates synthetic data fixtures for testing FoldDB.
+// Command dbspa-gen generates synthetic data fixtures for testing DBSPA.
 package main
 
 import (
@@ -11,8 +11,8 @@ import (
 func main() {
 	var cli GenerateCmd
 	kong.Parse(&cli,
-		kong.Name("folddb-gen"),
-		kong.Description("Generate synthetic data fixtures for testing FoldDB."),
+		kong.Name("dbspa-gen"),
+		kong.Description("Generate synthetic data fixtures for testing DBSPA."),
 		kong.UsageOnError(),
 		kong.ConfigureHelp(kong.HelpOptions{Compact: true}),
 	)

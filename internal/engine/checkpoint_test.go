@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kevin-cantwell/folddb/internal/sql/ast"
+	"github.com/kevin-cantwell/dbspa/internal/sql/ast"
 )
 
 // TC-CKPT-001: Basic save and restore cycle

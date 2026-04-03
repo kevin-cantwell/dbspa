@@ -1,4 +1,4 @@
-module github.com/kevin-cantwell/folddb
+module github.com/kevin-cantwell/dbspa
 
 go 1.25.7
 

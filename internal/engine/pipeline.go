@@ -3,7 +3,7 @@ package engine
 import (
 	"sync/atomic"
 
-	"github.com/kevin-cantwell/folddb/internal/sql/ast"
+	"github.com/kevin-cantwell/dbspa/internal/sql/ast"
 )
 
 // Pipeline represents a streaming execution pipeline that reads records

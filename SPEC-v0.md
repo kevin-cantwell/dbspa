@@ -1,35 +1,35 @@
-# FoldDB v0 Specification
+# DBSPA v0 Specification
 
 **Date:** 2026-03-28
 **Status:** Draft
 
 ---
 
-## 1. What Is FoldDB
+## 1. What Is DBSPA
 
-FoldDB is a CLI tool that executes SQL queries against Kafka topics and stdin streams, with correct incremental aggregation over change streams. It is a single binary with zero infrastructure dependencies.
+DBSPA is a CLI tool that executes SQL queries against Kafka topics and stdin streams, with correct incremental aggregation over change streams. It is a single binary with zero infrastructure dependencies.
 
 The v0 scope is deliberately narrow: **streaming SQL with accumulation, Kafka and stdin only, no joins, no table sources.**
 
 ```bash
 # Filter a Kafka CDC stream
-folddb "SELECT _after->>'status', _after->>'region'
+dbspa "SELECT _after->>'status', _after->>'region'
         FROM 'kafka://localhost:9092/orders.cdc' FORMAT DEBEZIUM
         WHERE _op = 'u'"
 
 # Live aggregate over CDC — output updates in place as state changes
-folddb "SELECT _after->>'region' AS region, COUNT(*) AS orders
+dbspa "SELECT _after->>'region' AS region, COUNT(*) AS orders
         FROM 'kafka://localhost:9092/orders.cdc' FORMAT DEBEZIUM
         GROUP BY region"
 
 # Windowed metrics over a plain Kafka topic
-folddb "SELECT window_start, endpoint, COUNT(*) AS reqs, AVG(latency_ms) AS avg_lat
+dbspa "SELECT window_start, endpoint, COUNT(*) AS reqs, AVG(latency_ms) AS avg_lat
         FROM 'kafka://localhost:9092/api_requests'
         GROUP BY endpoint
         WINDOW TUMBLING '1 minute'"
 
 # Pipe structured logs through SQL
-kubectl logs my-pod -f | folddb "SELECT message WHERE level = 'ERROR'"
+kubectl logs my-pod -f | dbspa "SELECT message WHERE level = 'ERROR'"
 ```
 
 ---
@@ -38,7 +38,7 @@ kubectl logs my-pod -f | folddb "SELECT message WHERE level = 'ERROR'"
 
 ### 2.1 Every Record Carries a Diff
 
-All records inside FoldDB have the shape `(columns, timestamp, diff)` where `diff` is `+1` (insert) or `-1` (retract).
+All records inside DBSPA have the shape `(columns, timestamp, diff)` where `diff` is `+1` (insert) or `-1` (retract).
 
 - **Insert-only sources** (plain Kafka JSON, stdin): `diff` is always `+1`.
 - **Debezium CDC sources**: `diff` is derived from the `op` field:
@@ -52,10 +52,10 @@ All records inside FoldDB have the shape `(columns, timestamp, diff)` where `dif
 | `t` (truncate) | ignored (logged at `warn` level) |
 
 **Debezium edge cases:**
-- If `_before` is `null` on an `update` (common when Debezium `REPLICA IDENTITY` is not `FULL`), the retraction is **skipped** — only the `(_after, +1)` insert is emitted. This means accumulators may drift over time for sources without full replica identity. FoldDB logs a `warn` on the first occurrence per source and includes a count of skipped retractions in the TUI footer.
+- If `_before` is `null` on an `update` (common when Debezium `REPLICA IDENTITY` is not `FULL`), the retraction is **skipped** — only the `(_after, +1)` insert is emitted. This means accumulators may drift over time for sources without full replica identity. DBSPA logs a `warn` on the first occurrence per source and includes a count of skipped retractions in the TUI footer.
 - If `_after` is `null` on an `update`, the record is treated as malformed and routed to `--dead-letter` (or logged and skipped).
 - Debezium tombstone records (null value with non-null key) are silently dropped.
-- If `_before` is `null` on a `delete` (`op=d`), the retraction is **skipped**. This occurs when the source table uses `REPLICA IDENTITY DEFAULT` (which only includes the primary key in `_before` for updates, and may send `null` for deletes). FoldDB logs a `warn` on the first occurrence per source, routes the original record to `--dead-letter` (if configured), and includes a count of skipped delete retractions in the TUI footer. The record is **not** silently dropped — it is explicitly surfaced as un-retractable.
+- If `_before` is `null` on a `delete` (`op=d`), the retraction is **skipped**. This occurs when the source table uses `REPLICA IDENTITY DEFAULT` (which only includes the primary key in `_before` for updates, and may send `null` for deletes). DBSPA logs a `warn` on the first occurrence per source, routes the original record to `--dead-letter` (if configured), and includes a count of skipped delete retractions in the TUI footer. The record is **not** silently dropped — it is explicitly surfaced as un-retractable.
 
 This means all operators handle retractions correctly by default.
 
@@ -65,7 +65,7 @@ This means all operators handle retractions correctly by default.
 
 **Accumulating** (GROUP BY with aggregates): output is a changelog of accumulator updates. Each update is a diff — either a new/updated result (`+`) or a retraction of a previous result (`-`).
 
-**DISTINCT:** `SELECT DISTINCT` on a non-accumulating query maintains an in-memory set of seen output rows. Duplicates are suppressed. This is bounded only by the data — there is no automatic eviction. For streams with high cardinality output, this can consume unbounded memory. FoldDB logs a warning when the distinct set exceeds `--memory-limit / 4`. For accumulating queries, `SELECT DISTINCT` is a no-op (the output is already one row per group key).
+**DISTINCT:** `SELECT DISTINCT` on a non-accumulating query maintains an in-memory set of seen output rows. Duplicates are suppressed. This is bounded only by the data — there is no automatic eviction. For streams with high cardinality output, this can consume unbounded memory. DBSPA logs a warning when the distinct set exceeds `--memory-limit / 4`. For accumulating queries, `SELECT DISTINCT` is a no-op (the output is already one row per group key).
 
 ### 2.3 Output Modes
 
@@ -98,16 +98,16 @@ For non-accumulating queries, every line is `op: "+"` and the `op` field is omit
 
 `--state orders.db` writes the current aggregation result to a SQLite table named `result`, updated in place via UPSERT. The SQLite file uses WAL mode for concurrent read access — readers do not block writers and vice versa.
 
-**File locking:** If another process holds a write lock on the SQLite file (e.g., another FoldDB instance or a manual `sqlite3` session with an open transaction), FoldDB retries with exponential backoff (100ms, 200ms, 400ms, ..., capped at 5s per retry). If the lock is not acquired within 30 seconds total, FoldDB exits with an error: `Error: cannot acquire write lock on <file> after 30s — is another process writing to it?`. In practice, WAL mode minimizes this: concurrent readers never conflict with FoldDB's writes, and write conflicts only occur if another process is actively writing.
+**File locking:** If another process holds a write lock on the SQLite file (e.g., another DBSPA instance or a manual `sqlite3` session with an open transaction), DBSPA retries with exponential backoff (100ms, 200ms, 400ms, ..., capped at 5s per retry). If the lock is not acquired within 30 seconds total, DBSPA exits with an error: `Error: cannot acquire write lock on <file> after 30s — is another process writing to it?`. In practice, WAL mode minimizes this: concurrent readers never conflict with DBSPA's writes, and write conflicts only occur if another process is actively writing.
 
 ```bash
 # Terminal 1
-folddb --state orders.db \
+dbspa --state orders.db \
   "SELECT region, status, COUNT(*) AS cnt, SUM(total) AS revenue
    FROM 'kafka://broker/orders.cdc' FORMAT DEBEZIUM
    GROUP BY region, status"
 
-# Terminal 2 (any time, while folddb is running)
+# Terminal 2 (any time, while dbspa is running)
 sqlite3 orders.db "SELECT * FROM result ORDER BY revenue DESC"
 ```
 
@@ -121,7 +121,7 @@ For non-accumulating queries with `--state`, records are INSERTed (append-only).
 
 ### 3.0 Dialect Alignment
 
-FoldDB's SQL is **PostgreSQL** — the most widely known SQL dialect and the same one DuckDB aligns to (relevant for future table-query integration).
+DBSPA's SQL is **PostgreSQL** — the most widely known SQL dialect and the same one DuckDB aligns to (relevant for future table-query integration).
 
 | Aspect | Aligned to | Notes |
 |---|---|---|
@@ -131,9 +131,9 @@ FoldDB's SQL is **PostgreSQL** — the most widely known SQL dialect and the sam
 | String functions | PostgreSQL | `SPLIT_PART`, `SUBSTR`, `TRIM`, `LENGTH` |
 | Date/time | PostgreSQL | `EXTRACT()`, `INTERVAL '1' MINUTE`, `NOW()` |
 | NULL handling | PostgreSQL | `IS DISTINCT FROM`, `COALESCE`, three-valued logic |
-| Streaming semantics | FoldDB-specific | Simple, opinionated extensions designed for CLI ergonomics |
+| Streaming semantics | DBSPA-specific | Simple, opinionated extensions designed for CLI ergonomics |
 
-**Streaming extensions are FoldDB-specific.** We don't align to Flink SQL or Spark SQL for streaming because neither syntax is a good fit for a zero-config CLI. Instead, we define simple, readable extensions that prioritize ergonomics for the common case.
+**Streaming extensions are DBSPA-specific.** We don't align to Flink SQL or Spark SQL for streaming because neither syntax is a good fit for a zero-config CLI. Instead, we define simple, readable extensions that prioritize ergonomics for the common case.
 
 | Extension | Purpose |
 |---|---|
@@ -183,7 +183,7 @@ SELECT _after->>'region' AS region ... GROUP BY 1
 When reading from stdin, `FROM` is optional:
 
 ```bash
-cat data.json | folddb "SELECT name, age WHERE age > 30"
+cat data.json | dbspa "SELECT name, age WHERE age > 30"
 ```
 
 ### 3.2 Expressions
@@ -273,7 +273,7 @@ Every aggregate supports both `Add` (diff=+1) and `Retract` (diff=-1). The disti
 
 **NULL handling in aggregates:** All aggregate functions skip NULL input values (following SQL standard). `COUNT(*)` counts all rows including NULLs; `COUNT(x)` counts only non-NULL values of `x`. If all input values for a group are NULL (or the group is empty after retractions), aggregates return NULL — except `COUNT(*)` and `COUNT(x)` which return 0.
 
-**State cost matters for memory and checkpointing.** A `GROUP BY user_id` with `SUM(amount)` over 10M users needs ~80MB (8 bytes per key). The same query with `MEDIAN(amount)` and 100 values per user needs ~8GB (all values retained). FoldDB logs a warning when proportional-state aggregates exceed a configurable threshold.
+**State cost matters for memory and checkpointing.** A `GROUP BY user_id` with `SUM(amount)` over 10M users needs ~80MB (8 bytes per key). The same query with `MEDIAN(amount)` and 100 values per user needs ~8GB (all values retained). DBSPA logs a warning when proportional-state aggregates exceed a configurable threshold.
 
 **Scalar:**
 
@@ -294,7 +294,7 @@ Every aggregate supports both `Add` (diff=+1) and `Retract` (diff=-1). The disti
 | `EXTRACT(field FROM ts)` | Extract year/month/day/hour/minute/second |
 | `json_keys(j)` | Array of keys in a JSON object |
 
-### 3.5 Window Clause (FoldDB Extension)
+### 3.5 Window Clause (DBSPA Extension)
 
 Windowed aggregation uses a `WINDOW` clause that specifies the window type after the `GROUP BY`. Two implicit columns — `window_start` and `window_end` — become available in `SELECT`.
 
@@ -348,7 +348,7 @@ FROM 'kafka://broker/orders.cdc' FORMAT DEBEZIUM
 GROUP BY region
 ```
 
-### 3.6 Emit Clause (FoldDB Extension)
+### 3.6 Emit Clause (DBSPA Extension)
 
 Controls when windowed results are emitted:
 
@@ -359,9 +359,9 @@ EMIT EARLY '10 seconds' -- periodic partial results before window closes
 
 Non-windowed accumulating queries emit on every change by default (each input record that changes an accumulator triggers an output diff).
 
-### 3.7 Event Time and Watermarks (FoldDB Extension)
+### 3.7 Event Time and Watermarks (DBSPA Extension)
 
-By default, windows use processing time (when FoldDB receives the record). To use a field from the data as event time:
+By default, windows use processing time (when DBSPA receives the record). To use a field from the data as event time:
 
 ```sql
 SELECT window_start, user_id, COUNT(*)
@@ -389,7 +389,7 @@ If `EVENT TIME BY` is specified without `WATERMARK`, the default lateness is `'5
 - **EVENT TIME BY on a non-existent column:** This is a **parse-time error** if schema is known, or a **runtime error** on the first record if schema is inferred. The error message suggests available column names.
 - **`EVENT TIME BY` without `WINDOW`:** Valid. The event time column is used for watermark tracking. Non-windowed accumulating queries use the watermark to determine when to discard dedup state or closed session state.
 
-**Watermark advancement:** The watermark advances to `max(event_time_seen) - watermark_delay`. For multi-partition Kafka sources, FoldDB tracks the **minimum** watermark across all assigned partitions. The watermark does not advance until all partitions have produced at least one record past the threshold. A stalled partition (no records for > 30 seconds) is excluded from the minimum calculation to prevent watermark stalls; this is logged at `info` level.
+**Watermark advancement:** The watermark advances to `max(event_time_seen) - watermark_delay`. For multi-partition Kafka sources, DBSPA tracks the **minimum** watermark across all assigned partitions. The watermark does not advance until all partitions have produced at least one record past the threshold. A stalled partition (no records for > 30 seconds) is excluded from the minimum calculation to prevent watermark stalls; this is logged at `info` level.
 
 ### 3.8 Deduplication
 
@@ -443,7 +443,7 @@ Authentication:
 | SASL/SCRAM-256/512 | `sasl_mechanism=SCRAM-SHA-256` + username/password |
 | mTLS | `tls_cert=/path/cert.pem&tls_key=/path/key.pem&tls_ca=/path/ca.pem` |
 
-Credentials file (`~/.folddb/credentials`):
+Credentials file (`~/.dbspa/credentials`):
 
 ```toml
 [kafka.my-cluster]
@@ -490,13 +490,13 @@ When `FORMAT DEBEZIUM` is specified, additionally:
 Implicit when no `FROM` clause, or explicit with `stdin://`:
 
 ```bash
-cat data.json | folddb "SELECT name WHERE age > 30"
-cat data.json | folddb "SELECT * FROM 'stdin://' FORMAT CSV"
+cat data.json | dbspa "SELECT name WHERE age > 30"
+cat data.json | dbspa "SELECT * FROM 'stdin://' FORMAT CSV"
 ```
 
 stdin is always a stream source (`diff = +1` for all records).
 
-**Empty stdin:** When stdin is empty (EOF immediately), FoldDB emits no output and exits with code 0. For accumulating queries, no result is emitted (not even an empty table). This is consistent with SQL behavior where an empty table produces no `GROUP BY` output rows.
+**Empty stdin:** When stdin is empty (EOF immediately), DBSPA emits no output and exits with code 0. For accumulating queries, no result is emitted (not even an empty table). This is consistent with SQL behavior where an empty table produces no `GROUP BY` output rows.
 
 ### 4.3 Format Detection
 
@@ -519,7 +519,7 @@ FORMAT CSV(
 
 #### Avro
 
-When a schema registry URL is configured (via URI param or credentials file), FoldDB auto-detects the Confluent wire format (magic byte `0x00` + 4-byte schema ID) and fetches the schema from the registry. No `FORMAT` clause needed.
+When a schema registry URL is configured (via URI param or credentials file), DBSPA auto-detects the Confluent wire format (magic byte `0x00` + 4-byte schema ID) and fetches the schema from the registry. No `FORMAT` clause needed.
 
 Explicit: `FORMAT AVRO` or `FORMAT AVRO(registry = 'http://registry:8081')`.
 
@@ -530,7 +530,7 @@ Explicit: `FORMAT AVRO` or `FORMAT AVRO(registry = 'http://registry:8081')`.
 ### 5.1 `--stateful` Flag
 
 ```bash
-folddb --stateful "SELECT region, COUNT(*) FROM 'kafka://broker/orders.cdc' FORMAT DEBEZIUM GROUP BY region"
+dbspa --stateful "SELECT region, COUNT(*) FROM 'kafka://broker/orders.cdc' FORMAT DEBEZIUM GROUP BY region"
 ```
 
 When enabled:
@@ -544,23 +544,23 @@ When enabled:
 
 **Flush cadence:** every 5 seconds or every 10,000 records, whichever comes first. Configurable via `--checkpoint-interval`.
 
-**Flush mechanism:** atomic write (write to temp file, `fsync`, rename). A crash mid-flush never corrupts the checkpoint. **Disk full during checkpoint:** If the disk is full during the temp file write, the write fails and the previous checkpoint remains intact (the rename never occurs). FoldDB logs an error and continues processing without checkpointing. It retries on the next checkpoint interval. If the disk remains full for 3 consecutive checkpoint intervals, FoldDB exits with an error: `Error: disk full — unable to write checkpoint for 3 consecutive intervals. Exiting to prevent unbounded data loss on restart.`
+**Flush mechanism:** atomic write (write to temp file, `fsync`, rename). A crash mid-flush never corrupts the checkpoint. **Disk full during checkpoint:** If the disk is full during the temp file write, the write fails and the previous checkpoint remains intact (the rename never occurs). DBSPA logs an error and continues processing without checkpointing. It retries on the next checkpoint interval. If the disk remains full for 3 consecutive checkpoint intervals, DBSPA exits with an error: `Error: disk full — unable to write checkpoint for 3 consecutive intervals. Exiting to prevent unbounded data loss on restart.`
 
 **On restart:** load checkpoint, verify query fingerprint matches, resume from checkpointed offsets. The gap between the checkpoint and the current stream position is replayed (typically seconds of data).
 
-**On query change:** query fingerprint won't match. FoldDB warns and starts fresh (or `--force-replay` to explicitly discard old state).
+**On query change:** query fingerprint won't match. DBSPA warns and starts fresh (or `--force-replay` to explicitly discard old state).
 
-**Delivery semantics: at-least-once.** FoldDB provides at-least-once processing, not exactly-once. The failure window is:
+**Delivery semantics: at-least-once.** DBSPA provides at-least-once processing, not exactly-once. The failure window is:
 
-1. FoldDB processes records and updates the in-memory accumulator.
+1. DBSPA processes records and updates the in-memory accumulator.
 2. Output records are emitted to the sink (stdout, SQLite, etc.).
 3. On checkpoint flush: accumulator state + Kafka offsets are written atomically to disk.
 4. After successful checkpoint flush: offsets are committed to Kafka (if consumer group is configured).
 
 **Crash scenarios:**
 - **Crash between step 2 and step 3:** Output was emitted but checkpoint was not saved. On restart, records between the last checkpoint and the crash point are **replayed**, producing **duplicate output** for those records. For changelog output, downstream consumers that maintain a key-value map will converge to the correct state after replay (the replay will re-emit the same retraction/insertion pairs). For non-accumulating queries, duplicates will appear in the output.
-- **Crash between step 3 and step 4:** Checkpoint is saved but Kafka offsets are not committed. On restart, FoldDB resumes from the checkpointed offsets (stored locally), not from the Kafka-committed offsets. The Kafka consumer group offset commit is best-effort — it exists so that external monitoring tools (e.g., Burrow) can track lag, not for correctness.
-- **Crash during step 3 (mid-flush):** The atomic write (temp file + fsync + rename) ensures the previous checkpoint is intact. FoldDB resumes from the previous checkpoint.
+- **Crash between step 3 and step 4:** Checkpoint is saved but Kafka offsets are not committed. On restart, DBSPA resumes from the checkpointed offsets (stored locally), not from the Kafka-committed offsets. The Kafka consumer group offset commit is best-effort — it exists so that external monitoring tools (e.g., Burrow) can track lag, not for correctness.
+- **Crash during step 3 (mid-flush):** The atomic write (temp file + fsync + rename) ensures the previous checkpoint is intact. DBSPA resumes from the previous checkpoint.
 
 **Exactly-once is not a v0 goal.** Achieving exactly-once would require transactional coordination between the output sink and the checkpoint store (e.g., writing output and checkpoint to the same SQLite transaction). This is a v1 consideration for the `--state` SQLite mode specifically.
 
@@ -568,19 +568,19 @@ When enabled:
 
 ### 5.2 State Directory
 
-Default: `~/.folddb/state/<query-hash>/`
+Default: `~/.dbspa/state/<query-hash>/`
 
 Override: `--state-dir /path/to/dir`
 
 ### 5.3 State Inspection
 
 ```bash
-folddb state list                      # list all checkpointed queries
-folddb state inspect <query-hash>      # show checkpoint metadata
-folddb state reset <query-hash>        # delete checkpoint (next run replays from scratch)
+dbspa state list                      # list all checkpointed queries
+dbspa state inspect <query-hash>      # show checkpoint metadata
+dbspa state reset <query-hash>        # delete checkpoint (next run replays from scratch)
 ```
 
-`folddb state inspect` output:
+`dbspa state inspect` output:
 
 ```
 Query:       SELECT region, COUNT(*) FROM 'kafka://broker/orders.cdc' ...
@@ -635,12 +635,12 @@ Output Sink (TUI / changelog NDJSON / SQLite)
 - Backpressure: if the output channel is full (slow sink), the reader blocks — Kafka consumer session timeout must be configured to tolerate this.
 - Offset commit: after each checkpoint flush, commit offsets to Kafka (if a consumer group is configured).
 
-**Consumer rebalance handling:** FoldDB uses an ephemeral consumer group by default (unique group ID per invocation), so rebalances only occur when a `group` parameter is explicitly set. When a rebalance occurs:
-1. **Partitions revoked:** FoldDB immediately flushes a checkpoint for the revoked partitions' state. Goroutines for revoked partitions are stopped. Accumulator entries that were exclusively fed by revoked partitions remain in memory (they cannot be cleanly separated in v0 because the accumulator is a single shared map).
+**Consumer rebalance handling:** DBSPA uses an ephemeral consumer group by default (unique group ID per invocation), so rebalances only occur when a `group` parameter is explicitly set. When a rebalance occurs:
+1. **Partitions revoked:** DBSPA immediately flushes a checkpoint for the revoked partitions' state. Goroutines for revoked partitions are stopped. Accumulator entries that were exclusively fed by revoked partitions remain in memory (they cannot be cleanly separated in v0 because the accumulator is a single shared map).
 2. **Partitions assigned:** New goroutines are started. If `--stateful` is enabled and a checkpoint exists for the new partitions, state is restored. Otherwise, consumption starts from the configured offset.
-3. **Accumulator correctness on rebalance:** Because the accumulator is a single shared map across all partitions, a rebalance with a shared consumer group can produce incorrect aggregate state if different FoldDB instances process overlapping group keys from different partitions. **Recommendation:** For accumulating queries with consumer groups, either consume all partitions (default) or ensure the GROUP BY key is aligned with the Kafka partition key.
+3. **Accumulator correctness on rebalance:** Because the accumulator is a single shared map across all partitions, a rebalance with a shared consumer group can produce incorrect aggregate state if different DBSPA instances process overlapping group keys from different partitions. **Recommendation:** For accumulating queries with consumer groups, either consume all partitions (default) or ensure the GROUP BY key is aligned with the Kafka partition key.
 
-**Multi-partition timestamp ordering:** Records from different partitions arrive independently and may have different timestamps. FoldDB does **not** merge-sort across partitions — records are processed in arrival order. For event-time windowed queries, the watermark mechanism handles out-of-order data. For non-windowed queries, output order reflects arrival order, not event-time order.
+**Multi-partition timestamp ordering:** Records from different partitions arrive independently and may have different timestamps. DBSPA does **not** merge-sort across partitions — records are processed in arrival order. For event-time windowed queries, the watermark mechanism handles out-of-order data. For non-windowed queries, output order reflects arrival order, not event-time order.
 
 ### 6.3 Accumulator
 
@@ -679,7 +679,7 @@ For windowed queries, the accumulator is keyed by `(window_start, ...group_by_ke
 ### 6.4 Memory Management
 
 - Accumulator state is in-memory by default.
-- `--memory-limit` (default 1GB): if the accumulator map exceeds this, FoldDB logs a warning and continues (v0 does not spill to disk; Badger spill is v1).
+- `--memory-limit` (default 1GB): if the accumulator map exceeds this, DBSPA logs a warning and continues (v0 does not spill to disk; Badger spill is v1).
 - For `--state <file.db>`, the SQLite file acts as overflow — accumulators are periodically flushed to SQLite and evicted from memory for low-frequency keys. Hot keys remain in memory. (This is a v1 optimization; v0 keeps all accumulators in memory.)
 
 ### 6.5 Parallelism
@@ -701,8 +701,8 @@ For windowed queries, the accumulator is keyed by `(window_start, ...group_by_ke
 ### 7.1 Primary Command
 
 ```
-folddb [flags] <SQL>
-folddb [flags] -f <query-file.sql>
+dbspa [flags] <SQL>
+dbspa [flags] -f <query-file.sql>
 ```
 
 ### 7.2 Flags
@@ -713,7 +713,7 @@ folddb [flags] -f <query-file.sql>
 | `--mode tui\|changelog\|json` | (auto) | Output mode override |
 | `--state <file.db>` | (none) | Write accumulator state to SQLite |
 | `--stateful` | false | Enable checkpoint persistence for fast restart |
-| `--state-dir <path>` | `~/.folddb/state` | Checkpoint directory |
+| `--state-dir <path>` | `~/.dbspa/state` | Checkpoint directory |
 | `--checkpoint-interval <dur>` | `5s` | How often to flush checkpoints |
 | `--timeout <duration>` | (none) | Terminate after duration |
 | `--limit <n>` | (none) | Terminate after n output records |
@@ -727,17 +727,17 @@ folddb [flags] -f <query-file.sql>
 
 | Command | Description |
 |---|---|
-| `folddb <sql>` | Execute query (default) |
-| `folddb schema <source>` | Print inferred schema for a source |
-| `folddb state list` | List checkpointed queries |
-| `folddb state inspect <hash>` | Show checkpoint details |
-| `folddb state reset <hash>` | Delete a checkpoint |
-| `folddb version` | Print version |
+| `dbspa <sql>` | Execute query (default) |
+| `dbspa schema <source>` | Print inferred schema for a source |
+| `dbspa state list` | List checkpointed queries |
+| `dbspa state inspect <hash>` | Show checkpoint details |
+| `dbspa state reset <hash>` | Delete a checkpoint |
+| `dbspa version` | Print version |
 
 ### 7.4 Schema Subcommand
 
 ```bash
-$ folddb schema 'kafka://localhost:9092/orders.cdc'
+$ dbspa schema 'kafka://localhost:9092/orders.cdc'
 Source:    kafka://localhost:9092/orders.cdc
 Format:    NDJSON (detected)
 Partitions: 12
@@ -791,13 +791,13 @@ Error: column 'regin' not found in source schema
 - **Retraction on empty accumulator**: warn and skip. This can happen if the stream starts mid-history (e.g., `offset=latest` and the first event for a key is an update). Specifically: if `Retract` is called on a group key that does not exist in the accumulator map, the retraction is **dropped** (not applied). A `warn`-level log is emitted on the first occurrence; subsequent occurrences for the same key are logged at `debug` level to avoid log spam. The accumulator does **not** allow negative counts — `COUNT(*)` is clamped at 0, `SUM` does not go negative from phantom retractions.
 - **Type errors in expressions**: e.g., `(_after->>'status')::int` where status is `"active"`. The record is skipped, counted as a deserialization error, and routed to `--dead-letter` if configured. The accumulator is not updated for skipped records.
 - **Division by zero**: returns NULL (not an error). Follows PostgreSQL semantics for integer division by zero; float division by zero returns `+Inf`/`-Inf`/`NaN` per IEEE 754.
-- **Maximum record/field size**: No hard limit on record or field size. Records are processed in memory. A single record larger than `--memory-limit` will cause the process to exceed the memory limit and may trigger OOM. For practical purposes, records larger than 10MB should be considered pathological. FoldDB does not stream-parse individual records — the entire record must fit in memory for deserialization.
-- **JSON field type changes mid-stream**: If a JSON field changes type between records (e.g., `amount` is a string in record 1 and a number in record 2), FoldDB does not error. Each record is evaluated independently. The expression `(col->>'amount')::float` will succeed if the text representation is parseable as a float, regardless of the underlying JSON type. However, `col->'amount' + 1` will fail with a type error if `amount` is a string, since `->` preserves the JSON type and arithmetic on a JSON string is not defined.
+- **Maximum record/field size**: No hard limit on record or field size. Records are processed in memory. A single record larger than `--memory-limit` will cause the process to exceed the memory limit and may trigger OOM. For practical purposes, records larger than 10MB should be considered pathological. DBSPA does not stream-parse individual records — the entire record must fit in memory for deserialization.
+- **JSON field type changes mid-stream**: If a JSON field changes type between records (e.g., `amount` is a string in record 1 and a number in record 2), DBSPA does not error. Each record is evaluated independently. The expression `(col->>'amount')::float` will succeed if the text representation is parseable as a float, regardless of the underlying JSON type. However, `col->'amount' + 1` will fail with a type error if `amount` is a string, since `->` preserves the JSON type and arithmetic on a JSON string is not defined.
 
 ### 8.4 Dead Letter Output
 
 ```bash
-folddb --dead-letter errors.ndjson "..."
+dbspa --dead-letter errors.ndjson "..."
 ```
 
 Records that fail deserialization or cause runtime errors are written to the dead letter file with error context:
@@ -818,7 +818,7 @@ Records that fail deserialization or cause runtime errors are written to the dea
 - SQL lexer (tokenizer)
 - SQL parser (recursive descent): SELECT, FROM, WHERE, GROUP BY, HAVING, ORDER BY, LIMIT, WINDOW, EMIT, DEDUPLICATE BY, FORMAT, EVENT TIME BY
 - AST types
-- CLI scaffold (cobra): `folddb <sql>`, `folddb schema`, `folddb version`
+- CLI scaffold (cobra): `dbspa <sql>`, `dbspa schema`, `dbspa version`
 - Pipeline scaffold: Source → Decoder → Filter → Project → Accumulator → Sink (interfaces, wiring)
 - stdin source + JSON decoder (simplest possible end-to-end)
 - Non-accumulating output (NDJSON to stdout)
@@ -826,7 +826,7 @@ Records that fail deserialization or cause runtime errors are written to the dea
 
 **Done when:**
 ```bash
-echo '{"name":"alice","age":30}' | folddb "SELECT name WHERE age > 25"
+echo '{"name":"alice","age":30}' | dbspa "SELECT name WHERE age > 25"
 # → {"name":"alice"}
 ```
 
@@ -844,7 +844,7 @@ echo '{"name":"alice","age":30}' | folddb "SELECT name WHERE age > 25"
 
 **Done when:**
 ```bash
-cat events.ndjson | folddb "SELECT status, COUNT(*) AS cnt GROUP BY status"
+cat events.ndjson | dbspa "SELECT status, COUNT(*) AS cnt GROUP BY status"
 # TUI shows live-updating table; piping shows changelog diffs
 ```
 
@@ -858,14 +858,14 @@ cat events.ndjson | folddb "SELECT status, COUNT(*) AS cnt GROUP BY status"
 - Confluent Schema Registry client (HTTP, schema caching)
 - Avro deserialization (with registry auto-detect via magic byte)
 - FORMAT DEBEZIUM: envelope unwrapping, virtual columns, diff derivation from `op`
-- Credentials file (`~/.folddb/credentials`)
-- `folddb schema <kafka-source>` subcommand
+- Credentials file (`~/.dbspa/credentials`)
+- `dbspa schema <kafka-source>` subcommand
 - Offset control: `earliest`, `latest`, timestamp, explicit offset
 - Virtual columns: `_offset`, `_partition`, `_timestamp`, `_key`
 
 **Done when:**
 ```bash
-folddb "SELECT _after->>'region' AS region, COUNT(*) AS orders
+dbspa "SELECT _after->>'region' AS region, COUNT(*) AS orders
         FROM 'kafka://localhost:9092/orders.cdc' FORMAT DEBEZIUM
         WHERE _op IN ('c','u','d')
         GROUP BY region"
@@ -885,12 +885,12 @@ folddb "SELECT _after->>'region' AS region, COUNT(*) AS orders
 - DEDUPLICATE BY with bounded LRU cache
 - Stateful checkpointing: accumulator serialization, offset persistence, atomic flush
 - Checkpoint restore on startup
-- `folddb state list/inspect/reset` subcommands
+- `dbspa state list/inspect/reset` subcommands
 - `--state <file.db>` SQLite output mode
 
 **Done when:**
 ```bash
-folddb --stateful \
+dbspa --stateful \
   "SELECT window_start, endpoint, COUNT(*) AS reqs, AVG(latency_ms) AS avg_lat
    FROM 'kafka://localhost:9092/api_requests'
    GROUP BY endpoint
@@ -916,9 +916,9 @@ folddb --stateful \
 ## 10. Project Structure
 
 ```
-folddb/
+dbspa/
 ├── cmd/
-│   └── folddb/
+│   └── dbspa/
 │       └── main.go              # CLI entrypoint
 ├── internal/
 │   ├── sql/
@@ -985,7 +985,7 @@ This section enumerates the precise behavior for every edge case that an impleme
 
 ### 12.1 NULL Semantics
 
-FoldDB follows PostgreSQL three-valued logic (TRUE / FALSE / NULL).
+DBSPA follows PostgreSQL three-valued logic (TRUE / FALSE / NULL).
 
 **Three-valued logic truth table:**
 
@@ -1039,7 +1039,7 @@ FoldDB follows PostgreSQL three-valued logic (TRUE / FALSE / NULL).
 | Retraction from FIRST/LAST | Ignored (FIRST/LAST are not retractable). |
 | Retraction from MIN/MAX | Value removed from heap. If heap is empty, aggregate returns NULL. |
 | Retraction from ARRAY_AGG | First matching value removed from list. If duplicates exist, only one is removed. |
-| Retraction with different value than was inserted | Undefined behavior. FoldDB does not validate that retractions match prior insertions. This can produce incorrect aggregate state. The Debezium `_before` field is the mechanism that ensures retractions carry the correct prior value. |
+| Retraction with different value than was inserted | Undefined behavior. DBSPA does not validate that retractions match prior insertions. This can produce incorrect aggregate state. The Debezium `_before` field is the mechanism that ensures retractions carry the correct prior value. |
 | Double retraction (same value retracted twice) | Processed as-is. For COUNT, this can drive the count below zero (clamped at 0). For SUM, the value is subtracted twice. **Users should ensure their source does not produce double retractions.** |
 | Insert after all values retracted (COUNT was 0) | The group key is re-created in the accumulator. A fresh `+` emission occurs (no retraction emitted since the previous state was already retracted when COUNT hit 0). |
 
@@ -1075,12 +1075,12 @@ Implicit coercion is applied in expressions where types don't match, following P
 | Scenario | Behavior |
 |---|---|
 | Broker unreachable at startup | Retry with exponential backoff (1s, 2s, 4s, 8s, max 30s). After `--timeout` or 5 minutes (whichever is less), exit with error. |
-| Broker becomes unreachable mid-stream | Kafka client retries internally (franz-go defaults). FoldDB continues processing buffered records. If reconnection fails after session timeout, exit with error. Checkpoint is flushed on exit if `--stateful`. |
+| Broker becomes unreachable mid-stream | Kafka client retries internally (franz-go defaults). DBSPA continues processing buffered records. If reconnection fails after session timeout, exit with error. Checkpoint is flushed on exit if `--stateful`. |
 | Topic does not exist | Immediate error: `Error: topic 'X' does not exist on broker Y. Available topics: ...` (lists up to 20 topics). |
 | Partition produces no data for extended period | For watermark tracking: partition excluded from minimum watermark calculation after 30s of inactivity (see Section 3.7). For backpressure: idle partitions do not consume resources. |
 | Message key is not valid UTF-8 | `_key` is set to the base64 encoding of the raw bytes, prefixed with `b64:`. Example: `b64:AQIDBA==`. |
 | Message value is empty (null payload) | Record is skipped. Counted as a deserialization error. Debezium tombstones (null value, non-null key) are silently dropped without incrementing the error counter. |
-| Schema registry unreachable | If schema registry is configured (via URI param or credentials) and unreachable, FoldDB retries 3 times, then exits with an error. Schema fetch failures mid-stream (e.g., new schema ID encountered) are logged and the record is routed to `--dead-letter`. |
+| Schema registry unreachable | If schema registry is configured (via URI param or credentials) and unreachable, DBSPA retries 3 times, then exits with an error. Schema fetch failures mid-stream (e.g., new schema ID encountered) are logged and the record is routed to `--dead-letter`. |
 | Consumer group rebalance | See Section 6.2. |
 
 ### 12.6 Output Determinism
@@ -1095,9 +1095,9 @@ Implicit coercion is applied in expressions where types don't match, following P
 
 ### 12.7 PRD Alignment Notes
 
-The v0 spec (FoldDB) is the first implementation phase of the broader `neql` vision described in the PRD. The following syntactic differences exist between the v0 spec and the PRD and will be reconciled when FoldDB merges into neql:
+The v0 spec (DBSPA) is the first implementation phase of the broader `neql` vision described in the PRD. The following syntactic differences exist between the v0 spec and the PRD and will be reconciled when DBSPA merges into neql:
 
-| Aspect | v0 Spec (FoldDB) | PRD (neql) | Resolution |
+| Aspect | v0 Spec (DBSPA) | PRD (neql) | Resolution |
 |---|---|---|---|
 | Window syntax | `WINDOW TUMBLING '1 minute'` | `WINDOW TUMBLING(SIZE 1 MINUTE)` | v0 uses the simpler form; the PRD form will be accepted as an alias in v1 |
 | Sliding window keyword | `SLIDING` | `HOPPING` | v0 uses `SLIDING`; both will be accepted as aliases in v1 |
@@ -1117,7 +1117,7 @@ Explicitly not in v0, deferred to v1+:
 - DuckDB integration
 - Joins of any kind
 - SEED FROM (warehouse bootstrap)
-- `folddb serve` (HTTP/sidecar mode)
+- `dbspa serve` (HTTP/sidecar mode)
 - Sidecar merge / ingest API
 - Protobuf format
 - Badger spill-to-disk for large accumulator state

@@ -8,40 +8,40 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/kevin-cantwell/folddb/internal/engine"
-	"github.com/kevin-cantwell/folddb/internal/format"
-	"github.com/kevin-cantwell/folddb/internal/source"
+	"github.com/kevin-cantwell/dbspa/internal/engine"
+	"github.com/kevin-cantwell/dbspa/internal/format"
+	"github.com/kevin-cantwell/dbspa/internal/source"
 )
 
 // loadTableFile loads all records from a file into a slice.
 // For formats supported by DuckDB (Parquet, CSV, JSON), it routes through DuckDB
 // for better performance (predicate pushdown, column pruning). Falls back to
-// FoldDB's own decoders for Avro, Protobuf, Debezium, or if DuckDB fails.
+// DBSPA's own decoders for Avro, Protobuf, Debezium, or if DuckDB fails.
 func loadTableFile(path string, formatHint string) ([]engine.Record, error) {
 	// If the format is explicitly set to a streaming/envelope format that
-	// DuckDB can't interpret (Debezium, Avro, Protobuf), always use FoldDB decoders.
-	if requiresFoldDBDecoder(formatHint) {
-		return loadViaFoldDB(path, formatHint)
+	// DuckDB can't interpret (Debezium, Avro, Protobuf), always use DBSPA decoders.
+	if requiresDBSPADecoder(formatHint) {
+		return loadViaDBSPA(path, formatHint)
 	}
 
 	// Try DuckDB first for supported formats
 	if source.IsDuckDBSupported(path) {
 		records, err := loadViaDuckDB(path)
 		if err != nil {
-			// Fall back to FoldDB decoders with a warning
-			fmt.Fprintf(os.Stderr, "Warning: DuckDB load failed (%v), falling back to FoldDB decoder\n", err)
+			// Fall back to DBSPA decoders with a warning
+			fmt.Fprintf(os.Stderr, "Warning: DuckDB load failed (%v), falling back to DBSPA decoder\n", err)
 		} else {
 			return records, nil
 		}
 	}
 
-	// Fall back to FoldDB's own decoders
-	return loadViaFoldDB(path, formatHint)
+	// Fall back to DBSPA's own decoders
+	return loadViaDBSPA(path, formatHint)
 }
 
-// requiresFoldDBDecoder returns true for format hints that indicate an envelope
+// requiresDBSPADecoder returns true for format hints that indicate an envelope
 // or streaming format that DuckDB cannot interpret (e.g., Debezium CDC, Avro, Protobuf).
-func requiresFoldDBDecoder(formatHint string) bool {
+func requiresDBSPADecoder(formatHint string) bool {
 	switch strings.ToUpper(formatHint) {
 	case "DEBEZIUM", "AVRO", "PROTOBUF", "PROTO":
 		return true
@@ -64,8 +64,8 @@ func loadViaDuckDB(path string) ([]engine.Record, error) {
 	return duckSrc.Query(query)
 }
 
-// loadViaFoldDB loads a file using FoldDB's built-in decoders.
-func loadViaFoldDB(path string, formatHint string) ([]engine.Record, error) {
+// loadViaDBSPA loads a file using DBSPA's built-in decoders.
+func loadViaDBSPA(path string, formatHint string) ([]engine.Record, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("cannot open table file: %w", err)

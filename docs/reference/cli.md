@@ -3,14 +3,14 @@
 ## Synopsis
 
 ```
-folddb [flags] <SQL>
-folddb [flags] -f <file.sql>
-folddb serve [flags] <SQL>
-folddb schema [source [FORMAT ...]]
-folddb state list
-folddb state inspect <hash>
-folddb state reset <hash>
-folddb version
+dbspa [flags] <SQL>
+dbspa [flags] -f <file.sql>
+dbspa serve [flags] <SQL>
+dbspa schema [source [FORMAT ...]]
+dbspa state list
+dbspa state inspect <hash>
+dbspa state reset <hash>
+dbspa version
 ```
 
 ## Default command: query
@@ -18,9 +18,9 @@ folddb version
 Execute a SQL query against streaming data.
 
 ```bash
-folddb "SELECT name, age WHERE age > 25"
-folddb -f query.sql
-cat data.json | folddb "SELECT * WHERE status = 'active'"
+dbspa "SELECT name, age WHERE age > 25"
+dbspa -f query.sql
+cat data.json | dbspa "SELECT * WHERE status = 'active'"
 ```
 
 ### Flags
@@ -34,7 +34,7 @@ cat data.json | folddb "SELECT * WHERE status = 'active'"
 | `--limit <n>` | | 0 (unlimited) | Terminate after N output records |
 | `--timeout <duration>` | | 0 (none) | Terminate after duration (e.g., `30s`, `5m`) |
 | `--stateful` | | false | Enable persistent checkpoints for fast restart |
-| `--state-dir <path>` | | `~/.folddb/state` | Directory for checkpoint files |
+| `--state-dir <path>` | | `~/.dbspa/state` | Directory for checkpoint files |
 | `--checkpoint-interval <dur>` | | `5s` | How often to flush checkpoints |
 | `--dead-letter <file>` | | | Route error records to NDJSON file. See [Error Handling](../concepts/error-handling.md). |
 | `--spill-to-disk` | | false | Spill large join arrangements to disk (Badger) to prevent OOM |
@@ -48,38 +48,38 @@ cat data.json | folddb "SELECT * WHERE status = 'active'"
 
 ```bash
 # Basic filter
-echo '{"name":"alice","age":30}' | folddb "SELECT name WHERE age > 25"
+echo '{"name":"alice","age":30}' | dbspa "SELECT name WHERE age > 25"
 
 # Aggregate from file input
-folddb -i orders.ndjson "SELECT status, COUNT(*) GROUP BY status"
+dbspa -i orders.ndjson "SELECT status, COUNT(*) GROUP BY status"
 
 # Kafka with state
-folddb --stateful --state orders.db \
+dbspa --stateful --state orders.db \
   "SELECT region, COUNT(*) FROM 'kafka://broker/orders.cdc' FORMAT DEBEZIUM GROUP BY region"
 
 # Dry run
-folddb --dry-run "SELECT status, COUNT(*) GROUP BY status"
+dbspa --dry-run "SELECT status, COUNT(*) GROUP BY status"
 
 # With timeout
-folddb --timeout 30s "SELECT * FROM 'kafka://broker/events'"
+dbspa --timeout 30s "SELECT * FROM 'kafka://broker/events'"
 
 # Dead letter output
-folddb --dead-letter errors.ndjson "SELECT * FROM 'kafka://broker/events'"
+dbspa --dead-letter errors.ndjson "SELECT * FROM 'kafka://broker/events'"
 
 # Spill to disk for large joins
-folddb --spill-to-disk \
+dbspa --spill-to-disk \
   "SELECT o.*, c.name FROM 'kafka://broker/orders' o JOIN '/data/customers.parquet' c ON o.customer_id = c.id"
 
 # With memory budget
-folddb --max-memory 512MB \
+dbspa --max-memory 512MB \
   "SELECT o.*, c.name FROM 'kafka://broker/orders' o JOIN '/data/customers.parquet' c ON o.customer_id = c.id"
 
 # CPU profiling
-folddb --cpuprofile prof.out "SELECT status, COUNT(*) GROUP BY status"
+dbspa --cpuprofile prof.out "SELECT status, COUNT(*) GROUP BY status"
 go tool pprof prof.out
 
 # Debezium Avro with schema registry
-folddb "SELECT _op, customer_id, total
+dbspa "SELECT _op, customer_id, total
         FROM 'kafka://broker/orders.cdc?registry=http://schema-registry:8081'
         FORMAT AVRO CHANGELOG DEBEZIUM"
 ```
@@ -92,7 +92,7 @@ folddb "SELECT _op, customer_id, total
 Run a query and serve results via HTTP.
 
 ```bash
-folddb serve [flags] <SQL>
+dbspa serve [flags] <SQL>
 ```
 
 ### Flags
@@ -117,7 +117,7 @@ folddb serve [flags] <SQL>
 ### Example
 
 ```bash
-folddb serve --port 8080 \
+dbspa serve --port 8080 \
   "SELECT region, COUNT(*) AS orders
    FROM 'kafka://broker/orders.cdc' FORMAT DEBEZIUM
    GROUP BY region"
@@ -133,8 +133,8 @@ curl http://localhost:8080/health
 Print the inferred schema for a data source.
 
 ```bash
-folddb schema 'kafka://localhost:9092/orders.cdc'
-folddb schema 'kafka://broker/events' FORMAT AVRO
+dbspa schema 'kafka://localhost:9092/orders.cdc'
+dbspa schema 'kafka://broker/events' FORMAT AVRO
 ```
 
 Example output:
@@ -170,11 +170,11 @@ Manage checkpoint state.
 List all checkpointed queries.
 
 ```bash
-folddb state list
+dbspa state list
 ```
 
 ```
-  a1b2c3d4e5f6  last_flush=2026-03-28T14:02:31Z  dir=/Users/you/.folddb/state/a1b2c3d4e5f6
+  a1b2c3d4e5f6  last_flush=2026-03-28T14:02:31Z  dir=/Users/you/.dbspa/state/a1b2c3d4e5f6
 ```
 
 ### state inspect
@@ -182,7 +182,7 @@ folddb state list
 Show checkpoint details for a specific query hash.
 
 ```bash
-folddb state inspect a1b2c3d4
+dbspa state inspect a1b2c3d4
 ```
 
 ### state reset
@@ -190,19 +190,19 @@ folddb state inspect a1b2c3d4
 Delete a checkpoint. The next run of the matching query will replay from scratch.
 
 ```bash
-folddb state reset a1b2c3d4
+dbspa state reset a1b2c3d4
 ```
 
 ## version
 
-Print the FoldDB version.
+Print the DBSPA version.
 
 ```bash
-folddb version
+dbspa version
 ```
 
 ```
-folddb v0.1.0
+dbspa v0.1.0
 ```
 
 ## Exit codes
@@ -214,7 +214,7 @@ folddb v0.1.0
 
 ## Environment
 
-FoldDB reads Kafka credentials from `~/.folddb/credentials` (TOML format):
+DBSPA reads Kafka credentials from `~/.dbspa/credentials` (TOML format):
 
 ```toml
 [kafka.my-cluster]

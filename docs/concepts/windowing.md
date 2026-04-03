@@ -1,6 +1,6 @@
 # Windowing
 
-Windowed aggregation groups records into time-based buckets. FoldDB supports three window types: tumbling, sliding, and session.
+Windowed aggregation groups records into time-based buckets. DBSPA supports three window types: tumbling, sliding, and session.
 
 ## Tumbling windows
 
@@ -67,7 +67,7 @@ These can be used in SELECT and ORDER BY.
 
 ## Event time vs processing time
 
-By default, windows use **processing time** (when FoldDB receives the record). To use a field from the data:
+By default, windows use **processing time** (when DBSPA receives the record). To use a field from the data:
 
 ```sql
 EVENT TIME BY timestamp
@@ -85,7 +85,7 @@ WATERMARK '30 seconds'
 
 If `EVENT TIME BY` is specified without `WATERMARK`, the default lateness is 5 seconds.
 
-For multi-partition Kafka sources, FoldDB tracks the minimum watermark across all assigned partitions. A stalled partition (no records for 30+ seconds) is excluded from the minimum to prevent watermark stalls.
+For multi-partition Kafka sources, DBSPA tracks the minimum watermark across all assigned partitions. A stalled partition (no records for 30+ seconds) is excluded from the minimum to prevent watermark stalls.
 
 ## Emit control
 

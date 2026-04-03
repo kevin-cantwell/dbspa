@@ -301,7 +301,7 @@ var File_orders_proto protoreflect.FileDescriptor
 
 const file_orders_proto_rawDesc = "" +
 	"\n" +
-	"\forders.proto\x12\x06folddb\"\xf4\x01\n" +
+	"\forders.proto\x12\x05dbspa\"\xf4\x01\n" +
 	"\x05Order\x12\x19\n" +
 	"\border_id\x18\x01 \x01(\x03R\aorderId\x12\x1f\n" +
 	"\vcustomer_id\x18\x02 \x01(\x03R\n" +
@@ -331,7 +331,7 @@ const file_orders_proto_rawDesc = "" +
 	"session_id\x18\x04 \x01(\tR\tsessionId\x12\x1f\n" +
 	"\vduration_ms\x18\x05 \x01(\x03R\n" +
 	"durationMs\x12\x1c\n" +
-	"\ttimestamp\x18\x06 \x01(\tR\ttimestampB+Z)github.com/kevin-cantwell/folddb/proto/pbb\x06proto3"
+	"\ttimestamp\x18\x06 \x01(\tR\ttimestampB*Z(github.com/kevin-cantwell/dbspa/proto/pbb\x06proto3"
 
 var (
 	file_orders_proto_rawDescOnce sync.Once
@@ -347,9 +347,9 @@ func file_orders_proto_rawDescGZIP() []byte {
 
 var file_orders_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
 var file_orders_proto_goTypes = []any{
-	(*Order)(nil),  // 0: folddb.Order
-	(*Metric)(nil), // 1: folddb.Metric
-	(*Click)(nil),  // 2: folddb.Click
+	(*Order)(nil),  // 0: dbspa.Order
+	(*Metric)(nil), // 1: dbspa.Metric
+	(*Click)(nil),  // 2: dbspa.Click
 }
 var file_orders_proto_depIdxs = []int32{
 	0, // [0:0] is the sub-list for method output_type

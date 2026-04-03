@@ -7,9 +7,9 @@ import (
 	"math"
 	"time"
 
-	"github.com/kevin-cantwell/folddb/internal/engine"
+	"github.com/kevin-cantwell/dbspa/internal/engine"
 
-	pb "github.com/kevin-cantwell/folddb/proto/pb"
+	pb "github.com/kevin-cantwell/dbspa/proto/pb"
 	"google.golang.org/protobuf/proto"
 )
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Usage: ./bench/harness/run.sh [--with-kafka] [--output results.json] [--compare baseline.json]
 #
-# Runs the FoldDB benchmark suite and outputs machine-readable JSON results.
+# Runs the DBSPA benchmark suite and outputs machine-readable JSON results.
 # Use --with-kafka to include Kafka integration benchmarks (requires Docker).
 #
 # Examples:
@@ -43,13 +43,13 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Step 1: Build binaries
-echo "=== Building folddb + folddb-gen ==="
+echo "=== Building dbspa + dbspa-gen ==="
 cd "$PROJECT_ROOT"
 make build
 echo ""
 
-FOLDDB_BIN="$PROJECT_ROOT/folddb"
-GEN_BIN="$PROJECT_ROOT/folddb-gen"
+DBSPA_BIN="$PROJECT_ROOT/dbspa"
+GEN_BIN="$PROJECT_ROOT/dbspa-gen"
 
 # Step 2: Start Kafka if requested
 KAFKA_STARTED=false
@@ -83,8 +83,8 @@ echo ""
 echo "=== Running benchmarks ==="
 
 BENCH_ARGS=(
-    --folddb "$FOLDDB_BIN"
-    --folddb-gen "$GEN_BIN"
+    --dbspa "$DBSPA_BIN"
+    --dbspa-gen "$GEN_BIN"
 )
 
 if [[ -n "$WITH_KAFKA" ]]; then

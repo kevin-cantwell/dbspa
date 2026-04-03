@@ -3,7 +3,7 @@ package parser
 import (
 	"testing"
 
-	"github.com/kevin-cantwell/folddb/internal/sql/ast"
+	"github.com/kevin-cantwell/dbspa/internal/sql/ast"
 )
 
 func TestPositiveSQL(t *testing.T) {
@@ -820,26 +820,26 @@ func TestPositiveSQL(t *testing.T) {
 			},
 		},
 		{
-			name: "FORMAT FOLDDB (deprecated shorthand)",
-			sql:  "SELECT * FROM stdin FORMAT FOLDDB",
+			name: "FORMAT DBSPA (deprecated shorthand)",
+			sql:  "SELECT * FROM stdin FORMAT DBSPA",
 			check: func(t *testing.T, stmt *ast.SelectStatement) {
 				if stmt.From.Format != "JSON" {
 					t.Errorf("format: got %q, want JSON", stmt.From.Format)
 				}
-				if stmt.Changelog != "FOLDDB" {
-					t.Errorf("changelog: got %q, want FOLDDB", stmt.Changelog)
+				if stmt.Changelog != "DBSPA" {
+					t.Errorf("changelog: got %q, want DBSPA", stmt.Changelog)
 				}
 			},
 		},
 		{
-			name: "FORMAT JSON FOLDDB (deprecated two-token)",
-			sql:  "SELECT * FROM stdin FORMAT JSON FOLDDB",
+			name: "FORMAT JSON DBSPA (deprecated two-token)",
+			sql:  "SELECT * FROM stdin FORMAT JSON DBSPA",
 			check: func(t *testing.T, stmt *ast.SelectStatement) {
 				if stmt.From.Format != "JSON" {
 					t.Errorf("format: got %q, want JSON", stmt.From.Format)
 				}
-				if stmt.Changelog != "FOLDDB" {
-					t.Errorf("changelog: got %q, want FOLDDB", stmt.Changelog)
+				if stmt.Changelog != "DBSPA" {
+					t.Errorf("changelog: got %q, want DBSPA", stmt.Changelog)
 				}
 			},
 		},
@@ -959,11 +959,11 @@ func TestPositiveSQL(t *testing.T) {
 			},
 		},
 		{
-			name: "CHANGELOG FOLDDB (explicit)",
-			sql:  "SELECT * FROM stdin CHANGELOG FOLDDB",
+			name: "CHANGELOG DBSPA (explicit)",
+			sql:  "SELECT * FROM stdin CHANGELOG DBSPA",
 			check: func(t *testing.T, stmt *ast.SelectStatement) {
-				if stmt.Changelog != "FOLDDB" {
-					t.Errorf("changelog: got %q, want FOLDDB", stmt.Changelog)
+				if stmt.Changelog != "DBSPA" {
+					t.Errorf("changelog: got %q, want DBSPA", stmt.Changelog)
 				}
 			},
 		},

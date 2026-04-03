@@ -5,7 +5,7 @@ import (
 	"io"
 	"math"
 
-	"github.com/kevin-cantwell/folddb/internal/engine"
+	"github.com/kevin-cantwell/dbspa/internal/engine"
 	"github.com/parquet-go/parquet-go"
 )
 

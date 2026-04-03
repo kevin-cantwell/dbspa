@@ -30,7 +30,7 @@ Parquet via DuckDB achieves nearly 2M records/sec on filters due to predicate pu
 |---|---|---|
 | NDJSON | 871ms | 115K |
 | Avro OCF | 922ms | 108K |
-| Parquet (DuckDB scan, FoldDB agg) | 904ms | 111K |
+| Parquet (DuckDB scan, DBSPA agg) | 904ms | 111K |
 
 GROUP BY throughput is dominated by accumulation, not decoding — all formats converge around 110K records/sec.
 
@@ -48,7 +48,7 @@ GROUP BY throughput is dominated by accumulation, not decoding — all formats c
 
 ### Full Complex Query
 
-The most demanding query FoldDB supports — exercises every major feature:
+The most demanding query DBSPA supports — exercises every major feature:
 
 ```sql
 SELECT c.tier, c.region,
@@ -78,33 +78,33 @@ Features used: Debezium CDC retractions, DD join against DuckDB-loaded Parquet (
 
 For Kafka deployments, Avro reduces broker storage and network bandwidth by 2.4x.
 
-## FoldDB vs DuckDB
+## DBSPA vs DuckDB
 
-DuckDB is a vectorized columnar engine optimized for batch analytics. FoldDB is a streaming engine with incremental aggregation. They serve different use cases.
+DuckDB is a vectorized columnar engine optimized for batch analytics. DBSPA is a streaming engine with incremental aggregation. They serve different use cases.
 
 ### Parquet GROUP BY (100K records)
 
 | Engine | Time | Records/sec |
 |---|---|---|
 | **DuckDB (native)** | **17ms** | **5,882K** |
-| FoldDB (via DuckDB scan) | 936ms | 107K |
+| DBSPA (via DuckDB scan) | 936ms | 107K |
 
-DuckDB is ~55x faster on pure batch queries due to SIMD vectorized execution across all cores. FoldDB processes records through a goroutine pipeline optimized for streaming.
+DuckDB is ~55x faster on pure batch queries due to SIMD vectorized execution across all cores. DBSPA processes records through a goroutine pipeline optimized for streaming.
 
 !!! tip "When to use which"
     **DuckDB:** One-shot queries on files. Batch analytics. Data exploration.
 
-    **FoldDB:** Streaming queries on Kafka/CDC. Incremental aggregation. Live-updating results. Joins between streams and tables.
+    **DBSPA:** Streaming queries on Kafka/CDC. Incremental aggregation. Live-updating results. Joins between streams and tables.
 
-    FoldDB uses DuckDB internally for file scanning — you get DuckDB's read performance with FoldDB's streaming semantics.
+    DBSPA uses DuckDB internally for file scanning — you get DuckDB's read performance with DBSPA's streaming semantics.
 
 ## Live Kafka Benchmarks
 
-End-to-end benchmarks with a live Kafka producer and FoldDB consumer. These measure real-world throughput including network I/O, Kafka consumer overhead, deserialization, and aggregation.
+End-to-end benchmarks with a live Kafka producer and DBSPA consumer. These measure real-world throughput including network I/O, Kafka consumer overhead, deserialization, and aggregation.
 
 ### Burst Throughput (200K messages, GROUP BY)
 
-A producer writes 200K messages to a Kafka topic in a burst. FoldDB consumes with a GROUP BY aggregation query.
+A producer writes 200K messages to a Kafka topic in a burst. DBSPA consumes with a GROUP BY aggregation query.
 
 | Scenario | Throughput | Notes |
 |---|---|---|
@@ -114,7 +114,7 @@ The bottleneck is JSON decoding, not Kafka consumption or aggregation. With Avro
 
 ### Sustained Throughput
 
-For sustained streaming (producer rate-limited to match consumer), FoldDB processes at the same throughput as the stdin benchmarks above -- the Kafka consumer adds negligible overhead once messages are in the fetch buffer.
+For sustained streaming (producer rate-limited to match consumer), DBSPA processes at the same throughput as the stdin benchmarks above -- the Kafka consumer adds negligible overhead once messages are in the fetch buffer.
 
 ## Optimization History
 
@@ -146,10 +146,10 @@ For large joins and long windows, arrangements can spill to disk using [Badger](
 
 ```bash
 # Use default memory budget (1M records)
-folddb --spill-to-disk "SELECT ... FROM ... JOIN ..."
+dbspa --spill-to-disk "SELECT ... FROM ... JOIN ..."
 
 # Set explicit memory budget
-folddb --max-memory 512MB "SELECT ... FROM ... JOIN ..."
+dbspa --max-memory 512MB "SELECT ... FROM ... JOIN ..."
 ```
 
 Stream-stream joins (both FROM and JOIN are Kafka topics) auto-enable spill-to-disk to prevent OOM. Override with `--max-memory` to set an explicit budget.
@@ -170,9 +170,9 @@ The overhead is minimal because hot join probes still hit the in-memory portion 
 
 ## Profiling
 
-FoldDB includes built-in CPU profiling:
+DBSPA includes built-in CPU profiling:
 
 ```bash
-folddb query --cpuprofile prof.out "SELECT ..."
+dbspa query --cpuprofile prof.out "SELECT ..."
 go tool pprof prof.out
 ```

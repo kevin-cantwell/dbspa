@@ -3,7 +3,7 @@ package engine
 import (
 	"fmt"
 
-	"github.com/kevin-cantwell/folddb/internal/sql/ast"
+	"github.com/kevin-cantwell/dbspa/internal/sql/ast"
 )
 
 // Filter evaluates a WHERE clause expression against a record.

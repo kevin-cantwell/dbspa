@@ -7,10 +7,10 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/kevin-cantwell/folddb/internal/engine"
-	"github.com/kevin-cantwell/folddb/internal/sink"
-	"github.com/kevin-cantwell/folddb/internal/source"
-	"github.com/kevin-cantwell/folddb/internal/sql/ast"
+	"github.com/kevin-cantwell/dbspa/internal/engine"
+	"github.com/kevin-cantwell/dbspa/internal/sink"
+	"github.com/kevin-cantwell/dbspa/internal/source"
+	"github.com/kevin-cantwell/dbspa/internal/sql/ast"
 )
 
 // duckDBInstance is the shared DuckDB connection, created lazily and reused.
@@ -49,10 +49,10 @@ func isFileSource(uri string) bool {
 	return source.IsDuckDBSupported(uri)
 }
 
-// translateFoldDBQueryToDuckDB rewrites a FoldDB SELECT statement so that
+// translateDBSPAQueryToDuckDB rewrites a DBSPA SELECT statement so that
 // the FROM clause uses DuckDB scanner functions. This is used for
 // non-accumulating file queries where DuckDB can handle the entire query.
-func translateFoldDBQueryToDuckDB(stmt *ast.SelectStatement) (string, error) {
+func translateDBSPAQueryToDuckDB(stmt *ast.SelectStatement) (string, error) {
 	fromURI := stmt.From.URI
 	duckExpr, err := source.TranslateToDuckDB(fromURI)
 	if err != nil {
@@ -123,7 +123,7 @@ func translateFoldDBQueryToDuckDB(stmt *ast.SelectStatement) (string, error) {
 	return query, nil
 }
 
-// exprToDuckDBSQL converts a FoldDB AST expression to DuckDB-compatible SQL.
+// exprToDuckDBSQL converts a DBSPA AST expression to DuckDB-compatible SQL.
 func exprToDuckDBSQL(e ast.Expr) string {
 	switch v := e.(type) {
 	case *ast.StarExpr:
@@ -156,7 +156,7 @@ func exprToDuckDBSQL(e ast.Expr) string {
 	case *ast.CastExpr:
 		return "CAST(" + exprToDuckDBSQL(v.Expr) + " AS " + v.TypeName + ")"
 	case *ast.JsonAccessExpr:
-		// DuckDB uses -> for JSON access, same as FoldDB
+		// DuckDB uses -> for JSON access, same as DBSPA
 		op := "->"
 		if v.AsText {
 			op = "->>"
@@ -182,7 +182,7 @@ func quoteIdent(name string) string {
 // Used for non-accumulating queries on file sources where DuckDB can handle
 // everything (predicate pushdown, column pruning, ORDER BY, LIMIT).
 func runDuckDBFileQuery(ctx context.Context, stmt *ast.SelectStatement) ([]engine.Record, error) {
-	query, err := translateFoldDBQueryToDuckDB(stmt)
+	query, err := translateDBSPAQueryToDuckDB(stmt)
 	if err != nil {
 		return nil, err
 	}
@@ -198,7 +198,7 @@ func runDuckDBFileQuery(ctx context.Context, stmt *ast.SelectStatement) ([]engin
 // runDuckDBFileQueryToChannel executes a file-source query through DuckDB
 // and streams results to a channel.
 func runDuckDBFileQueryToChannel(ctx context.Context, stmt *ast.SelectStatement, ch chan<- engine.Record) error {
-	query, err := translateFoldDBQueryToDuckDB(stmt)
+	query, err := translateDBSPAQueryToDuckDB(stmt)
 	if err != nil {
 		return err
 	}
@@ -212,10 +212,10 @@ func runDuckDBFileQueryToChannel(ctx context.Context, stmt *ast.SelectStatement,
 }
 
 // runDuckDBNonAccumulating executes a file query entirely through DuckDB and
-// outputs results via the standard FoldDB sink. DuckDB handles the full query
+// outputs results via the standard DBSPA sink. DuckDB handles the full query
 // including WHERE, ORDER BY, and LIMIT with predicate pushdown.
 func runDuckDBNonAccumulating(ctx context.Context, stmt *ast.SelectStatement) error {
-	query, err := translateFoldDBQueryToDuckDB(stmt)
+	query, err := translateDBSPAQueryToDuckDB(stmt)
 	if err != nil {
 		return fmt.Errorf("duckdb query translation error: %w", err)
 	}
@@ -253,7 +253,7 @@ func runDuckDBNonAccumulating(ctx context.Context, stmt *ast.SelectStatement) er
 
 // duckDBScanToChannel executes a simple SELECT * FROM <file> via DuckDB
 // and streams results to a channel. Used when DuckDB just provides the source
-// data and FoldDB handles aggregation.
+// data and DBSPA handles aggregation.
 func duckDBScanToChannel(ctx context.Context, uri string, ch chan<- engine.Record) error {
 	duckExpr, err := source.TranslateToDuckDB(uri)
 	if err != nil {

@@ -16,7 +16,7 @@ func TestCSV_StdinBasic(t *testing.T) {
 	requireBuild(t)
 
 	input := "name,age,city\nalice,30,nyc\nbob,25,sf\ncharlie,35,nyc\n"
-	stdout, err := runFoldDBWithStdin(t,
+	stdout, err := runDBSPAWithStdin(t,
 		"SELECT name, city WHERE age::int > 27",
 		input,
 		"FORMAT", "CSV",
@@ -36,12 +36,12 @@ func TestCSV_StdinWithFormatClause(t *testing.T) {
 	requireBuild(t)
 
 	input := "name,age,city\nalice,30,nyc\nbob,25,sf\ncharlie,35,nyc\n"
-	stdout, err := runFoldDBWithStdin(t,
+	stdout, err := runDBSPAWithStdin(t,
 		"SELECT name, city FROM 'stdin://' FORMAT CSV WHERE age::int > 27",
 		input,
 	)
 	if err != nil {
-		t.Fatalf("folddb failed: %v", err)
+		t.Fatalf("dbspa failed: %v", err)
 	}
 
 	lines := outputLines(stdout)
@@ -73,12 +73,12 @@ func TestCSV_FromFile(t *testing.T) {
 		t.Fatalf("cannot read testdata: %v", err)
 	}
 
-	stdout, err2 := runFoldDBWithStdin(t,
+	stdout, err2 := runDBSPAWithStdin(t,
 		"SELECT order_id, status FROM 'stdin://' FORMAT CSV LIMIT 10",
 		string(data),
 	)
 	if err2 != nil {
-		t.Fatalf("folddb failed: %v", err2)
+		t.Fatalf("dbspa failed: %v", err2)
 	}
 
 	lines := outputLines(stdout)
@@ -107,12 +107,12 @@ func TestCSV_GroupByAggregation(t *testing.T) {
 	requireBuild(t)
 
 	input := "region,amount\nus-east,100\nus-west,200\nus-east,150\nus-west,50\nus-east,300\n"
-	stdout, err := runFoldDBWithStdin(t,
+	stdout, err := runDBSPAWithStdin(t,
 		"SELECT region, COUNT(*) AS cnt, SUM(amount::float) AS total FROM 'stdin://' FORMAT CSV GROUP BY region",
 		input,
 	)
 	if err != nil {
-		t.Fatalf("folddb failed: %v", err)
+		t.Fatalf("dbspa failed: %v", err)
 	}
 
 	lines := outputLines(stdout)

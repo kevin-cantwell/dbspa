@@ -41,7 +41,7 @@ type StressResult struct {
 
 // Config holds paths and parameters for the stress run.
 type Config struct {
-	FoldDBBin string
+	DBSPABin string
 	GenBin    string
 	Duration  time.Duration
 	TempDir   string
@@ -160,7 +160,7 @@ func schemaDrift(ctx context.Context, cfg *Config) (*StressResult, error) {
 	dlqFile := filepath.Join(cfg.TempDir, "schema_drift_dlq.ndjson")
 	defer os.Remove(dlqFile)
 
-	cmd := exec.Command(cfg.FoldDBBin, "query",
+	cmd := exec.Command(cfg.DBSPABin, "query",
 		"--dead-letter", dlqFile,
 		"SELECT region, SUM(amount) AS total GROUP BY region")
 	cmd.Stdin = bytes.NewReader(data)
@@ -261,7 +261,7 @@ func spillToDisk(ctx context.Context, cfg *Config) (*StressResult, error) {
 		"SELECT e.group_key, u.tier, COUNT(*) AS cnt FROM stdin e JOIN '%s' u ON e.group_key = u.id GROUP BY e.group_key, u.tier",
 		tableFile)
 
-	cmd := exec.Command(cfg.FoldDBBin, "query", "--max-memory", "128MB", sql)
+	cmd := exec.Command(cfg.DBSPABin, "query", "--max-memory", "128MB", sql)
 	cmd.Stdin = bytes.NewReader(streamData)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -334,7 +334,7 @@ func checkpointRecovery(ctx context.Context, cfg *Config) (*StressResult, error)
 	firstHalf := data[:half]
 	secondHalf := data[half:]
 
-	cmd1 := exec.Command(cfg.FoldDBBin, "query", "--stateful", "--state-dir", stateDir, sql)
+	cmd1 := exec.Command(cfg.DBSPABin, "query", "--stateful", "--state-dir", stateDir, sql)
 	cmd1.Stdin = bytes.NewReader(firstHalf)
 	var stdout1, stderr1 bytes.Buffer
 	cmd1.Stdout = &stdout1
@@ -350,7 +350,7 @@ func checkpointRecovery(ctx context.Context, cfg *Config) (*StressResult, error)
 	cmd1.Wait()
 
 	// Phase 2: feed second half with same state dir
-	cmd2 := exec.Command(cfg.FoldDBBin, "query", "--stateful", "--state-dir", stateDir, sql)
+	cmd2 := exec.Command(cfg.DBSPABin, "query", "--stateful", "--state-dir", stateDir, sql)
 	cmd2.Stdin = bytes.NewReader(secondHalf)
 	var stdout2, stderr2 bytes.Buffer
 	cmd2.Stdout = &stdout2
@@ -358,7 +358,7 @@ func checkpointRecovery(ctx context.Context, cfg *Config) (*StressResult, error)
 	cmd2.Run()
 
 	// Phase 3: feed all data in one shot for comparison
-	cmdFull := exec.Command(cfg.FoldDBBin, "query", sql)
+	cmdFull := exec.Command(cfg.DBSPABin, "query", sql)
 	cmdFull.Stdin = bytes.NewReader(data)
 	var stdoutFull bytes.Buffer
 	cmdFull.Stdout = &stdoutFull
@@ -416,7 +416,7 @@ func cpuProfile(ctx context.Context, cfg *Config) (*StressResult, error) {
 
 	profFile := filepath.Join(cfg.TempDir, "cpu.prof")
 
-	cmd := exec.Command(cfg.FoldDBBin, "query", "--cpuprofile", profFile,
+	cmd := exec.Command(cfg.DBSPABin, "query", "--cpuprofile", profFile,
 		"SELECT group_key, COUNT(*) AS cnt, SUM(value) AS total, AVG(price) AS avg_price GROUP BY group_key")
 	cmd.Stdin = bytes.NewReader(data)
 	var stdout, stderr bytes.Buffer
@@ -461,9 +461,9 @@ func cpuProfile(ctx context.Context, cfg *Config) (*StressResult, error) {
 // Helpers
 // ============================================================
 
-// runMonitored runs a folddb query with stdin data, monitors RSS, and calls validate on the result.
+// runMonitored runs a dbspa query with stdin data, monitors RSS, and calls validate on the result.
 func runMonitored(cfg *Config, data []byte, sql string, recordCount int, validate func(*StressResult)) (*StressResult, error) {
-	cmd := exec.Command(cfg.FoldDBBin, "query", sql)
+	cmd := exec.Command(cfg.DBSPABin, "query", sql)
 	cmd.Stdin = bytes.NewReader(data)
 
 	var stdout bytes.Buffer

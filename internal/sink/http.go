@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kevin-cantwell/folddb/internal/engine"
+	"github.com/kevin-cantwell/dbspa/internal/engine"
 )
 
 // HTTPSink maintains an in-memory result set and serves it via HTTP.

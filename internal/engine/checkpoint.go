@@ -34,7 +34,7 @@ func NewCheckpointManager(sql string, stateDir string, interval time.Duration) (
 		if err != nil {
 			return nil, fmt.Errorf("cannot determine home directory: %w", err)
 		}
-		stateDir = filepath.Join(home, ".folddb", "state", hash)
+		stateDir = filepath.Join(home, ".dbspa", "state", hash)
 	}
 
 	if err := os.MkdirAll(stateDir, 0755); err != nil {
@@ -149,7 +149,7 @@ func ListCheckpoints() ([]CheckpointInfo, error) {
 		return nil, err
 	}
 
-	stateRoot := filepath.Join(home, ".folddb", "state")
+	stateRoot := filepath.Join(home, ".dbspa", "state")
 	entries, err := os.ReadDir(stateRoot)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -188,7 +188,7 @@ func ResetCheckpoint(hash string) error {
 	if err != nil {
 		return err
 	}
-	dir := filepath.Join(home, ".folddb", "state", hash)
+	dir := filepath.Join(home, ".dbspa", "state", hash)
 	return os.RemoveAll(dir)
 }
 

@@ -1,7 +1,7 @@
 // +build ignore
 
 // bench_kafka_registry.go produces Confluent-wire-format Avro messages to Kafka
-// for benchmarking FoldDB's schema registry integration.
+// for benchmarking DBSPA's schema registry integration.
 package main
 
 import (
@@ -29,7 +29,7 @@ func main() {
 	topic := "bench-orders"
 	schemaID := int32(1)
 
-	schema := `{"type":"record","name":"Order","namespace":"folddb.bench","fields":[{"name":"order_id","type":"int"},{"name":"customer_id","type":"int"},{"name":"product","type":"string"},{"name":"quantity","type":"int"},{"name":"price","type":"double"},{"name":"total","type":"double"},{"name":"status","type":"string"},{"name":"region","type":"string"},{"name":"created_at","type":"string"}]}`
+	schema := `{"type":"record","name":"Order","namespace":"dbspa.bench","fields":[{"name":"order_id","type":"int"},{"name":"customer_id","type":"int"},{"name":"product","type":"string"},{"name":"quantity","type":"int"},{"name":"price","type":"double"},{"name":"total","type":"double"},{"name":"status","type":"string"},{"name":"region","type":"string"},{"name":"created_at","type":"string"}]}`
 
 	codec, err := goavro.NewCodec(schema)
 	if err != nil {

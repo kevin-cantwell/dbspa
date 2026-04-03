@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kevin-cantwell/folddb/internal/sql/ast"
+	"github.com/kevin-cantwell/dbspa/internal/sql/ast"
 )
 
 func TestDedupFilter(t *testing.T) {

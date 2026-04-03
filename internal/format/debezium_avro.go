@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kevin-cantwell/folddb/internal/engine"
+	"github.com/kevin-cantwell/dbspa/internal/engine"
 	"github.com/linkedin/goavro/v2"
 )
 

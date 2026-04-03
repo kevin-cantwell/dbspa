@@ -18,7 +18,7 @@ func TestCheckpoint_SaveAndRestore(t *testing.T) {
 	createTopic(t, topic, 1)
 
 	// Create a temp state directory
-	stateDir, err := os.MkdirTemp("", "folddb-ckpt-*")
+	stateDir, err := os.MkdirTemp("", "dbspa-ckpt-*")
 	if err != nil {
 		t.Fatalf("cannot create temp dir: %v", err)
 	}
@@ -35,7 +35,7 @@ func TestCheckpoint_SaveAndRestore(t *testing.T) {
 		"SELECT region, SUM(val::float) AS total FROM 'kafka://%s/%s?offset=earliest' GROUP BY region LIMIT 10",
 		kafkaBroker, topic,
 	)
-	stdout1, stderr1, err := runFoldDBWithTimeout(t, 15*time.Second, sql,
+	stdout1, stderr1, err := runDBSPAWithTimeout(t, 15*time.Second, sql,
 		"--stateful", "--state-dir", stateDir, "--checkpoint-interval", "1s",
 	)
 	t.Logf("run1 stdout:\n%s", stdout1)
@@ -58,7 +58,7 @@ func TestCheckpoint_SaveAndRestore(t *testing.T) {
 	time.Sleep(500 * time.Millisecond)
 
 	// Run 2: should resume from checkpoint
-	stdout2, stderr2, err := runFoldDBWithTimeout(t, 15*time.Second, sql,
+	stdout2, stderr2, err := runDBSPAWithTimeout(t, 15*time.Second, sql,
 		"--stateful", "--state-dir", stateDir, "--checkpoint-interval", "1s",
 	)
 	t.Logf("run2 stdout:\n%s", stdout2)
@@ -78,7 +78,7 @@ func TestCheckpoint_QueryFingerprintMismatch(t *testing.T) {
 	topic := uniqueTopic(t, "ckpt-mismatch")
 	createTopic(t, topic, 1)
 
-	stateDir, err := os.MkdirTemp("", "folddb-ckpt-mismatch-*")
+	stateDir, err := os.MkdirTemp("", "dbspa-ckpt-mismatch-*")
 	if err != nil {
 		t.Fatalf("cannot create temp dir: %v", err)
 	}
@@ -92,7 +92,7 @@ func TestCheckpoint_QueryFingerprintMismatch(t *testing.T) {
 		"SELECT x FROM 'kafka://%s/%s?offset=earliest' LIMIT 2",
 		kafkaBroker, topic,
 	)
-	runFoldDBWithTimeout(t, 15*time.Second, sql1,
+	runDBSPAWithTimeout(t, 15*time.Second, sql1,
 		"--stateful", "--state-dir", stateDir,
 	)
 
@@ -101,7 +101,7 @@ func TestCheckpoint_QueryFingerprintMismatch(t *testing.T) {
 		"SELECT x, x FROM 'kafka://%s/%s?offset=earliest' LIMIT 2",
 		kafkaBroker, topic,
 	)
-	_, stderr, _ := runFoldDBWithTimeout(t, 15*time.Second, sql2,
+	_, stderr, _ := runDBSPAWithTimeout(t, 15*time.Second, sql2,
 		"--stateful", "--state-dir", stateDir,
 	)
 
@@ -115,14 +115,14 @@ func TestCheckpoint_StateDirectory(t *testing.T) {
 	skipIfShort(t)
 	requireBuild(t)
 
-	stateDir, err := os.MkdirTemp("", "folddb-statedir-*")
+	stateDir, err := os.MkdirTemp("", "dbspa-statedir-*")
 	if err != nil {
 		t.Fatalf("cannot create temp dir: %v", err)
 	}
 	defer os.RemoveAll(stateDir)
 
-	// Run folddb state list pointing at the temp dir
-	stdout, stderr, err := runFoldDB(t, "state", "list")
+	// Run dbspa state list pointing at the temp dir
+	stdout, stderr, err := runDBSPA(t, "state", "list")
 	t.Logf("state list stdout: %s", stdout)
 	t.Logf("state list stderr: %s", stderr)
 
@@ -137,7 +137,7 @@ func TestCheckpoint_StateFileCreated(t *testing.T) {
 	requireBuild(t)
 
 	// Test that --stateful with stdin creates a checkpoint directory
-	stateDir, err := os.MkdirTemp("", "folddb-ckpt-stdin-*")
+	stateDir, err := os.MkdirTemp("", "dbspa-ckpt-stdin-*")
 	if err != nil {
 		t.Fatalf("cannot create temp dir: %v", err)
 	}
@@ -147,7 +147,7 @@ func TestCheckpoint_StateFileCreated(t *testing.T) {
 {"g":"a","v":2}
 {"g":"b","v":3}
 `
-	stdout, err2 := runFoldDBWithStdin(t,
+	stdout, err2 := runDBSPAWithStdin(t,
 		"SELECT g, SUM(v::float) AS total GROUP BY g",
 		input,
 		"--stateful", "--state-dir", stateDir,

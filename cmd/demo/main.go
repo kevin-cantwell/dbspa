@@ -1,4 +1,4 @@
-// Command demo runs an interactive browser demo for FoldDB.
+// Command demo runs an interactive browser demo for DBSPA.
 package main
 
 import (
@@ -27,18 +27,18 @@ var (
 )
 
 func main() {
-	// Build folddb binary if it doesn't exist
-	folddbPath := "/tmp/folddb"
-	if _, err := os.Stat(folddbPath); os.IsNotExist(err) {
-		log.Println("Building folddb binary...")
-		cmd := exec.Command("go", "build", "-o", folddbPath, "./cmd/folddb")
+	// Build dbspa binary if it doesn't exist
+	dbspaPath := "/tmp/dbspa"
+	if _, err := os.Stat(dbspaPath); os.IsNotExist(err) {
+		log.Println("Building dbspa binary...")
+		cmd := exec.Command("go", "build", "-o", dbspaPath, "./cmd/dbspa")
 		cmd.Dir = findModuleRoot()
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		if err := cmd.Run(); err != nil {
-			log.Fatalf("Failed to build folddb: %v", err)
+			log.Fatalf("Failed to build dbspa: %v", err)
 		}
-		log.Println("folddb binary built successfully")
+		log.Println("dbspa binary built successfully")
 	}
 
 	mux := http.NewServeMux()
@@ -125,16 +125,16 @@ func handleRun(w http.ResponseWriter, r *http.Request) {
 	// Stop any existing query
 	stopActive()
 
-	// Set up pipe: generator -> folddb stdin
+	// Set up pipe: generator -> dbspa stdin
 	pr, pw := io.Pipe()
 	done := make(chan struct{})
 
 	// Start generator
 	go gen.Run(pw, done)
 
-	// Build folddb command
-	folddbPath := "/tmp/folddb"
-	cmd := exec.Command(folddbPath, req.SQL)
+	// Build dbspa command
+	dbspaPath := "/tmp/dbspa"
+	cmd := exec.Command(dbspaPath, req.SQL)
 	cmd.Stdin = pr
 
 	stdout, err := cmd.StdoutPipe()
@@ -150,7 +150,7 @@ func handleRun(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := cmd.Start(); err != nil {
-		http.Error(w, "failed to start folddb: "+err.Error(), http.StatusInternalServerError)
+		http.Error(w, "failed to start dbspa: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -165,7 +165,7 @@ func handleRun(w http.ResponseWriter, r *http.Request) {
 	go func() {
 		scanner := bufio.NewScanner(stderr)
 		for scanner.Scan() {
-			log.Printf("[folddb stderr] %s", scanner.Text())
+			log.Printf("[dbspa stderr] %s", scanner.Text())
 		}
 	}()
 

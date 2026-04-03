@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kevin-cantwell/folddb/internal/sql/ast"
+	"github.com/kevin-cantwell/dbspa/internal/sql/ast"
 )
 
 // AggColumn describes one column in the SELECT list of an accumulating query.

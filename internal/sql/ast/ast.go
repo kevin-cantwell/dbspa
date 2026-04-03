@@ -1,4 +1,4 @@
-// Package ast defines the abstract syntax tree for FoldDB's SQL dialect.
+// Package ast defines the abstract syntax tree for DBSPA's SQL dialect.
 package ast
 
 // Node is the interface implemented by all AST nodes.
@@ -17,7 +17,7 @@ type ExecSource struct {
 	Command    string            // the shell command to execute
 	Format     string            // encoding: JSON, AVRO, CSV, PROTOBUF, PARQUET (empty = auto-detect)
 	FormatOpts map[string]string // encoding options: registry, delimiter, header, etc.
-	Changelog  string            // envelope: DEBEZIUM, FOLDDB, "" = none, "AUTO" = auto-detect
+	Changelog  string            // envelope: DEBEZIUM, DBSPA, "" = none, "AUTO" = auto-detect
 	Mode       string            // "TABLE" (default) or "STREAM"
 }
 
@@ -43,7 +43,7 @@ type SelectStatement struct {
 	FromAlias    string          // optional alias for the FROM source
 	Join         *JoinClause     // nil means no JOIN
 	Seed         *SeedClause     // nil means no SEED FROM
-	Changelog    string          // "", "AUTO" (bare CHANGELOG), "DEBEZIUM", "FOLDDB"
+	Changelog    string          // "", "AUTO" (bare CHANGELOG), "DEBEZIUM", "DBSPA"
 	Where       Expr          // nil means no WHERE
 	GroupBy     []Expr        // nil means non-accumulating
 	Having      Expr          // nil means no HAVING
@@ -90,7 +90,7 @@ type TableSource struct {
 	URI        string            // e.g., 'kafka://...' or 'stdin://'
 	Format     string            // encoding: JSON, AVRO, CSV, PROTOBUF, PARQUET (empty = auto-detect)
 	FormatOpts map[string]string // encoding options: registry, delimiter, header, etc.
-	Changelog  string            // envelope: DEBEZIUM, FOLDDB, "" = none, "AUTO" = auto-detect
+	Changelog  string            // envelope: DEBEZIUM, DBSPA, "" = none, "AUTO" = auto-detect
 }
 
 // CombinedFormat produces a single format string from encoding + changelog

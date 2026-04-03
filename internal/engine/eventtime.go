@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kevin-cantwell/folddb/internal/sql/ast"
+	"github.com/kevin-cantwell/dbspa/internal/sql/ast"
 )
 
 // ExtractEventTime extracts the event time from a record using the given expression.

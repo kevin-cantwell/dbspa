@@ -5,14 +5,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kevin-cantwell/folddb/internal/engine"
+	"github.com/kevin-cantwell/dbspa/internal/engine"
 	"github.com/linkedin/goavro/v2"
 )
 
 const testDebeziumAvroSchema = `{
 	"type": "record",
 	"name": "Envelope",
-	"namespace": "folddb.test",
+	"namespace": "dbspa.test",
 	"fields": [
 		{"name": "op", "type": "string"},
 		{"name": "before", "type": ["null", {
@@ -75,7 +75,7 @@ func TestDebeziumAvroCreate(t *testing.T) {
 		{
 			"op":             "c",
 			"before":         nil,
-			"after":          goavro.Union("folddb.test.Order", order),
+			"after":          goavro.Union("dbspa.test.Order", order),
 			"source_db":      "ecommerce",
 			"source_table":   "orders",
 			"source_ts_ms":   int64(1700000000000),
@@ -138,8 +138,8 @@ func TestDebeziumAvroUpdate(t *testing.T) {
 	buf := writeDebeziumAvroOCF(t, []map[string]any{
 		{
 			"op":             "u",
-			"before":         goavro.Union("folddb.test.Order", before),
-			"after":          goavro.Union("folddb.test.Order", after),
+			"before":         goavro.Union("dbspa.test.Order", before),
+			"after":          goavro.Union("dbspa.test.Order", after),
 			"source_db":      "ecommerce",
 			"source_table":   "orders",
 			"source_ts_ms":   int64(1700000001000),
@@ -185,7 +185,7 @@ func TestDebeziumAvroUpdateNullBefore(t *testing.T) {
 		{
 			"op":             "u",
 			"before":         nil,
-			"after":          goavro.Union("folddb.test.Order", after),
+			"after":          goavro.Union("dbspa.test.Order", after),
 			"source_db":      "ecommerce",
 			"source_table":   "orders",
 			"source_ts_ms":   int64(1700000001000),
@@ -217,7 +217,7 @@ func TestDebeziumAvroDelete(t *testing.T) {
 	buf := writeDebeziumAvroOCF(t, []map[string]any{
 		{
 			"op":             "d",
-			"before":         goavro.Union("folddb.test.Order", before),
+			"before":         goavro.Union("dbspa.test.Order", before),
 			"after":          nil,
 			"source_db":      "ecommerce",
 			"source_table":   "orders",
@@ -300,7 +300,7 @@ func TestDebeziumAvroVirtualColumns(t *testing.T) {
 		{
 			"op":             "c",
 			"before":         nil,
-			"after":          goavro.Union("folddb.test.Order", order),
+			"after":          goavro.Union("dbspa.test.Order", order),
 			"source_db":      "mydb",
 			"source_table":   "items",
 			"source_ts_ms":   int64(1700000000000),
@@ -369,7 +369,7 @@ func TestDebeziumAvroMixedOps(t *testing.T) {
 		{
 			"op":             "c",
 			"before":         nil,
-			"after":          goavro.Union("folddb.test.Order", order1),
+			"after":          goavro.Union("dbspa.test.Order", order1),
 			"source_db":      "ecommerce",
 			"source_table":   "orders",
 			"source_ts_ms":   int64(1000),
@@ -378,7 +378,7 @@ func TestDebeziumAvroMixedOps(t *testing.T) {
 		{
 			"op":             "c",
 			"before":         nil,
-			"after":          goavro.Union("folddb.test.Order", order2),
+			"after":          goavro.Union("dbspa.test.Order", order2),
 			"source_db":      "ecommerce",
 			"source_table":   "orders",
 			"source_ts_ms":   int64(2000),
@@ -386,8 +386,8 @@ func TestDebeziumAvroMixedOps(t *testing.T) {
 		// Update order 1
 		{
 			"op":             "u",
-			"before":         goavro.Union("folddb.test.Order", order1),
-			"after":          goavro.Union("folddb.test.Order", order1Updated),
+			"before":         goavro.Union("dbspa.test.Order", order1),
+			"after":          goavro.Union("dbspa.test.Order", order1Updated),
 			"source_db":      "ecommerce",
 			"source_table":   "orders",
 			"source_ts_ms":   int64(3000),
@@ -395,7 +395,7 @@ func TestDebeziumAvroMixedOps(t *testing.T) {
 		// Delete order 2
 		{
 			"op":             "d",
-			"before":         goavro.Union("folddb.test.Order", order2),
+			"before":         goavro.Union("dbspa.test.Order", order2),
 			"after":          nil,
 			"source_db":      "ecommerce",
 			"source_table":   "orders",

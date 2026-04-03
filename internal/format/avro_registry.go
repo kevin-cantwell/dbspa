@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/kevin-cantwell/folddb/internal/engine"
-	"github.com/kevin-cantwell/folddb/internal/registry"
+	"github.com/kevin-cantwell/dbspa/internal/engine"
+	"github.com/kevin-cantwell/dbspa/internal/registry"
 )
 
 // ConfluentAvroDecoder decodes Kafka messages encoded with the Confluent

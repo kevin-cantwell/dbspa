@@ -18,7 +18,7 @@ import (
 	"github.com/twmb/franz-go/pkg/kgo"
 )
 
-// QA Item 1: Kafka produce (Confluent Avro) -> consume with FoldDB -> verify against DuckDB
+// QA Item 1: Kafka produce (Confluent Avro) -> consume with DBSPA -> verify against DuckDB
 
 const orderAvroSchema = `{
   "type": "record",
@@ -173,27 +173,27 @@ func TestKafkaDuckDB_AvroAggregationMatch(t *testing.T) {
 	t.Log("produced all messages")
 	time.Sleep(1 * time.Second)
 
-	// Step 4: Consume with FoldDB
+	// Step 4: Consume with DBSPA
 	sql := fmt.Sprintf(
 		"SELECT status, COUNT(*) AS cnt, SUM(total) AS total_sum FROM 'kafka://%s/%s?offset=earliest&registry=http://localhost:8081' FORMAT AVRO GROUP BY status",
 		kafkaBroker, topic,
 	)
-	folddbStdout, folddbStderr, err := runFoldDBWithTimeout(t, 60*time.Second, sql, "--timeout", "15s")
+	dbspaStdout, dbspaStderr, err := runDBSPAWithTimeout(t, 60*time.Second, sql, "--timeout", "15s")
 	if err != nil {
-		t.Logf("folddb stderr: %s", folddbStderr)
+		t.Logf("dbspa stderr: %s", dbspaStderr)
 		// Timeout exit is expected for streaming queries
-		if !strings.Contains(err.Error(), "signal") && !strings.Contains(err.Error(), "exit status") && folddbStdout == "" {
-			t.Fatalf("folddb failed with no output: %v", err)
+		if !strings.Contains(err.Error(), "signal") && !strings.Contains(err.Error(), "exit status") && dbspaStdout == "" {
+			t.Fatalf("dbspa failed with no output: %v", err)
 		}
 	}
-	t.Logf("folddb stdout (%d bytes)", len(folddbStdout))
+	t.Logf("dbspa stdout (%d bytes)", len(dbspaStdout))
 
-	// Parse FoldDB results: last emission per status (streaming changelog)
-	folddbResults := parseFoldDBGroupByResults(t, folddbStdout)
-	if len(folddbResults) == 0 {
-		t.Fatalf("folddb produced no output\nstderr: %s", folddbStderr)
+	// Parse DBSPA results: last emission per status (streaming changelog)
+	dbspaResults := parseDBSPAGroupByResults(t, dbspaStdout)
+	if len(dbspaResults) == 0 {
+		t.Fatalf("dbspa produced no output\nstderr: %s", dbspaStderr)
 	}
-	t.Logf("folddb results: %v", folddbResults)
+	t.Logf("dbspa results: %v", dbspaResults)
 
 	// Step 5: Compute expected results with DuckDB
 	ndjsonFile := writeOrdersNDJSON(t, orders)
@@ -203,7 +203,7 @@ func TestKafkaDuckDB_AvroAggregationMatch(t *testing.T) {
 	t.Logf("duckdb results: %v", duckdbResults)
 
 	// Step 6: Compare results
-	compareAggResults(t, folddbResults, duckdbResults)
+	compareAggResults(t, dbspaResults, duckdbResults)
 }
 
 type aggResult struct {
@@ -212,9 +212,9 @@ type aggResult struct {
 	Total  float64
 }
 
-// parseFoldDBGroupByResults parses the streaming NDJSON output of a GROUP BY query.
+// parseDBSPAGroupByResults parses the streaming NDJSON output of a GROUP BY query.
 // For a changelog stream, the last record per group key represents the final state.
-func parseFoldDBGroupByResults(t *testing.T, stdout string) []aggResult {
+func parseDBSPAGroupByResults(t *testing.T, stdout string) []aggResult {
 	t.Helper()
 	lines := outputLines(stdout)
 	// Keep last emission per status
@@ -317,20 +317,20 @@ func runDuckDBAggregation(t *testing.T, ndjsonFile string) []aggResult {
 	return results
 }
 
-func compareAggResults(t *testing.T, folddb, duckdb []aggResult) {
+func compareAggResults(t *testing.T, dbspa, duckdb []aggResult) {
 	t.Helper()
-	if len(folddb) != len(duckdb) {
-		t.Fatalf("result count mismatch: folddb=%d duckdb=%d\nfolddb: %v\nduckdb: %v",
-			len(folddb), len(duckdb), folddb, duckdb)
+	if len(dbspa) != len(duckdb) {
+		t.Fatalf("result count mismatch: dbspa=%d duckdb=%d\ndbspa: %v\nduckdb: %v",
+			len(dbspa), len(duckdb), dbspa, duckdb)
 	}
-	for i := range folddb {
-		f := folddb[i]
+	for i := range dbspa {
+		f := dbspa[i]
 		d := duckdb[i]
 		if f.Status != d.Status {
-			t.Errorf("row %d status mismatch: folddb=%q duckdb=%q", i, f.Status, d.Status)
+			t.Errorf("row %d status mismatch: dbspa=%q duckdb=%q", i, f.Status, d.Status)
 		}
 		if f.Count != d.Count {
-			t.Errorf("row %d (%s) count mismatch: folddb=%d duckdb=%d", i, f.Status, f.Count, d.Count)
+			t.Errorf("row %d (%s) count mismatch: dbspa=%d duckdb=%d", i, f.Status, f.Count, d.Count)
 		}
 		// Compare totals with tolerance for floating point
 		diff := f.Total - d.Total
@@ -338,7 +338,7 @@ func compareAggResults(t *testing.T, folddb, duckdb []aggResult) {
 			diff = -diff
 		}
 		if diff > 0.01 {
-			t.Errorf("row %d (%s) total mismatch: folddb=%.2f duckdb=%.2f (diff=%.4f)",
+			t.Errorf("row %d (%s) total mismatch: dbspa=%.2f duckdb=%.2f (diff=%.4f)",
 				i, f.Status, f.Total, d.Total, diff)
 		}
 	}

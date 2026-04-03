@@ -1,4 +1,4 @@
-# FoldDB v0 Comprehensive Test Plan
+# DBSPA v0 Comprehensive Test Plan
 
 **Date:** 2026-03-28
 **Status:** Draft
@@ -34,13 +34,13 @@
 
 ### TC-PARSER-001: Basic SELECT with WHERE
 ```
-Input:  echo '{"name":"alice","age":30}' | folddb "SELECT name WHERE age > 25"
+Input:  echo '{"name":"alice","age":30}' | dbspa "SELECT name WHERE age > 25"
 Expected: {"name":"alice"}
 ```
 
 ### TC-PARSER-002: Missing closing quote in source URI
 ```
-Input:  folddb "SELECT * FROM 'kafka://broker/topic"
+Input:  dbspa "SELECT * FROM 'kafka://broker/topic"
 Expected: Parse error with caret pointing to unclosed quote:
   SELECT * FROM 'kafka://broker/topic
                 ^
@@ -49,219 +49,219 @@ Expected: Parse error with caret pointing to unclosed quote:
 
 ### TC-PARSER-003: Misspelled keyword (GRUP BY)
 ```
-Input:  folddb "SELECT region, COUNT(*) FROM 'kafka://b/t' GRUP BY region"
+Input:  dbspa "SELECT region, COUNT(*) FROM 'kafka://b/t' GRUP BY region"
 Expected: Error: unexpected token 'GRUP' at position XX
          Did you mean: GROUP BY?
 ```
 
 ### TC-PARSER-004: SELECT with all arithmetic operators
 ```
-Input:  echo '{"a":10,"b":3}' | folddb "SELECT a + b, a - b, a * b, a / b, a % b"
+Input:  echo '{"a":10,"b":3}' | dbspa "SELECT a + b, a - b, a * b, a / b, a % b"
 Expected: {"a + b":13,"a - b":7,"a * b":30,"a / b":3.333...,"a % b":1}
 ```
 
 ### TC-PARSER-005: Operator precedence (multiplication before addition)
 ```
-Input:  echo '{"a":2,"b":3,"c":4}' | folddb "SELECT a + b * c"
+Input:  echo '{"a":2,"b":3,"c":4}' | dbspa "SELECT a + b * c"
 Expected: {"a + b * c":14}  (not 20)
 ```
 
 ### TC-PARSER-006: Parenthesized expression overrides precedence
 ```
-Input:  echo '{"a":2,"b":3,"c":4}' | folddb "SELECT (a + b) * c"
+Input:  echo '{"a":2,"b":3,"c":4}' | dbspa "SELECT (a + b) * c"
 Expected: {"(a + b) * c":20}
 ```
 
 ### TC-PARSER-007: JSON arrow operator chaining
 ```
-Input:  echo '{"payload":{"user":{"email":"a@b.com"}}}' | folddb "SELECT payload->'user'->>'email' AS email"
+Input:  echo '{"payload":{"user":{"email":"a@b.com"}}}' | dbspa "SELECT payload->'user'->>'email' AS email"
 Expected: {"email":"a@b.com"}
 ```
 
 ### TC-PARSER-008: JSON array index access
 ```
-Input:  echo '{"items":[10,20,30]}' | folddb "SELECT items->0 AS first, items->2 AS last"
+Input:  echo '{"items":[10,20,30]}' | dbspa "SELECT items->0 AS first, items->2 AS last"
 Expected: {"first":10,"last":30}
 ```
 
 ### TC-PARSER-009: Type cast with :: syntax
 ```
-Input:  echo '{"val":"42"}' | folddb "SELECT val::int AS num"
+Input:  echo '{"val":"42"}' | dbspa "SELECT val::int AS num"
 Expected: {"num":42}
 ```
 
 ### TC-PARSER-010: CAST() function syntax
 ```
-Input:  echo '{"val":"42"}' | folddb "SELECT CAST(val AS INT) AS num"
+Input:  echo '{"val":"42"}' | dbspa "SELECT CAST(val AS INT) AS num"
 Expected: {"num":42}
 ```
 
 ### TC-PARSER-011: SELECT DISTINCT
 ```
-Input:  printf '{"x":1}\n{"x":2}\n{"x":1}\n' | folddb "SELECT DISTINCT x"
+Input:  printf '{"x":1}\n{"x":2}\n{"x":1}\n' | dbspa "SELECT DISTINCT x"
 Expected: Two output lines: {"x":1} and {"x":2} (order may vary)
 ```
 
 ### TC-PARSER-012: HAVING clause
 ```
-Input:  printf '{"g":"a","v":1}\n{"g":"a","v":2}\n{"g":"b","v":1}\n' | folddb "SELECT g, COUNT(*) AS cnt GROUP BY g HAVING cnt > 1"
+Input:  printf '{"g":"a","v":1}\n{"g":"a","v":2}\n{"g":"b","v":1}\n' | dbspa "SELECT g, COUNT(*) AS cnt GROUP BY g HAVING cnt > 1"
 Expected: Only group "a" with cnt=2 appears
 ```
 
 ### TC-PARSER-013: ORDER BY rejected on non-accumulating streaming query
 ```
-Input:  printf '{"x":3}\n{"x":1}\n{"x":2}\n' | folddb "SELECT x ORDER BY x DESC"
+Input:  printf '{"x":3}\n{"x":1}\n{"x":2}\n' | dbspa "SELECT x ORDER BY x DESC"
 Expected: Parse error: "Error: ORDER BY is not supported on non-accumulating streaming queries. Add a GROUP BY clause or use LIMIT to make the query bounded."
 Note:   Per Section 3.1, ORDER BY requires the query to be accumulating (GROUP BY) or bounded (LIMIT).
 ```
 
 ### TC-PARSER-014: LIMIT clause
 ```
-Input:  Generate 100 JSON lines | folddb "SELECT x LIMIT 5"
+Input:  Generate 100 JSON lines | dbspa "SELECT x LIMIT 5"
 Expected: Exactly 5 output lines, process terminates
 ```
 
 ### TC-PARSER-015: Column alias with AS
 ```
-Input:  echo '{"name":"alice"}' | folddb "SELECT name AS username"
+Input:  echo '{"name":"alice"}' | dbspa "SELECT name AS username"
 Expected: {"username":"alice"}
 ```
 
 ### TC-PARSER-016: IN operator with literal list
 ```
-Input:  printf '{"s":"a"}\n{"s":"b"}\n{"s":"c"}\n' | folddb "SELECT s WHERE s IN ('a','c')"
+Input:  printf '{"s":"a"}\n{"s":"b"}\n{"s":"c"}\n' | dbspa "SELECT s WHERE s IN ('a','c')"
 Expected: Two lines: {"s":"a"} and {"s":"c"}
 ```
 
 ### TC-PARSER-017: BETWEEN operator
 ```
-Input:  printf '{"x":1}\n{"x":5}\n{"x":10}\n' | folddb "SELECT x WHERE x BETWEEN 3 AND 8"
+Input:  printf '{"x":1}\n{"x":5}\n{"x":10}\n' | dbspa "SELECT x WHERE x BETWEEN 3 AND 8"
 Expected: {"x":5}
 ```
 
 ### TC-PARSER-018: IS NULL and IS NOT NULL
 ```
-Input:  printf '{"x":1}\n{"x":null}\n' | folddb "SELECT x WHERE x IS NOT NULL"
+Input:  printf '{"x":1}\n{"x":null}\n' | dbspa "SELECT x WHERE x IS NOT NULL"
 Expected: {"x":1}
 ```
 
 ### TC-PARSER-019: IS DISTINCT FROM (NULL-safe comparison)
 ```
-Input:  printf '{"a":null,"b":null}\n{"a":1,"b":null}\n' | folddb "SELECT a, b WHERE a IS NOT DISTINCT FROM b"
+Input:  printf '{"a":null,"b":null}\n{"a":1,"b":null}\n' | dbspa "SELECT a, b WHERE a IS NOT DISTINCT FROM b"
 Expected: First row only (NULL IS NOT DISTINCT FROM NULL is true)
 ```
 
 ### TC-PARSER-020: String concatenation with ||
 ```
-Input:  echo '{"first":"Alice","last":"Smith"}' | folddb "SELECT first || ' ' || last AS full_name"
+Input:  echo '{"first":"Alice","last":"Smith"}' | dbspa "SELECT first || ' ' || last AS full_name"
 Expected: {"full_name":"Alice Smith"}
 ```
 
 ### TC-PARSER-021: LIKE pattern matching
 ```
-Input:  printf '{"n":"alice"}\n{"n":"bob"}\n{"n":"alicia"}\n' | folddb "SELECT n WHERE n LIKE 'ali%'"
+Input:  printf '{"n":"alice"}\n{"n":"bob"}\n{"n":"alicia"}\n' | dbspa "SELECT n WHERE n LIKE 'ali%'"
 Expected: {"n":"alice"} and {"n":"alicia"}
 ```
 
 ### TC-PARSER-022: ILIKE case-insensitive pattern
 ```
-Input:  printf '{"n":"Alice"}\n{"n":"BOB"}\n' | folddb "SELECT n WHERE n ILIKE 'alice'"
+Input:  printf '{"n":"Alice"}\n{"n":"BOB"}\n' | dbspa "SELECT n WHERE n ILIKE 'alice'"
 Expected: {"n":"Alice"}
 ```
 
 ### TC-PARSER-023: CASE WHEN expression
 ```
-Input:  echo '{"x":5}' | folddb "SELECT CASE WHEN x > 3 THEN 'big' ELSE 'small' END AS label"
+Input:  echo '{"x":5}' | dbspa "SELECT CASE WHEN x > 3 THEN 'big' ELSE 'small' END AS label"
 Expected: {"label":"big"}
 ```
 
 ### TC-PARSER-024: Nested CASE WHEN
 ```
-Input:  echo '{"x":5}' | folddb "SELECT CASE WHEN x > 10 THEN 'huge' WHEN x > 3 THEN 'big' ELSE 'small' END AS label"
+Input:  echo '{"x":5}' | dbspa "SELECT CASE WHEN x > 10 THEN 'huge' WHEN x > 3 THEN 'big' ELSE 'small' END AS label"
 Expected: {"label":"big"}
 ```
 
 ### TC-PARSER-025: Multiple aggregates in one SELECT
 ```
-Input:  printf '{"v":1}\n{"v":2}\n{"v":3}\n' | folddb "SELECT COUNT(*) AS c, SUM(v) AS s, AVG(v) AS a GROUP BY 1"
+Input:  printf '{"v":1}\n{"v":2}\n{"v":3}\n' | dbspa "SELECT COUNT(*) AS c, SUM(v) AS s, AVG(v) AS a GROUP BY 1"
 Expected: c=3, s=6, a=2.0 (or equivalent grouping)
 ```
 
 ### TC-PARSER-026: FROM clause with Kafka URI and FORMAT DEBEZIUM
 ```
-Input:  folddb --dry-run "SELECT _op FROM 'kafka://localhost:9092/test.cdc' FORMAT DEBEZIUM"
+Input:  dbspa --dry-run "SELECT _op FROM 'kafka://localhost:9092/test.cdc' FORMAT DEBEZIUM"
 Expected: Dry-run output shows Kafka source with Debezium format, no parse error
 ```
 
 ### TC-PARSER-027: WINDOW TUMBLING clause
 ```
-Input:  folddb --dry-run "SELECT window_start, COUNT(*) FROM 'kafka://b/t' GROUP BY 1 WINDOW TUMBLING '1 minute'"
+Input:  dbspa --dry-run "SELECT window_start, COUNT(*) FROM 'kafka://b/t' GROUP BY 1 WINDOW TUMBLING '1 minute'"
 Expected: Dry-run shows tumbling window with 1 minute duration
 ```
 
 ### TC-PARSER-028: WINDOW SLIDING clause
 ```
-Input:  folddb --dry-run "SELECT window_start, COUNT(*) FROM 'kafka://b/t' GROUP BY 1 WINDOW SLIDING '10 minutes' BY '5 minutes'"
+Input:  dbspa --dry-run "SELECT window_start, COUNT(*) FROM 'kafka://b/t' GROUP BY 1 WINDOW SLIDING '10 minutes' BY '5 minutes'"
 Expected: Dry-run shows sliding window with 10m size and 5m slide
 ```
 
 ### TC-PARSER-029: DEDUPLICATE BY clause
 ```
-Input:  folddb --dry-run "SELECT * FROM 'kafka://b/t' DEDUPLICATE BY order_id WITHIN 10 MINUTES"
+Input:  dbspa --dry-run "SELECT * FROM 'kafka://b/t' DEDUPLICATE BY order_id WITHIN 10 MINUTES"
 Expected: Dry-run shows dedup filter with 10 minute window
 ```
 
 ### TC-PARSER-030: Empty SQL string
 ```
-Input:  folddb ""
+Input:  dbspa ""
 Expected: Parse error: empty query
 ```
 
 ### TC-PARSER-031: SQL with only whitespace
 ```
-Input:  folddb "   "
+Input:  dbspa "   "
 Expected: Parse error: empty query
 ```
 
 ### TC-PARSER-032: Unclosed parenthesis
 ```
-Input:  folddb "SELECT COUNT(* FROM 'kafka://b/t'"
+Input:  dbspa "SELECT COUNT(* FROM 'kafka://b/t'"
 Expected: Parse error with caret at position of missing closing paren
 ```
 
 ### TC-PARSER-033: Reserved keyword used as alias without quoting
 ```
-Input:  echo '{"x":1}' | folddb "SELECT x AS select"
+Input:  echo '{"x":1}' | dbspa "SELECT x AS select"
 Expected: Parse error indicating 'select' is a reserved keyword. Suggest: "select"
 ```
 
 ### TC-PARSER-034: Quoted identifier as alias
 ```
-Input:  echo '{"x":1}' | folddb 'SELECT x AS "select"'
+Input:  echo '{"x":1}' | dbspa 'SELECT x AS "select"'
 Expected: {"select":1}
 ```
 
 ### TC-PARSER-035: EMIT clause parsing
 ```
-Input:  folddb --dry-run "SELECT COUNT(*) FROM 'kafka://b/t' GROUP BY 1 WINDOW TUMBLING '1 minute' EMIT EARLY '10 seconds'"
+Input:  dbspa --dry-run "SELECT COUNT(*) FROM 'kafka://b/t' GROUP BY 1 WINDOW TUMBLING '1 minute' EMIT EARLY '10 seconds'"
 Expected: Dry-run shows EMIT EARLY with 10 second interval
 ```
 
 ### TC-PARSER-036: EVENT TIME BY and WATERMARK parsing
 ```
-Input:  folddb --dry-run "SELECT COUNT(*) FROM 'kafka://b/t' GROUP BY 1 WINDOW TUMBLING '1 minute' EVENT TIME BY ts WATERMARK '30 seconds'"
+Input:  dbspa --dry-run "SELECT COUNT(*) FROM 'kafka://b/t' GROUP BY 1 WINDOW TUMBLING '1 minute' EVENT TIME BY ts WATERMARK '30 seconds'"
 Expected: Dry-run shows event time column and watermark duration
 ```
 
 ### TC-PARSER-037: Multiple WHERE conditions with AND/OR precedence
 ```
-Input:  echo '{"a":1,"b":2,"c":3}' | folddb "SELECT a WHERE a = 1 OR b = 5 AND c = 3"
+Input:  echo '{"a":1,"b":2,"c":3}' | dbspa "SELECT a WHERE a = 1 OR b = 5 AND c = 3"
 Expected: {"a":1} -- AND binds tighter, so (b=5 AND c=3) is false, but a=1 is true
 ```
 
 ### TC-PARSER-038: NOT operator precedence
 ```
-Input:  echo '{"x":true,"y":false}' | folddb "SELECT x WHERE NOT x AND y"
+Input:  echo '{"x":true,"y":false}' | dbspa "SELECT x WHERE NOT x AND y"
 Expected: No output (NOT binds to x only, so NOT true AND false = false)
 ```
 
@@ -271,155 +271,155 @@ Expected: No output (NOT binds to x only, so NOT true AND false = false)
 
 ### TC-TYPE-001: Implicit int-to-float coercion in arithmetic
 ```
-Input:  echo '{"a":5,"b":2.0}' | folddb "SELECT a / b AS result"
+Input:  echo '{"a":5,"b":2.0}' | dbspa "SELECT a / b AS result"
 Expected: {"result":2.5} (not integer division)
 ```
 
 ### TC-TYPE-002: Explicit cast string to int
 ```
-Input:  echo '{"x":"not_a_number"}' | folddb "SELECT x::int"
+Input:  echo '{"x":"not_a_number"}' | dbspa "SELECT x::int"
 Expected: Runtime error or NULL depending on strictness. Error message should reference the value.
 ```
 
 ### TC-TYPE-003: NULL arithmetic propagation
 ```
-Input:  echo '{"a":5,"b":null}' | folddb "SELECT a + b AS result"
+Input:  echo '{"a":5,"b":null}' | dbspa "SELECT a + b AS result"
 Expected: {"result":null}
 ```
 
 ### TC-TYPE-004: NULL comparison propagation
 ```
-Input:  echo '{"a":null}' | folddb "SELECT a WHERE a = null"
+Input:  echo '{"a":null}' | dbspa "SELECT a WHERE a = null"
 Expected: No output (NULL = NULL is NULL, not true. Should use IS NULL.)
 ```
 
 ### TC-TYPE-005: NULL in boolean logic (AND short-circuit)
 ```
-Input:  echo '{"a":null,"b":true}' | folddb "SELECT a WHERE a AND b"
+Input:  echo '{"a":null,"b":true}' | dbspa "SELECT a WHERE a AND b"
 Expected: No output (NULL AND TRUE is NULL)
 ```
 
 ### TC-TYPE-006: NULL in boolean logic (OR short-circuit)
 ```
-Input:  echo '{"a":null,"b":true}' | folddb "SELECT b WHERE a OR b"
+Input:  echo '{"a":null,"b":true}' | dbspa "SELECT b WHERE a OR b"
 Expected: {"b":true} (NULL OR TRUE is TRUE)
 ```
 
 ### TC-TYPE-007: COALESCE with NULL chain
 ```
-Input:  echo '{"a":null,"b":null,"c":42}' | folddb "SELECT COALESCE(a, b, c) AS result"
+Input:  echo '{"a":null,"b":null,"c":42}' | dbspa "SELECT COALESCE(a, b, c) AS result"
 Expected: {"result":42}
 ```
 
 ### TC-TYPE-008: NULLIF producing NULL
 ```
-Input:  echo '{"a":5,"b":5}' | folddb "SELECT NULLIF(a, b) AS result"
+Input:  echo '{"a":5,"b":5}' | dbspa "SELECT NULLIF(a, b) AS result"
 Expected: {"result":null}
 ```
 
 ### TC-TYPE-009: Integer overflow behavior
 ```
-Input:  echo '{"x":9223372036854775807}' | folddb "SELECT x + 1 AS result"
+Input:  echo '{"x":9223372036854775807}' | dbspa "SELECT x + 1 AS result"
 Expected: Either overflow error or wrap-around with warning. Must not silently produce wrong answer.
 ```
 
 ### TC-TYPE-010: Float precision edge case
 ```
-Input:  echo '{"x":0.1,"y":0.2}' | folddb "SELECT x + y AS result"
+Input:  echo '{"x":0.1,"y":0.2}' | dbspa "SELECT x + y AS result"
 Expected: {"result":0.30000000000000004} or similar IEEE 754 result (not exactly 0.3)
 ```
 
 ### TC-TYPE-011: JSON field access on non-JSON column
 ```
-Input:  echo '{"x":"hello"}' | folddb "SELECT x->'key'"
+Input:  echo '{"x":"hello"}' | dbspa "SELECT x->'key'"
 Expected: Runtime error: cannot use -> operator on TEXT value
 ```
 
 ### TC-TYPE-012: JSON ->> returns TEXT type
 ```
-Input:  echo '{"obj":{"num":42}}' | folddb "SELECT obj->>'num' AS val"
+Input:  echo '{"obj":{"num":42}}' | dbspa "SELECT obj->>'num' AS val"
 Expected: {"val":"42"} (text, not integer)
 ```
 
 ### TC-TYPE-013: Boolean to integer coercion should fail or warn
 ```
-Input:  echo '{"x":true}' | folddb "SELECT x + 1"
+Input:  echo '{"x":true}' | dbspa "SELECT x + 1"
 Expected: Type error: cannot add BOOLEAN and INT
 ```
 
 ### TC-TYPE-014: Timestamp parsing from string
 ```
-Input:  echo '{"ts":"2026-03-28T14:30:00Z"}' | folddb "SELECT PARSE_TIMESTAMP(ts, 'RFC3339') AS t"
+Input:  echo '{"ts":"2026-03-28T14:30:00Z"}' | dbspa "SELECT PARSE_TIMESTAMP(ts, 'RFC3339') AS t"
 Expected: Correctly parsed timestamp value
 ```
 
 ### TC-TYPE-015: Division by zero
 ```
-Input (integer):  echo '{"a":10,"b":0}' | folddb "SELECT a / b AS result"
+Input (integer):  echo '{"a":10,"b":0}' | dbspa "SELECT a / b AS result"
 Expected: {"result":null} with warning logged: "integer division by zero, returning NULL"
 
-Input (float):    echo '{"a":10.0,"b":0.0}' | folddb "SELECT a / b AS result"
+Input (float):    echo '{"a":10.0,"b":0.0}' | dbspa "SELECT a / b AS result"
 Expected: {"result":Infinity} (IEEE 754: positive / +0.0 = +Inf)
 
-Input (float):    echo '{"a":-10.0,"b":0.0}' | folddb "SELECT a / b AS result"
+Input (float):    echo '{"a":-10.0,"b":0.0}' | dbspa "SELECT a / b AS result"
 Expected: {"result":-Infinity} (IEEE 754: negative / +0.0 = -Inf)
 
-Input (float):    echo '{"a":0.0,"b":0.0}' | folddb "SELECT a / b AS result"
+Input (float):    echo '{"a":0.0,"b":0.0}' | dbspa "SELECT a / b AS result"
 Expected: {"result":NaN} (IEEE 754: 0.0 / 0.0 = NaN)
 ```
 
 ### TC-TYPE-016: NULL IN (1, 2, NULL) returns NULL
 ```
-Input:  echo '{"x":null}' | folddb "SELECT x IN (1, 2, NULL) AS result"
+Input:  echo '{"x":null}' | dbspa "SELECT x IN (1, 2, NULL) AS result"
 Expected: {"result":null} (NULL compared to anything is NULL; IN with any NULL element and no match returns NULL)
 ```
 
 ### TC-TYPE-017: NULL BETWEEN 1 AND 10 returns NULL
 ```
-Input:  echo '{"x":null}' | folddb "SELECT x BETWEEN 1 AND 10 AS result"
+Input:  echo '{"x":null}' | dbspa "SELECT x BETWEEN 1 AND 10 AS result"
 Expected: {"result":null} (NULL propagates through BETWEEN comparisons)
 ```
 
 ### TC-TYPE-018: NULL->'key' returns NULL (JSON access on NULL)
 ```
-Input:  echo '{"x":null}' | folddb "SELECT x->'key' AS result"
+Input:  echo '{"x":null}' | dbspa "SELECT x->'key' AS result"
 Expected: {"result":null} (JSON arrow on NULL base returns NULL, not an error)
 ```
 
 ### TC-TYPE-019: col->>'key' where JSON value is `null` returns SQL NULL
 ```
-Input:  echo '{"obj":{"key":null}}' | folddb "SELECT obj->>'key' AS result"
+Input:  echo '{"obj":{"key":null}}' | dbspa "SELECT obj->>'key' AS result"
 Expected: {"result":null} (SQL NULL, not the string "null")
 ```
 
 ### TC-TYPE-020: NULL::int returns NULL
 ```
-Input:  echo '{"x":null}' | folddb "SELECT x::int AS result"
+Input:  echo '{"x":null}' | dbspa "SELECT x::int AS result"
 Expected: {"result":null} (casting NULL to any type yields NULL)
 ```
 
 ### TC-TYPE-021: ''::int is a type error (empty string is not NULL)
 ```
-Input:  echo '{"x":""}' | folddb "SELECT x::int AS result"
+Input:  echo '{"x":""}' | dbspa "SELECT x::int AS result"
 Expected: Runtime error: cannot cast empty string to INT (empty string is not NULL)
 ```
 
 ### TC-TYPE-022: || concat with non-TEXT operand (implicit cast to TEXT)
 ```
-Input:  echo '{"name":"alice","age":30}' | folddb "SELECT name || ' is ' || age AS result"
+Input:  echo '{"name":"alice","age":30}' | dbspa "SELECT name || ' is ' || age AS result"
 Expected: {"result":"alice is 30"} (age is implicitly cast to TEXT for concatenation)
 ```
 
 ### TC-TYPE-023: JSON ->> result used in arithmetic without cast is an error
 ```
-Input:  echo '{"obj":{"num":42}}' | folddb "SELECT obj->>'num' + 1 AS result"
+Input:  echo '{"obj":{"num":42}}' | dbspa "SELECT obj->>'num' + 1 AS result"
 Expected: Type error: cannot add TEXT and INT. Use (obj->>'num')::int + 1.
 Note:   ->> always returns TEXT; arithmetic requires explicit cast.
 ```
 
 ### TC-TYPE-024: TIMESTAMP compared to TEXT string (ISO 8601 parsing)
 ```
-Input:  echo '{"ts":"2026-03-28T14:30:00Z"}' | folddb "SELECT ts WHERE ts > '2026-03-28T00:00:00Z'"
+Input:  echo '{"ts":"2026-03-28T14:30:00Z"}' | dbspa "SELECT ts WHERE ts > '2026-03-28T00:00:00Z'"
 Expected: Row is returned. TEXT values in ISO 8601 format are implicitly parsed as TIMESTAMP for comparison.
 ```
 
@@ -429,14 +429,14 @@ Expected: Row is returned. TEXT values in ISO 8601 format are implicitly parsed 
 
 ### TC-ACC-001: COUNT(*) with inserts only
 ```
-Input:  printf '{"g":"a"}\n{"g":"a"}\n{"g":"b"}\n' | folddb "SELECT g, COUNT(*) AS c GROUP BY g"
+Input:  printf '{"g":"a"}\n{"g":"a"}\n{"g":"b"}\n' | dbspa "SELECT g, COUNT(*) AS c GROUP BY g"
 Expected: Final state: g=a c=2, g=b c=1
 ```
 
 ### TC-ACC-002: COUNT(*) with insert then retract (Debezium update)
 ```
 Setup:  Debezium stream: INSERT g=a, then UPDATE g=a->g=b
-Input:  folddb "SELECT _after->>'g' AS g, COUNT(*) AS c FROM 'kafka://b/t' FORMAT DEBEZIUM GROUP BY g"
+Input:  dbspa "SELECT _after->>'g' AS g, COUNT(*) AS c FROM 'kafka://b/t' FORMAT DEBEZIUM GROUP BY g"
 Expected: After insert: g=a c=1. After update: g=a c=0 (retracted), g=b c=1.
 Note:   When count reaches zero, the key should be removed (no row emitted for g=a).
 ```
@@ -449,7 +449,7 @@ Expected: SUM goes 10 -> 30 -> 20
 
 ### TC-ACC-004: SUM with NULL values
 ```
-Input:  printf '{"g":"a","v":10}\n{"g":"a","v":null}\n{"g":"a","v":5}\n' | folddb "SELECT g, SUM(v) AS s GROUP BY g"
+Input:  printf '{"g":"a","v":10}\n{"g":"a","v":null}\n{"g":"a","v":5}\n' | dbspa "SELECT g, SUM(v) AS s GROUP BY g"
 Expected: s=15 (NULL values are ignored in SUM, per SQL standard)
 ```
 
@@ -461,7 +461,7 @@ Expected: AVG goes 10.0 -> 15.0 -> 20.0
 
 ### TC-ACC-006: AVG with all NULLs
 ```
-Input:  printf '{"g":"a","v":null}\n{"g":"a","v":null}\n' | folddb "SELECT g, AVG(v) AS a GROUP BY g"
+Input:  printf '{"g":"a","v":null}\n{"g":"a","v":null}\n' | dbspa "SELECT g, AVG(v) AS a GROUP BY g"
 Expected: a=null (AVG of no non-NULL values is NULL)
 ```
 
@@ -529,13 +529,13 @@ Expected: Overflow error or warning. Must not silently wrap.
 
 ### TC-ACC-017: COUNT(*) with zero rows matching GROUP BY
 ```
-Input:  printf '{"g":"a","v":1}\n' | folddb "SELECT g, COUNT(*) AS c GROUP BY g HAVING c > 10"
+Input:  printf '{"g":"a","v":1}\n' | dbspa "SELECT g, COUNT(*) AS c GROUP BY g HAVING c > 10"
 Expected: No output (HAVING filters out the only group)
 ```
 
 ### TC-ACC-018: Multiple aggregates on same group
 ```
-Input:  printf '{"g":"a","v":10}\n{"g":"a","v":20}\n{"g":"a","v":30}\n' | folddb "SELECT g, COUNT(*) AS c, SUM(v) AS s, AVG(v) AS a, MIN(v) AS mn, MAX(v) AS mx GROUP BY g"
+Input:  printf '{"g":"a","v":10}\n{"g":"a","v":20}\n{"g":"a","v":30}\n' | dbspa "SELECT g, COUNT(*) AS c, SUM(v) AS s, AVG(v) AS a, MIN(v) AS mn, MAX(v) AS mx GROUP BY g"
 Expected: c=3, s=60, a=20.0, mn=10, mx=30
 ```
 
@@ -547,7 +547,7 @@ Expected: Warning logged: "retraction on empty accumulator for key X". Retractio
 
 ### TC-ACC-020: GROUP BY on expression (not just column name)
 ```
-Input:  printf '{"x":1}\n{"x":2}\n{"x":3}\n{"x":4}\n' | folddb "SELECT x % 2 AS parity, COUNT(*) AS c GROUP BY x % 2"
+Input:  printf '{"x":1}\n{"x":2}\n{"x":3}\n{"x":4}\n' | dbspa "SELECT x % 2 AS parity, COUNT(*) AS c GROUP BY x % 2"
 Expected: parity=0 c=2, parity=1 c=2
 ```
 
@@ -560,7 +560,7 @@ Expected: Retraction of previous result emitted. Group key removed from state.
 
 ### TC-ACC-022: NULL as a GROUP BY key (all NULLs grouped together)
 ```
-Input:  printf '{"g":null,"v":1}\n{"g":null,"v":2}\n{"g":"a","v":3}\n' | folddb "SELECT g, SUM(v) AS s GROUP BY g"
+Input:  printf '{"g":null,"v":1}\n{"g":null,"v":2}\n{"g":"a","v":3}\n' | dbspa "SELECT g, SUM(v) AS s GROUP BY g"
 Expected: Two groups: g=null s=3, g=a s=3. All NULL keys are grouped into a single group.
 ```
 
@@ -693,7 +693,7 @@ Expected: Separate aggregation results per (window_start, region) combination.
 
 ### TC-WIN-011: window_start and window_end columns available in SELECT
 ```
-Input:  folddb "SELECT window_start, window_end, COUNT(*) FROM 'kafka://b/t' GROUP BY 1 WINDOW TUMBLING '1 minute'"
+Input:  dbspa "SELECT window_start, window_end, COUNT(*) FROM 'kafka://b/t' GROUP BY 1 WINDOW TUMBLING '1 minute'"
 Expected: Each output row includes correct window_start and window_end timestamps.
 ```
 
@@ -712,7 +712,7 @@ Expected: Watermark = min(100, 80) - allowed_lateness. Window at 80s cannot clos
 ### TC-WIN-014: Processing time window (no EVENT TIME BY)
 ```
 Setup:  WINDOW TUMBLING '1 minute' without EVENT TIME BY clause.
-Expected: Windows assigned by FoldDB's receive time, not any data field.
+Expected: Windows assigned by DBSPA's receive time, not any data field.
 ```
 
 ### TC-WIN-015: Default watermark when EVENT TIME BY specified without WATERMARK
@@ -984,7 +984,7 @@ Expected: Old checkpoint discarded. Starts from offset=earliest (or configured o
 ### TC-CKPT-004: Corrupted checkpoint file (truncated)
 ```
 Setup:  Manually truncate the checkpoint file mid-way.
-Expected: FoldDB detects corruption on startup (checksum mismatch or parse error).
+Expected: DBSPA detects corruption on startup (checksum mismatch or parse error).
           Warning logged. Starts fresh.
 ```
 
@@ -1015,12 +1015,12 @@ Setup:  --checkpoint-interval 1s. Verify checkpoint file is updated approximatel
 Expected: Checkpoint file modification time updates at configured cadence.
 ```
 
-### TC-CKPT-009: folddb state list / inspect / reset subcommands
+### TC-CKPT-009: dbspa state list / inspect / reset subcommands
 ```
 Setup:  Run a --stateful query. Then run:
-        folddb state list -> shows the query hash
-        folddb state inspect <hash> -> shows metadata (query, offsets, keys, state size, last flush)
-        folddb state reset <hash> -> deletes the checkpoint
+        dbspa state list -> shows the query hash
+        dbspa state inspect <hash> -> shows metadata (query, offsets, keys, state size, last flush)
+        dbspa state reset <hash> -> deletes the checkpoint
 Expected: All subcommands produce correct output. After reset, next run starts fresh.
 ```
 
@@ -1043,7 +1043,7 @@ Expected: TUI renders table in-place (like `top`). Updates overwrite previous ou
 
 ### TC-OUT-002: Pipe detection triggers changelog NDJSON for accumulating query
 ```
-Setup:  folddb "SELECT g, COUNT(*) GROUP BY g" | cat
+Setup:  dbspa "SELECT g, COUNT(*) GROUP BY g" | cat
 Expected: Output is changelog NDJSON with {"op":"+","g":"a","count":1} lines.
 ```
 
@@ -1084,7 +1084,7 @@ Expected: Records INSERTed (append-only). _rowid and _ingested_at columns added.
 
 ### TC-OUT-008: SQLite concurrent read during write
 ```
-Setup:  Terminal 1: folddb --state test.db "...GROUP BY..."
+Setup:  Terminal 1: dbspa --state test.db "...GROUP BY..."
         Terminal 2: sqlite3 test.db "SELECT * FROM result"
 Expected: Terminal 2 can read while Terminal 1 is writing (WAL mode).
 ```
@@ -1098,7 +1098,7 @@ Expected: At any point, the map matches what the TUI would display.
 
 ### TC-OUT-010: --format csv output
 ```
-Setup:  echo '{"a":1,"b":"hello"}' | folddb --format csv "SELECT a, b"
+Setup:  echo '{"a":1,"b":"hello"}' | dbspa --format csv "SELECT a, b"
 Expected: CSV output with header row: a,b\n1,hello
 ```
 
@@ -1244,14 +1244,14 @@ Pass:    Flush < 2 seconds. Restore < 5 seconds.
 
 ### TC-E2E-001: stdin JSON filter end-to-end
 ```
-Input:   echo '{"name":"alice","age":30}' | folddb "SELECT name WHERE age > 25"
+Input:   echo '{"name":"alice","age":30}' | dbspa "SELECT name WHERE age > 25"
 Expected: {"name":"alice"}
 Verify:  Exit code 0. Exactly one line of output.
 ```
 
 ### TC-E2E-002: stdin JSON aggregation with multiple groups
 ```
-Input:   printf '{"g":"a","v":1}\n{"g":"b","v":2}\n{"g":"a","v":3}\n' | folddb "SELECT g, SUM(v) AS total GROUP BY g"
+Input:   printf '{"g":"a","v":1}\n{"g":"b","v":2}\n{"g":"a","v":3}\n' | dbspa "SELECT g, SUM(v) AS total GROUP BY g"
 Expected: Changelog output showing final state: g=a total=4, g=b total=2
 ```
 
@@ -1272,40 +1272,40 @@ Expected: SQLite "result" table contains one row per (window_start, group_key).
 
 ### TC-E2E-005: --dry-run shows query plan without execution
 ```
-Input:   folddb --dry-run "SELECT region, COUNT(*) FROM 'kafka://b/t' FORMAT DEBEZIUM GROUP BY region"
+Input:   dbspa --dry-run "SELECT region, COUNT(*) FROM 'kafka://b/t' FORMAT DEBEZIUM GROUP BY region"
 Expected: Printed query plan showing: source=kafka, format=debezium, operators=[filter, project, accumulate].
           No Kafka connection attempted. Exit code 0.
 ```
 
 ### TC-E2E-006: --explain shows plan then executes
 ```
-Input:   echo '{"x":1}' | folddb --explain "SELECT x"
+Input:   echo '{"x":1}' | dbspa --explain "SELECT x"
 Expected: Query plan printed to stderr, then results to stdout.
 ```
 
 ### TC-E2E-007: -f flag reads query from file
 ```
 Setup:   Write "SELECT name WHERE age > 25" to /tmp/query.sql
-Input:   echo '{"name":"alice","age":30}' | folddb -f /tmp/query.sql
+Input:   echo '{"name":"alice","age":30}' | dbspa -f /tmp/query.sql
 Expected: {"name":"alice"}
 ```
 
 ### TC-E2E-008: --timeout terminates after duration
 ```
-Input:   yes '{"x":1}' | folddb --timeout 2s "SELECT x"
+Input:   yes '{"x":1}' | dbspa --timeout 2s "SELECT x"
 Expected: Process terminates after approximately 2 seconds. Exit code 0.
 ```
 
 ### TC-E2E-009: LIMIT terminates after N output records
 ```
-Input:   yes '{"x":1}' | folddb "SELECT x LIMIT 5"
+Input:   yes '{"x":1}' | dbspa "SELECT x LIMIT 5"
 Expected: Exactly 5 lines of output. Process terminates. Exit code 0.
 ```
 
 ### TC-E2E-010: Dead letter output captures bad records
 ```
 Setup:   Mix of valid and invalid JSON on stdin. --dead-letter errors.ndjson.
-Input:   printf '{"x":1}\nbad json\n{"x":2}\n' | folddb --dead-letter /tmp/errors.ndjson "SELECT x"
+Input:   printf '{"x":1}\nbad json\n{"x":2}\n' | dbspa --dead-letter /tmp/errors.ndjson "SELECT x"
 Expected: stdout has {"x":1} and {"x":2}.
           /tmp/errors.ndjson has one entry with error context for "bad json".
 ```
@@ -1319,7 +1319,7 @@ These scenarios test system resilience under adversarial conditions. Each should
 ### FI-001: Kafka broker goes down mid-query
 ```
 Setup:   Start consuming from Kafka. After 1000 records, kill the broker.
-Expected: FoldDB detects connection loss within session timeout.
+Expected: DBSPA detects connection loss within session timeout.
           Error message: "kafka connection lost: broker unavailable".
           If --stateful, checkpoint is flushed before exit (best effort).
           On restart with --stateful, resumes from last checkpoint.
@@ -1360,7 +1360,7 @@ Expected: Error on startup: "cannot open state file test.db: database is locked"
 ### FI-006: Checkpoint file is corrupted (partial write simulated by writing garbage)
 ```
 Setup:   Overwrite checkpoint file with random bytes.
-Expected: On restart, FoldDB detects corruption.
+Expected: On restart, DBSPA detects corruption.
           Warning: "checkpoint corrupted, starting fresh".
           Processing begins from scratch (or configured offset).
 ```
@@ -1392,7 +1392,7 @@ Expected: Since ->> returns TEXT, both should produce "123" as text.
 
 ### FI-010: Consumer group rebalance during processing
 ```
-Setup:   Two FoldDB instances in same consumer group on a 4-partition topic.
+Setup:   Two DBSPA instances in same consumer group on a 4-partition topic.
          Kill one instance, triggering rebalance.
 Expected: Surviving instance picks up orphaned partitions.
           If --stateful, the surviving instance does NOT have the other's checkpoint.
@@ -1409,7 +1409,7 @@ Expected: Error: "topic 'nonexistent' does not exist on kafka://broker:9092".
 
 ### FI-012: stdin is closed immediately (empty input)
 ```
-Setup:   echo -n "" | folddb "SELECT x"
+Setup:   echo -n "" | dbspa "SELECT x"
 Expected: Graceful exit. No output. Exit code 0 (or specific "no input" code).
 ```
 

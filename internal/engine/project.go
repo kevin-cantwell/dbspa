@@ -5,7 +5,7 @@ import (
 	"maps"
 	"os"
 
-	"github.com/kevin-cantwell/folddb/internal/sql/ast"
+	"github.com/kevin-cantwell/dbspa/internal/sql/ast"
 )
 
 // Project evaluates the SELECT list expressions against a record, producing

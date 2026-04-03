@@ -1,4 +1,4 @@
-# FoldDB Decision Log
+# DBSPA Decision Log
 
 This file tracks design decisions made during development. Each entry explains what was changed, why, what alternatives were considered, and trade-offs.
 
@@ -87,16 +87,16 @@ In `WindowedAggregateOp.Process()`, when EMIT EARLY is configured:
 
 ---
 
-### 4. folddb serve (HTTP sidecar)
+### 4. dbspa serve (HTTP sidecar)
 
 **Status:** Implemented
 
-**Problem:** FoldDB is CLI-only. For sidecar deployments (Kubernetes, etc.), users need an HTTP API to query the current accumulated state. The TUI sink redraws a terminal, but there's no programmatic access to the live result set.
+**Problem:** DBSPA is CLI-only. For sidecar deployments (Kubernetes, etc.), users need an HTTP API to query the current accumulated state. The TUI sink redraws a terminal, but there's no programmatic access to the live result set.
 
 **Design:**
 
-`folddb serve` starts an HTTP server that:
-- Runs a streaming query in the background (same pipeline as `folddb query`)
+`dbspa serve` starts an HTTP server that:
+- Runs a streaming query in the background (same pipeline as `dbspa query`)
 - Exposes the current accumulated state via HTTP endpoints:
   - `GET /` — current result set as JSON array
   - `GET /stream` — SSE stream of changelog diffs
@@ -107,7 +107,7 @@ In `WindowedAggregateOp.Process()`, when EMIT EARLY is configured:
 
 **Syntax:**
 ```
-folddb serve --port 8080 "SELECT region, COUNT(*) FROM 'kafka://broker/orders.cdc' FORMAT DEBEZIUM GROUP BY region"
+dbspa serve --port 8080 "SELECT region, COUNT(*) FROM 'kafka://broker/orders.cdc' FORMAT DEBEZIUM GROUP BY region"
 ```
 
 **Architecture:**
@@ -167,7 +167,7 @@ GROUP BY region
 
 **Status:** In progress
 
-**Problem:** FoldDB's diff model (Diff int8, +1/-1) is an informal version of Z-sets from DBSP (Feldera's foundation). The informal approach works for simple operators but becomes fragile for complex queries (HAVING with retractions, multi-way joins, nested aggregation). It also prevents batch processing, which is needed to close the performance gap with DuckDB.
+**Problem:** DBSPA's diff model (Diff int8, +1/-1) is an informal version of Z-sets from DBSP (Feldera's foundation). The informal approach works for simple operators but becomes fragile for complex queries (HAVING with retractions, multi-way joins, nested aggregation). It also prevents batch processing, which is needed to close the performance gap with DuckDB.
 
 **Design:**
 
@@ -179,7 +179,7 @@ Phase 3 — Batch compaction: Before aggregation, compact per group key — sum 
 
 Phase 4 — Operator fusion: Fuse filter+project, filter+project+aggregate for common cases.
 
-**Why now:** The whole point of FoldDB is to close the gap between streaming and batch. Z-sets are the mathematical foundation that makes this possible. Deferring it accumulates tech debt.
+**Why now:** The whole point of DBSPA is to close the gap between streaming and batch. Z-sets are the mathematical foundation that makes this possible. Deferring it accumulates tech debt.
 
 **Reference:** Budiu et al., "DBSP: Automatic Incremental View Maintenance" (VLDB 2023). Z-sets = multisets with integer weights. Every relational operator has a provably correct incremental version over Z-set deltas.
 
@@ -250,7 +250,7 @@ The DD join operator already supports bidirectional deltas (ProcessLeftDelta + P
 2. **Time-bounded retention** — arrangements can't grow forever. An interval bound limits how long entries are kept.
 3. **Syntax** — `FROM 'kafka://broker/orders' o JOIN 'kafka://broker/payments' p ON o.order_id = p.order_id WITHIN INTERVAL '10 minutes'`
 
-**The interval bound is mandatory.** Without it, both arrangements grow indefinitely. FoldDB errors if WITHIN is missing for stream-stream joins.
+**The interval bound is mandatory.** Without it, both arrangements grow indefinitely. DBSPA errors if WITHIN is missing for stream-stream joins.
 
 **Architecture:**
 
@@ -276,7 +276,7 @@ Both goroutines call ProcessLeftDelta/ProcessRightDelta respectively. DDJoinOp h
 
 **Status:** In progress
 
-**Problem:** FoldDB can't compose queries. You can't use the result of one query as input to another — every query is a single flat pipeline. This prevents CDC aggregation from being used as a join input, and prevents derived tables.
+**Problem:** DBSPA can't compose queries. You can't use the result of one query as input to another — every query is a single flat pipeline. This prevents CDC aggregation from being used as a join input, and prevents derived tables.
 
 **Design:**
 
@@ -334,7 +334,7 @@ The inner accumulator emits retraction+insertion pairs (Z-set deltas) to a chann
 
 **Status:** Implemented
 
-**Problem:** SEED FROM previously fed raw records through the full pipeline (filter → accumulate). For a 1B-row seed source, this meant processing 1B records to build starting state. The seed should instead provide pre-computed accumulator values — the batch system (BigQuery, DuckDB, Postgres) does the heavy aggregation, FoldDB loads the result as starting state. Feeding pre-aggregated values through Add/Retract would double-count (e.g., SUM of already-summed values).
+**Problem:** SEED FROM previously fed raw records through the full pipeline (filter → accumulate). For a 1B-row seed source, this meant processing 1B records to build starting state. The seed should instead provide pre-computed accumulator values — the batch system (BigQuery, DuckDB, Postgres) does the heavy aggregation, DBSPA loads the result as starting state. Feeding pre-aggregated values through Add/Retract would double-count (e.g., SUM of already-summed values).
 
 **Design:**
 
@@ -368,7 +368,7 @@ Seed row `{"region":"us-east","total":1000000}` → accumulator for "us-east" st
 
 **Status:** In progress
 
-**Problem:** `FORMAT DEBEZIUM` and `FORMAT DEBEZIUM_AVRO` conflate two concepts: the wire encoding (JSON, Avro) and the envelope schema (Debezium CDC). This makes it hard to add new envelopes (FoldDB changelog, Maxwell, etc.) without a combinatorial explosion of format names.
+**Problem:** `FORMAT DEBEZIUM` and `FORMAT DEBEZIUM_AVRO` conflate two concepts: the wire encoding (JSON, Avro) and the envelope schema (Debezium CDC). This makes it hard to add new envelopes (DBSPA changelog, Maxwell, etc.) without a combinatorial explosion of format names.
 
 **Design:**
 
@@ -379,7 +379,7 @@ FORMAT AVRO DEBEZIUM      -- Avro encoding, Debezium envelope
 FORMAT JSON DEBEZIUM      -- JSON encoding, Debezium envelope
 FORMAT DEBEZIUM           -- shorthand: JSON + Debezium (default encoding)
 FORMAT AVRO               -- plain Avro, no envelope
-FORMAT FOLDDB             -- FoldDB changelog (_weight), default JSON encoding
+FORMAT DBSPA             -- DBSPA changelog (_weight), default JSON encoding
 FORMAT CSV(header=true)   -- plain CSV with options
 ```
 
@@ -392,7 +392,7 @@ Rules:
 Backwards compatibility: `FORMAT DEBEZIUM` still works. `FORMAT DEBEZIUM_AVRO` deprecated in favor of `FORMAT AVRO DEBEZIUM`.
 
 Known encodings: JSON, AVRO, CSV, PROTOBUF, PARQUET
-Known envelopes: DEBEZIUM, FOLDDB (future: MAXWELL, CANAL, UPSERT)
+Known envelopes: DEBEZIUM, DBSPA (future: MAXWELL, CANAL, UPSERT)
 
 **Update (v2):** Refactored again to separate FORMAT and CHANGELOG as orthogonal clauses:
 
@@ -412,7 +412,7 @@ FORMAT = wire encoding (how bytes are decoded). CHANGELOG = change semantics (ho
 
 **Status:** In progress
 
-**Problem:** FoldDB can only read from Kafka, files, and stdin. But data lives everywhere — BigQuery, Postgres, S3, kubectl logs, curl, custom scripts. Users have to pipe through stdin for each, losing the ability to compose multiple sources in one query.
+**Problem:** DBSPA can only read from Kafka, files, and stdin. But data lives everywhere — BigQuery, Postgres, S3, kubectl logs, curl, custom scripts. Users have to pipe through stdin for each, losing the ability to compose multiple sources in one query.
 
 **Design:**
 
@@ -437,9 +437,9 @@ GROUP BY region
 - Run via `/bin/sh -c "command"` (supports pipes, redirects, env vars)
 - `exec.CommandContext` for lifecycle management (killed on Ctrl+C)
 - stdout → record source (line-based for JSON/CSV, raw reader for binary)
-- stderr → captured separately, prefixed with `[exec]` on FoldDB's stderr
+- stderr → captured separately, prefixed with `[exec]` on DBSPA's stderr
 - FORMAT clause specifies output format (default NDJSON)
-- **Disabled in `folddb serve`** — HTTP clients must not trigger shell commands
+- **Disabled in `dbspa serve`** — HTTP clients must not trigger shell commands
 
 **Security:** EXEC runs with the user's shell permissions. This is acceptable for a CLI tool (the user is already running arbitrary SQL). Blocked in serve mode to prevent remote code execution.
 
@@ -449,7 +449,7 @@ GROUP BY region
 
 **Status:** In progress
 
-**Problem:** Production Kafka deployments use the Confluent Schema Registry for Avro and Protobuf schemas. Messages have a 5-byte header (magic byte `0x00` + 4-byte schema ID). FoldDB's current Avro support only handles OCF files (schema embedded in file header) — it can't decode registry-encoded Kafka messages.
+**Problem:** Production Kafka deployments use the Confluent Schema Registry for Avro and Protobuf schemas. Messages have a 5-byte header (magic byte `0x00` + 4-byte schema ID). DBSPA's current Avro support only handles OCF files (schema embedded in file header) — it can't decode registry-encoded Kafka messages.
 
 **Design:**
 
@@ -475,22 +475,22 @@ When consuming from Kafka with `FORMAT AVRO` or `FORMAT PROTOBUF`:
 
 **Status:** In progress
 
-**Problem:** FoldDB can only read files via `--input` with its own decoders. For table-side queries (Parquet, CSV, databases), DuckDB is orders of magnitude faster (70x on batch queries). The original PRD envisioned DuckDB as the table-side engine with FoldDB handling the streaming layer.
+**Problem:** DBSPA can only read files via `--input` with its own decoders. For table-side queries (Parquet, CSV, databases), DuckDB is orders of magnitude faster (70x on batch queries). The original PRD envisioned DuckDB as the table-side engine with DBSPA handling the streaming layer.
 
 **Design:**
 
-DuckDB serves as the **table query engine** for the right side of joins and for standalone file queries. FoldDB's streaming engine handles Kafka/stdin/CDC.
+DuckDB serves as the **table query engine** for the right side of joins and for standalone file queries. DBSPA's streaming engine handles Kafka/stdin/CDC.
 
 **Architecture:**
 ```
-Stream source ──▶ FoldDB pipeline ──▶ DD Join ──▶ Output
+Stream source ──▶ DBSPA pipeline ──▶ DD Join ──▶ Output
                                         ▲
 DuckDB query ──▶ Result as Arrangement ──┘
 ```
 
 **Use cases:**
 
-1. **Direct file query** — `FROM '/path/to/file.parquet'` routes to DuckDB instead of FoldDB's Parquet decoder. DuckDB handles the SQL (predicate pushdown, column pruning) natively.
+1. **Direct file query** — `FROM '/path/to/file.parquet'` routes to DuckDB instead of DBSPA's Parquet decoder. DuckDB handles the SQL (predicate pushdown, column pruning) natively.
 
 2. **Join against DuckDB query** — `JOIN (SELECT * FROM '/data/users.parquet' WHERE active) u ON ...` executes the subquery in DuckDB, loads the result into a DD join arrangement.
 
@@ -504,7 +504,7 @@ Phase 1: Embed DuckDB via `github.com/marcboeker/go-duckdb` (CGo). Add a `DuckDB
 - Returns results as `[]engine.Record`
 - For joins: loads results into a DD join arrangement
 
-Phase 2: Route file URIs (`.parquet`, `.csv`) and database URIs (`pg://`, `mysql://`) to DuckDB automatically. FoldDB's own file decoders become the fallback for streaming formats.
+Phase 2: Route file URIs (`.parquet`, `.csv`) and database URIs (`pg://`, `mysql://`) to DuckDB automatically. DBSPA's own file decoders become the fallback for streaming formats.
 
 **Syntax:**
 ```sql
@@ -532,7 +532,7 @@ SELECT * FROM 'pg://host/db/orders' WHERE status = 'pending'
 
 **Status:** Decided (revised)
 
-**Problem:** FoldDB's changelog output originally used `{"_weight":1, ...}` as a flat NDJSON format. Three issues emerged:
+**Problem:** DBSPA's changelog output originally used `{"_weight":1, ...}` as a flat NDJSON format. Three issues emerged:
 1. `_weight` could collide with source data columns
 2. No clean separation between delta metadata and record data
 3. No interoperability with any other system

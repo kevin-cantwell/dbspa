@@ -1,4 +1,4 @@
-// Package lexer provides a tokenizer for FoldDB's SQL dialect.
+// Package lexer provides a tokenizer for DBSPA's SQL dialect.
 package lexer
 
 import (
@@ -214,7 +214,7 @@ var keywords = map[string]TokenType{
 	"EXEC":                 TokenExec,
 	"STREAM":               TokenStream,
 	"TABLE":                TokenTable,
-	"FOLDDB":               TokenFolddb,
+	"DBSPA":               TokenFolddb,
 	"AVRO":                 TokenAvro,
 	"JSON":                 TokenJson,
 	"NDJSON":               TokenNdjson,

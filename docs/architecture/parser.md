@@ -1,6 +1,6 @@
 # SQL Parser
 
-FoldDB uses a hand-written recursive descent parser. No parser generator is involved.
+DBSPA uses a hand-written recursive descent parser. No parser generator is involved.
 
 ## Components
 

@@ -3,8 +3,8 @@ package format
 import (
 	"time"
 
-	"github.com/kevin-cantwell/folddb/internal/engine"
-	"github.com/kevin-cantwell/folddb/internal/source"
+	"github.com/kevin-cantwell/dbspa/internal/engine"
+	"github.com/kevin-cantwell/dbspa/internal/source"
 )
 
 // InjectKafkaVirtuals adds Kafka transport-layer virtual columns to all

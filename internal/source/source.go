@@ -1,4 +1,4 @@
-// Package source provides stream source implementations for FoldDB.
+// Package source provides stream source implementations for DBSPA.
 package source
 
 // Source reads raw records from an external system and sends them as byte

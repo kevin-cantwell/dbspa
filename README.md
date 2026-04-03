@@ -1,12 +1,12 @@
-# FoldDB
+# DBSPA
 
 **Streaming SQL with incremental aggregation.**
 
-FoldDB is a zero-infrastructure CLI that executes SQL queries against Kafka topics, CDC streams, and files — with correct incremental aggregation using [Z-set / DBSP](https://folddb.cantwell.dev/concepts/diff-model/) semantics.
+DBSPA is a zero-infrastructure CLI that executes SQL queries against Kafka topics, CDC streams, and files — with correct incremental aggregation using [Z-set / DBSP](https://kevin-cantwell.github.io/dbspa/docs/latest/concepts/diff-model/) semantics.
 
 ```bash
 # Count orders by status from a Kafka CDC stream, updating in real time
-folddb "SELECT status, COUNT(*) AS orders
+dbspa "SELECT status, COUNT(*) AS orders
         FROM 'kafka://broker:9092/orders.cdc' CHANGELOG DEBEZIUM
         GROUP BY status"
 ```
@@ -24,32 +24,32 @@ folddb "SELECT status, COUNT(*) AS orders
 ## Install
 
 ```bash
-go install github.com/kevin-cantwell/folddb/cmd/folddb@latest
+go install github.com/kevin-cantwell/dbspa/cmd/dbspa@latest
 ```
 
 ## Quick Examples
 
 ```bash
 # Filter API errors from a log stream
-tail -f /var/log/api.json | folddb "SELECT endpoint, status_code WHERE status_code >= 400"
+tail -f /var/log/api.json | dbspa "SELECT endpoint, status_code WHERE status_code >= 400"
 
 # Aggregate with windowing
-folddb "SELECT window_start, endpoint, COUNT(*) AS reqs
+dbspa "SELECT window_start, endpoint, COUNT(*) AS reqs
         FROM 'kafka://broker/api_requests'
         GROUP BY endpoint
         WINDOW TUMBLING '1 minute'
         EVENT TIME BY timestamp"
 
 # Join stream to Parquet reference table
-cat events.ndjson | folddb "SELECT e.user_id, u.name, e.action
+cat events.ndjson | dbspa "SELECT e.user_id, u.name, e.action
                              FROM stdin e
                              JOIN '/data/users.parquet' u ON e.user_id = u.id"
 
 # Query a Parquet file directly (via DuckDB)
-folddb "SELECT region, COUNT(*) FROM '/data/orders.parquet' GROUP BY region"
+dbspa "SELECT region, COUNT(*) FROM '/data/orders.parquet' GROUP BY region"
 
 # Serve results via HTTP (sidecar mode)
-folddb serve --port 8080 "SELECT region, COUNT(*)
+dbspa serve --port 8080 "SELECT region, COUNT(*)
                            FROM 'kafka://broker/orders.cdc' CHANGELOG DEBEZIUM
                            GROUP BY region"
 ```
@@ -67,16 +67,16 @@ Stress test results on Apple M4:
 | 50-column wide records (500K records) | 37K/sec |
 | JOIN with --max-memory spill-to-disk (1M records) | 297K/sec |
 
-See [full benchmarks](https://folddb.cantwell.dev/architecture/performance/).
+See [full benchmarks](https://kevin-cantwell.github.io/dbspa/docs/latest/architecture/performance/).
 
 ## Documentation
 
-**[folddb.cantwell.dev](https://folddb.cantwell.dev)**
+**[kevin-cantwell.github.io/dbspa/docs/latest](https://kevin-cantwell.github.io/dbspa/docs/latest)**
 
-- [When to Use FoldDB](https://folddb.cantwell.dev/concepts/when-to-use/) — honest comparison with Flink, Materialize, DuckDB, ksqlDB
-- [The Z-Set Model](https://folddb.cantwell.dev/concepts/diff-model/) — how incremental aggregation works
-- [SQL Reference](https://folddb.cantwell.dev/reference/sql/) — full dialect documentation
-- [Architecture](https://folddb.cantwell.dev/architecture/overview/) — pipeline, accumulators, joins, checkpointing
+- [When to Use DBSPA](https://kevin-cantwell.github.io/dbspa/docs/latest/concepts/when-to-use/) — honest comparison with Flink, Materialize, DuckDB, ksqlDB
+- [The Z-Set Model](https://kevin-cantwell.github.io/dbspa/docs/latest/concepts/diff-model/) — how incremental aggregation works
+- [SQL Reference](https://kevin-cantwell.github.io/dbspa/docs/latest/reference/sql/) — full dialect documentation
+- [Architecture](https://kevin-cantwell.github.io/dbspa/docs/latest/architecture/overview/) — pipeline, accumulators, joins, checkpointing
 
 ## License
 

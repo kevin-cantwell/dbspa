@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kevin-cantwell/folddb/internal/engine"
-	"github.com/kevin-cantwell/folddb/internal/source"
-	"github.com/kevin-cantwell/folddb/internal/sql/parser"
+	"github.com/kevin-cantwell/dbspa/internal/engine"
+	"github.com/kevin-cantwell/dbspa/internal/source"
+	"github.com/kevin-cantwell/dbspa/internal/sql/parser"
 )
 
 func TestLoadTableFile_CSVViaDuckDB(t *testing.T) {
@@ -77,7 +77,7 @@ func TestLoadTableFile_NDJSONViaDuckDB(t *testing.T) {
 	}
 }
 
-func TestLoadTableFile_DebeziumFallsBackToFoldDB(t *testing.T) {
+func TestLoadTableFile_DebeziumFallsBackToDBSPA(t *testing.T) {
 	dir := t.TempDir()
 	ndjsonPath := filepath.Join(dir, "cdc.ndjson")
 	data := `{"op":"c","before":null,"after":{"id":1,"name":"Alice"},"source":{"table":"users","db":"mydb","ts_ms":1700000000000}}
@@ -86,7 +86,7 @@ func TestLoadTableFile_DebeziumFallsBackToFoldDB(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// With DEBEZIUM format hint, should use FoldDB decoder, not DuckDB
+	// With DEBEZIUM format hint, should use DBSPA decoder, not DuckDB
 	records, err := loadTableFile(ndjsonPath, "DEBEZIUM")
 	if err != nil {
 		t.Fatalf("loadTableFile with DEBEZIUM: %v", err)
@@ -160,7 +160,7 @@ func TestDuckDBJoinTableLoading(t *testing.T) {
 	}
 }
 
-func TestTranslateFoldDBQueryToDuckDB(t *testing.T) {
+func TestTranslateDBSPAQueryToDuckDB(t *testing.T) {
 	tests := []struct {
 		name     string
 		sql      string
@@ -191,7 +191,7 @@ func TestTranslateFoldDBQueryToDuckDB(t *testing.T) {
 				t.Fatalf("parse error: %v", err)
 			}
 
-			query, err := translateFoldDBQueryToDuckDB(stmt)
+			query, err := translateDBSPAQueryToDuckDB(stmt)
 			if err != nil {
 				t.Fatalf("translate error: %v", err)
 			}
@@ -261,7 +261,7 @@ func TestIsFileSource(t *testing.T) {
 	}
 }
 
-func TestRequiresFoldDBDecoder(t *testing.T) {
+func TestRequiresDBSPADecoder(t *testing.T) {
 	tests := []struct {
 		format   string
 		expected bool
@@ -278,9 +278,9 @@ func TestRequiresFoldDBDecoder(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.format, func(t *testing.T) {
-			got := requiresFoldDBDecoder(tt.format)
+			got := requiresDBSPADecoder(tt.format)
 			if got != tt.expected {
-				t.Errorf("requiresFoldDBDecoder(%q) = %v, want %v", tt.format, got, tt.expected)
+				t.Errorf("requiresDBSPADecoder(%q) = %v, want %v", tt.format, got, tt.expected)
 			}
 		})
 	}

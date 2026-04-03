@@ -1,6 +1,6 @@
 # Accumulators
 
-Accumulators are the core of FoldDB's aggregation engine. Every aggregate function (`COUNT`, `SUM`, `AVG`, etc.) is implemented as an `Accumulator` that processes [Z-set](../concepts/diff-model.md) entries -- records with integer weights representing insertions and retractions.
+Accumulators are the core of DBSPA's aggregation engine. Every aggregate function (`COUNT`, `SUM`, `AVG`, etc.) is implemented as an `Accumulator` that processes [Z-set](../concepts/diff-model.md) entries -- records with integer weights representing insertions and retractions.
 
 ## Interface
 
@@ -54,7 +54,7 @@ State cost determines memory usage and checkpoint size:
 - **O(1) aggregates** (`COUNT`, `SUM`, `AVG`): a few numbers per group key. 10M groups uses ~80MB.
 - **O(n) aggregates** (`MIN`, `MAX`, `MEDIAN`, `PERCENTILE`, `COUNT(DISTINCT)`, `ARRAY_AGG`): all values retained per group key. 10M groups with 100 values each uses ~8GB.
 
-FoldDB logs a warning when O(n) aggregates exceed a configurable memory threshold.
+DBSPA logs a warning when O(n) aggregates exceed a configurable memory threshold.
 
 ## NULL handling
 

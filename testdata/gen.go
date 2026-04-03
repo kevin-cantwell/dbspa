@@ -1,6 +1,6 @@
 //go:build ignore
 
-// gen.go generates testdata files for FoldDB integration tests.
+// gen.go generates testdata files for DBSPA integration tests.
 package main
 
 import (
@@ -109,7 +109,7 @@ func genOrdersCDC(rng *rand.Rand, baseTime time.Time) {
 				"source": map[string]any{
 					"version":   "2.5.0",
 					"connector": "postgresql",
-					"name":      "folddb-test",
+					"name":      "dbspa-test",
 					"ts_ms":     ts.UnixMilli(),
 					"db":        "testdb",
 					"schema":    "public",
@@ -285,7 +285,7 @@ func genDebeziumEnvelope(baseTime time.Time) {
 			"source": map[string]any{
 				"version":   "2.5.0",
 				"connector": "postgresql",
-				"name":      "folddb-test",
+				"name":      "dbspa-test",
 				"ts_ms":     baseTime.UnixMilli(),
 				"db":        "testdb",
 				"schema":    "public",

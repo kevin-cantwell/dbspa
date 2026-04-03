@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strconv"
 
-	"github.com/kevin-cantwell/folddb/internal/engine"
+	"github.com/kevin-cantwell/dbspa/internal/engine"
 )
 
 // JSONSink writes records as NDJSON to an io.Writer.

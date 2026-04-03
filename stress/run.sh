@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Usage: ./stress/run.sh [--output FILE] [--scenarios PATTERN] [--duration DUR]
 #
-# Runs the FoldDB stress test suite.
+# Runs the DBSPA stress test suite.
 #
 # Examples:
 #   ./stress/run.sh
@@ -41,12 +41,12 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Build binaries
-echo "=== Building folddb ==="
+echo "=== Building dbspa ==="
 cd "$PROJECT_ROOT"
 make build
 echo ""
 
-FOLDDB_BIN="$PROJECT_ROOT/folddb"
+DBSPA_BIN="$PROJECT_ROOT/dbspa"
 
 # Build stress harness
 echo "=== Building stress harness ==="
@@ -57,7 +57,7 @@ echo ""
 echo "=== Running stress tests ==="
 
 ARGS=(
-    --folddb "$FOLDDB_BIN"
+    --dbspa "$DBSPA_BIN"
     --duration "$DURATION"
 )
 

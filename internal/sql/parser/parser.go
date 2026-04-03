@@ -1,4 +1,4 @@
-// Package parser implements a recursive descent parser for FoldDB's SQL dialect.
+// Package parser implements a recursive descent parser for DBSPA's SQL dialect.
 package parser
 
 import (
@@ -7,8 +7,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/kevin-cantwell/folddb/internal/sql/ast"
-	"github.com/kevin-cantwell/folddb/internal/sql/lexer"
+	"github.com/kevin-cantwell/dbspa/internal/sql/ast"
+	"github.com/kevin-cantwell/dbspa/internal/sql/lexer"
 )
 
 // Parser parses a token stream into an AST.
@@ -348,7 +348,7 @@ func (p *Parser) parseFormatClause() (format string, opts map[string]string, cha
 		return "AVRO", opts, "DEBEZIUM", nil
 	}
 
-	// Handle deprecated envelope-as-format: FORMAT DEBEZIUM, FORMAT FOLDDB
+	// Handle deprecated envelope-as-format: FORMAT DEBEZIUM, FORMAT DBSPA
 	if isChangelogFamily(firstName) {
 		log.Printf("Warning: FORMAT %s is deprecated, use FORMAT JSON CHANGELOG %s instead\n", firstName, firstName)
 		return "JSON", opts, firstName, nil
@@ -384,7 +384,7 @@ func (p *Parser) parseChangelogClause() (string, error) {
 // isChangelogFamily returns true if the name is a known changelog envelope family.
 func isChangelogFamily(name string) bool {
 	switch name {
-	case "DEBEZIUM", "FOLDDB":
+	case "DEBEZIUM", "DBSPA":
 		return true
 	}
 	return false

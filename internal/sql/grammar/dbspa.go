@@ -806,7 +806,7 @@ var g = &grammar{
 					},
 					&ruleRefExpr{
 						pos:  position{line: 95, col: 31, offset: 3161},
-						name: "FOLDDB",
+						name: "DBSPA",
 					},
 				},
 			},
@@ -1715,7 +1715,7 @@ var g = &grammar{
 					},
 					&ruleRefExpr{
 						pos:  position{line: 205, col: 28, offset: 7211},
-						name: "FOLDDB",
+						name: "DBSPA",
 					},
 				},
 			},
@@ -6509,50 +6509,43 @@ var g = &grammar{
 			},
 		},
 		{
-			name: "FOLDDB",
+			name: "DBSPA",
 			pos:  position{line: 415, col: 1, offset: 14722},
 			expr: &seqExpr{
 				pos: position{line: 415, col: 15, offset: 14736},
 				exprs: []any{
 					&charClassMatcher{
 						pos:        position{line: 415, col: 15, offset: 14736},
-						val:        "[Ff]",
-						chars:      []rune{'F', 'f'},
+						val:        "[Dd]",
+						chars:      []rune{'D', 'd'},
 						ignoreCase: false,
 						inverted:   false,
 					},
 					&charClassMatcher{
 						pos:        position{line: 415, col: 19, offset: 14740},
-						val:        "[Oo]",
-						chars:      []rune{'O', 'o'},
+						val:        "[Bb]",
+						chars:      []rune{'B', 'b'},
 						ignoreCase: false,
 						inverted:   false,
 					},
 					&charClassMatcher{
 						pos:        position{line: 415, col: 23, offset: 14744},
-						val:        "[Ll]",
-						chars:      []rune{'L', 'l'},
+						val:        "[Ss]",
+						chars:      []rune{'S', 's'},
 						ignoreCase: false,
 						inverted:   false,
 					},
 					&charClassMatcher{
 						pos:        position{line: 415, col: 27, offset: 14748},
-						val:        "[Dd]",
-						chars:      []rune{'D', 'd'},
+						val:        "[Pp]",
+						chars:      []rune{'P', 'p'},
 						ignoreCase: false,
 						inverted:   false,
 					},
 					&charClassMatcher{
 						pos:        position{line: 415, col: 31, offset: 14752},
-						val:        "[Dd]",
-						chars:      []rune{'D', 'd'},
-						ignoreCase: false,
-						inverted:   false,
-					},
-					&charClassMatcher{
-						pos:        position{line: 415, col: 35, offset: 14756},
-						val:        "[Bb]",
-						chars:      []rune{'B', 'b'},
+						val:        "[Aa]",
+						chars:      []rune{'A', 'a'},
 						ignoreCase: false,
 						inverted:   false,
 					},
@@ -9144,7 +9137,7 @@ var g = &grammar{
 							},
 							&ruleRefExpr{
 								pos:  position{line: 480, col: 18, offset: 18234},
-								name: "FOLDDB",
+								name: "DBSPA",
 							},
 							&ruleRefExpr{
 								pos:  position{line: 481, col: 7, offset: 18247},

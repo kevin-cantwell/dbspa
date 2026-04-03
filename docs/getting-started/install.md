@@ -3,21 +3,21 @@
 ## From source (Go 1.25+)
 
 ```bash
-go install github.com/kevin-cantwell/folddb/cmd/folddb@latest
+go install github.com/kevin-cantwell/dbspa/cmd/dbspa@latest
 ```
 
 ## Build from source
 
 ```bash
-git clone https://github.com/kevin-cantwell/folddb.git
-cd folddb
+git clone https://github.com/kevin-cantwell/dbspa.git
+cd dbspa
 make build
-# Produces: ./folddb and ./folddb-gen (data generator)
+# Produces: ./dbspa and ./dbspa-gen (data generator)
 ```
 
 ## Pre-built binaries
 
-Download from the [releases page](https://github.com/kevin-cantwell/folddb/releases). Binaries are available for:
+Download from the [releases page](https://github.com/kevin-cantwell/dbspa/releases). Binaries are available for:
 
 | OS | Architecture |
 |---|---|
@@ -26,19 +26,19 @@ Download from the [releases page](https://github.com/kevin-cantwell/folddb/relea
 
 ```bash
 # Example: macOS arm64
-curl -Lo folddb https://github.com/kevin-cantwell/folddb/releases/latest/download/folddb-darwin-arm64
-chmod +x folddb
-mv folddb /usr/local/bin/
+curl -Lo dbspa https://github.com/kevin-cantwell/dbspa/releases/latest/download/dbspa-darwin-arm64
+chmod +x dbspa
+mv dbspa /usr/local/bin/
 ```
 
 ## Verify installation
 
 ```bash
-folddb version
+dbspa version
 ```
 
 ## Dependencies
 
-FoldDB is a single static binary with zero runtime dependencies. No server, no daemon, no cluster.
+DBSPA is a single static binary with zero runtime dependencies. No server, no daemon, no cluster.
 
 For Kafka sources, you need a reachable Kafka broker. For Avro format with schema registry, the registry must be accessible over HTTP.

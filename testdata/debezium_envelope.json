@@ -18,7 +18,7 @@
       "connector": "postgresql",
       "db": "testdb",
       "lsn": 50100,
-      "name": "folddb-test",
+      "name": "dbspa-test",
       "schema": "public",
       "table": "orders",
       "ts_ms": 1774692000000,

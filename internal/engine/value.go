@@ -1,4 +1,4 @@
-// Package engine provides the core execution types and operators for FoldDB.
+// Package engine provides the core execution types and operators for DBSPA.
 package engine
 
 import (
@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-// Value represents a typed value in the FoldDB engine.
+// Value represents a typed value in the DBSPA engine.
 type Value interface {
 	// Type returns the type name of this value (e.g., "NULL", "BOOL", "INT", "FLOAT", "TEXT", "TIMESTAMP", "JSON").
 	Type() string
