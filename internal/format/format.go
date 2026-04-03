@@ -49,6 +49,8 @@ func NewDecoderWithOptions(formatStr string, opts map[string]string) (Decoder, e
 		return &DebeziumDecoder{}, nil
 	case "DEBEZIUM_AVRO":
 		return &DebeziumAvroDecoder{}, nil
+	case "FOLDDB":
+		return &FoldDBChangelogDecoder{}, nil
 	case "CSV":
 		return newCSVDecoder(opts), nil
 	case "AVRO":

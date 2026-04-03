@@ -394,6 +394,18 @@ Backwards compatibility: `FORMAT DEBEZIUM` still works. `FORMAT DEBEZIUM_AVRO` d
 Known encodings: JSON, AVRO, CSV, PROTOBUF, PARQUET
 Known envelopes: DEBEZIUM, FOLDDB (future: MAXWELL, CANAL, UPSERT)
 
+**Update (v2):** Refactored again to separate FORMAT and CHANGELOG as orthogonal clauses:
+
+```sql
+SELECT * FROM stdin                              -- auto everything
+SELECT * FROM stdin FORMAT AVRO                  -- explicit encoding, plain records
+SELECT * FROM stdin CHANGELOG                    -- auto encoding, auto envelope
+SELECT * FROM stdin CHANGELOG DEBEZIUM           -- auto encoding, explicit envelope
+SELECT * FROM stdin FORMAT AVRO CHANGELOG DEBEZIUM  -- explicit everything
+```
+
+FORMAT = wire encoding (how bytes are decoded). CHANGELOG = change semantics (how to derive weights). Both optional, independent, order-independent. Auto-detection crashes on ambiguity — no guessing.
+
 ---
 
 ### 14. EXEC() Universal Source Adapter

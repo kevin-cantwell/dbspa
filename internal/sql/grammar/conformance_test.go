@@ -156,6 +156,12 @@ var positiveQueries = []string{
 	"SELECT * FROM 'stdin://'",
 	"SELECT * FROM 'kafka://b/t' FORMAT AVRO(registry='http://registry:8081')",
 	`SELECT * FROM 'kafka://b/t' FORMAT CSV(delimiter='|', header=true, quote='"', null_string='')`,
+	// Two-token FORMAT syntax
+	"SELECT * FROM 'kafka://b/t' FORMAT AVRO DEBEZIUM",
+	"SELECT * FROM 'kafka://b/t' FORMAT JSON DEBEZIUM",
+	"SELECT * FROM stdin FORMAT FOLDDB",
+	"SELECT * FROM stdin FORMAT JSON FOLDDB",
+	"SELECT * FROM 'kafka://b/t' FORMAT AVRO(registry='http://reg:8081') DEBEZIUM",
 	"SELECT a + b * c",
 	"SELECT a OR b AND c",
 	"SELECT NOT a AND b",

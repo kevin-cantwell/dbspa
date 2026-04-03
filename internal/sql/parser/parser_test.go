@@ -105,8 +105,8 @@ func TestFormatClause(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if stmt.From.Format != "DEBEZIUM" {
-		t.Errorf("format: got %q, want %q", stmt.From.Format, "DEBEZIUM")
+	if stmt.From.Format() != "DEBEZIUM" {
+		t.Errorf("format: got %q, want %q", stmt.From.Format(), "DEBEZIUM")
 	}
 }
 
@@ -903,8 +903,8 @@ func TestJoinWithFormat(t *testing.T) {
 	if stmt.Join == nil {
 		t.Fatal("expected JOIN clause")
 	}
-	if stmt.Join.Source.Format != "CSV" {
-		t.Errorf("join format: got %q, want %q", stmt.Join.Source.Format, "CSV")
+	if stmt.Join.Source.Format() != "CSV" {
+		t.Errorf("join format: got %q, want %q", stmt.Join.Source.Format(), "CSV")
 	}
 }
 
@@ -936,8 +936,8 @@ func TestSeedFromWithFormat(t *testing.T) {
 	if stmt.Seed.Source.URI != "/tmp/seed.csv" {
 		t.Errorf("seed source URI: got %q, want %q", stmt.Seed.Source.URI, "/tmp/seed.csv")
 	}
-	if stmt.Seed.Source.Format != "CSV" {
-		t.Errorf("seed format: got %q, want %q", stmt.Seed.Source.Format, "CSV")
+	if stmt.Seed.Source.Format() != "CSV" {
+		t.Errorf("seed format: got %q, want %q", stmt.Seed.Source.Format(), "CSV")
 	}
 }
 

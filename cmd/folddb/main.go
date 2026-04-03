@@ -255,11 +255,11 @@ func run() error {
 	var formatStr string
 	var formatOpts map[string]string
 	if stmt.From != nil {
-		formatStr = stmt.From.Format
-		formatOpts = stmt.From.FormatOptions
+		formatStr = stmt.From.Format()
+		formatOpts = stmt.From.FormatOptions()
 	} else if stmt.FromExec != nil {
-		formatStr = stmt.FromExec.Format
-		formatOpts = stmt.FromExec.FormatOptions
+		formatStr = stmt.FromExec.Format()
+		formatOpts = stmt.FromExec.FormatOptions()
 	}
 	dec, err := format.NewDecoderWithOptions(formatStr, formatOpts)
 	if err != nil {
@@ -733,7 +733,7 @@ func runKafka(ctx context.Context, stmt *ast.SelectStatement, dec format.Decoder
 	if cfg.Registry != "" {
 		formatStr := ""
 		if stmt.From != nil {
-			formatStr = stmt.From.Format
+			formatStr = stmt.From.Format()
 		}
 		regDec, err := format.NewDecoderForKafka(formatStr, nil, cfg.Registry)
 		if err != nil {
@@ -825,7 +825,7 @@ func runStreamStreamKafka(ctx context.Context, stmt *ast.SelectStatement, dec fo
 	// Right side decoder (may have different format)
 	rightFormatStr := ""
 	if join.Source != nil {
-		rightFormatStr = join.Source.Format
+		rightFormatStr = join.Source.Format()
 	}
 	rightDec, err := format.NewDecoder(rightFormatStr)
 	if err != nil {
@@ -1600,24 +1600,24 @@ func printQueryPlan(stmt *ast.SelectStatement) {
 	if stmt.Seed != nil {
 		if stmt.Seed.Exec != nil {
 			fmt.Fprintf(os.Stderr, "  Seed: EXEC('%s')", stmt.Seed.Exec.Command)
-			if stmt.Seed.Exec.Format != "" {
-				fmt.Fprintf(os.Stderr, " (format: %s)", stmt.Seed.Exec.Format)
+			if stmt.Seed.Exec.Format() != "" {
+				fmt.Fprintf(os.Stderr, " (format: %s)", stmt.Seed.Exec.Format())
 			}
 			fmt.Fprintf(os.Stderr, "\n")
 		} else {
 			fmt.Fprintf(os.Stderr, "  Seed: %s", stmt.Seed.Source.URI)
-			if stmt.Seed.Source.Format != "" {
-				fmt.Fprintf(os.Stderr, " (format: %s)", stmt.Seed.Source.Format)
+			if stmt.Seed.Source.Format() != "" {
+				fmt.Fprintf(os.Stderr, " (format: %s)", stmt.Seed.Source.Format())
 			}
 			fmt.Fprintf(os.Stderr, "\n")
 		}
 	}
 
 	// Format
-	if stmt.From != nil && stmt.From.Format != "" {
-		fmt.Fprintf(os.Stderr, "  Format: %s\n", stmt.From.Format)
-		if stmt.From.FormatOptions != nil {
-			for k, v := range stmt.From.FormatOptions {
+	if stmt.From != nil && stmt.From.Format() != "" {
+		fmt.Fprintf(os.Stderr, "  Format: %s\n", stmt.From.Format())
+		if stmt.From.FormatOptions() != nil {
+			for k, v := range stmt.From.FormatOptions() {
 				fmt.Fprintf(os.Stderr, "    %s = %s\n", k, v)
 			}
 		}
@@ -1794,8 +1794,8 @@ func runServe(c *ServeCmd) error {
 	var formatStr string
 	var formatOpts map[string]string
 	if stmt.From != nil {
-		formatStr = stmt.From.Format
-		formatOpts = stmt.From.FormatOptions
+		formatStr = stmt.From.Format()
+		formatOpts = stmt.From.FormatOptions()
 	}
 	dec, err := format.NewDecoderWithOptions(formatStr, formatOpts)
 	if err != nil {
@@ -1932,7 +1932,7 @@ func runServeKafka(ctx context.Context, stmt *ast.SelectStatement, dec format.De
 	if cfg.Registry != "" {
 		formatStr := ""
 		if stmt.From != nil {
-			formatStr = stmt.From.Format
+			formatStr = stmt.From.Format()
 		}
 		regDec, err := format.NewDecoderForKafka(formatStr, nil, cfg.Registry)
 		if err != nil {
@@ -2245,7 +2245,7 @@ func materializeExecSource(exec *ast.ExecSource) ([]engine.Record, error) {
 	}
 
 
-	dec, err := format.NewDecoderWithOptions(exec.Format, exec.FormatOptions)
+	dec, err := format.NewDecoderWithOptions(exec.Format(), exec.FormatOptions())
 	if err != nil {
 
 		return nil, fmt.Errorf("EXEC decoder error: %w", err)
@@ -2295,7 +2295,7 @@ func buildStreamingExecJoinOp(ctx context.Context, stmt *ast.SelectStatement, ar
 		return nil, nil, fmt.Errorf("EXEC start error: %w", err)
 	}
 
-	dec, err := format.NewDecoderWithOptions(join.Exec.Format, join.Exec.FormatOptions)
+	dec, err := format.NewDecoderWithOptions(join.Exec.Format(), join.Exec.FormatOptions())
 	if err != nil {
 		return nil, nil, fmt.Errorf("EXEC decoder error: %w", err)
 	}
@@ -2362,7 +2362,7 @@ func loadSeedFile(seed *ast.SeedClause) ([]engine.Record, error) {
 	}
 	seedFormat := ""
 	if seed.Source != nil {
-		seedFormat = seed.Source.Format
+		seedFormat = seed.Source.Format()
 	}
 	return loadTableFile(seed.Source.URI, seedFormat)
 }
@@ -2397,7 +2397,7 @@ func buildDDJoinOp(stmt *ast.SelectStatement, arrangementMemLimit int) (*engine.
 		// Load table file
 		tableFormat := ""
 		if join.Source != nil {
-			tableFormat = join.Source.Format
+			tableFormat = join.Source.Format()
 		}
 		tableRecords, err = loadTableFile(join.Source.URI, tableFormat)
 		if err != nil {

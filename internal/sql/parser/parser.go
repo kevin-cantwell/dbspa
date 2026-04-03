@@ -3,6 +3,7 @@ package parser
 
 import (
 	"fmt"
+	"log"
 	"strconv"
 	"strings"
 
@@ -92,13 +93,13 @@ func (p *Parser) parseSelect() (*ast.SelectStatement, error) {
 	}
 
 	// FORMAT after FROM source+alias but before JOIN (e.g., FROM stdin e FORMAT DEBEZIUM JOIN ...)
-	if stmt.From != nil && stmt.From.Format == "" && p.lex.Peek().Type == lexer.TokenFormat {
+	if stmt.From != nil && !ast.HasFormat(stmt.From.Encoding, stmt.From.Envelope) && p.lex.Peek().Type == lexer.TokenFormat {
 		if err := p.parseFormatInto(stmt.From); err != nil {
 			return nil, err
 		}
 	}
 	// FORMAT after FROM EXEC(...) [alias] FORMAT ...
-	if stmt.FromExec != nil && stmt.FromExec.Format == "" && p.lex.Peek().Type == lexer.TokenFormat {
+	if stmt.FromExec != nil && !ast.HasFormat(stmt.FromExec.Encoding, stmt.FromExec.Envelope) && p.lex.Peek().Type == lexer.TokenFormat {
 		if err := p.parseFormatIntoExec(stmt.FromExec); err != nil {
 			return nil, err
 		}
@@ -114,7 +115,7 @@ func (p *Parser) parseSelect() (*ast.SelectStatement, error) {
 	}
 
 	// FORMAT after JOIN (e.g., FROM stdin e JOIN ... FORMAT DEBEZIUM WHERE ...)
-	if stmt.From != nil && stmt.From.Format == "" && p.lex.Peek().Type == lexer.TokenFormat {
+	if stmt.From != nil && !ast.HasFormat(stmt.From.Encoding, stmt.From.Envelope) && p.lex.Peek().Type == lexer.TokenFormat {
 		if err := p.parseFormatInto(stmt.From); err != nil {
 			return nil, err
 		}
@@ -261,7 +262,7 @@ func (p *Parser) parseSelect() (*ast.SelectStatement, error) {
 	// This allows: SELECT ... WHERE ... FORMAT CSV
 	// Also: SELECT ... FROM stdin JOIN ... WHERE ... FORMAT DEBEZIUM
 	if p.lex.Peek().Type == lexer.TokenFormat {
-		if stmt.FromExec != nil && stmt.FromExec.Format == "" {
+		if stmt.FromExec != nil && !ast.HasFormat(stmt.FromExec.Encoding, stmt.FromExec.Envelope) {
 			if err := p.parseFormatIntoExec(stmt.FromExec); err != nil {
 				return nil, err
 			}
@@ -271,7 +272,7 @@ func (p *Parser) parseSelect() (*ast.SelectStatement, error) {
 				return nil, err
 			}
 			stmt.From = src
-		} else if stmt.From != nil && stmt.From.Format == "" {
+		} else if stmt.From != nil && !ast.HasFormat(stmt.From.Encoding, stmt.From.Envelope) {
 			if err := p.parseFormatInto(stmt.From); err != nil {
 				return nil, err
 			}
@@ -282,101 +283,123 @@ func (p *Parser) parseSelect() (*ast.SelectStatement, error) {
 }
 
 func (p *Parser) parseStandaloneFormat() (*ast.TableSource, error) {
-	p.lex.Next() // consume FORMAT
-	fmtTok := p.lex.Next()
-	src := &ast.TableSource{Format: strings.ToUpper(fmtTok.Literal)}
-	// Parse optional format options: FORMAT CSV(key=value, ...)
-	if p.lex.Peek().Type == lexer.TokenLParen {
-		p.lex.Next()
-		opts := make(map[string]string)
-		for p.lex.Peek().Type != lexer.TokenRParen && p.lex.Peek().Type != lexer.TokenEOF {
-			keyTok := p.lex.Next()
-			if keyTok.Type != lexer.TokenIdent && !lexer.IsKeyword(keyTok.Type) {
-				return nil, p.errorf(keyTok, "expected option name, got %q", keyTok.Literal)
-			}
-			key := strings.ToLower(keyTok.Literal)
-			if err := p.expect(lexer.TokenEq); err != nil {
-				return nil, err
-			}
-			valTok := p.lex.Next()
-			var val string
-			switch valTok.Type {
-			case lexer.TokenString:
-				val = valTok.Literal
-			case lexer.TokenTrue:
-				val = "true"
-			case lexer.TokenFalse:
-				val = "false"
-			case lexer.TokenInteger:
-				val = valTok.Literal
-			case lexer.TokenIdent:
-				val = valTok.Literal
-			default:
-				return nil, p.errorf(valTok, "expected option value, got %q", valTok.Literal)
-			}
-			opts[key] = val
-			if p.lex.Peek().Type == lexer.TokenComma {
-				p.lex.Next()
-			}
-		}
-		if err := p.expect(lexer.TokenRParen); err != nil {
-			return nil, err
-		}
-		src.FormatOptions = opts
+	src := &ast.TableSource{}
+	if err := p.parseFormatInto(src); err != nil {
+		return nil, err
 	}
 	return src, nil
 }
 
-// parseFormatInto consumes a FORMAT clause and writes the format name and
-// options into the given TableSource. The caller must have already verified
+// parseFormatInto consumes a FORMAT clause and writes the encoding, envelope,
+// and options into the given TableSource. The caller must have already verified
 // that the next token is TokenFormat.
+//
+// Syntax: FORMAT <encoding> [<envelope>]
+//   FORMAT AVRO DEBEZIUM      -> encoding=AVRO, envelope=DEBEZIUM
+//   FORMAT JSON DEBEZIUM      -> encoding=JSON, envelope=DEBEZIUM
+//   FORMAT DEBEZIUM           -> encoding=JSON, envelope=DEBEZIUM (shorthand)
+//   FORMAT FOLDDB             -> encoding=JSON, envelope=FOLDDB (shorthand)
+//   FORMAT JSON FOLDDB        -> encoding=JSON, envelope=FOLDDB
+//   FORMAT AVRO               -> encoding=AVRO
+//   FORMAT CSV(header=true)   -> encoding=CSV, opts={header:true}
+//   FORMAT DEBEZIUM_AVRO      -> encoding=AVRO, envelope=DEBEZIUM (deprecated)
 func (p *Parser) parseFormatInto(src *ast.TableSource) error {
 	p.lex.Next() // consume FORMAT
 	fmtTok := p.lex.Next()
 	if fmtTok.Type == lexer.TokenEOF {
 		return p.errorf(fmtTok, "expected format name after FORMAT")
 	}
-	src.Format = strings.ToUpper(fmtTok.Literal)
-	// Parse optional format options: FORMAT CSV(key=value, ...)
+
+	firstName := strings.ToUpper(fmtTok.Literal)
+
+	// Parse optional options after first token: FORMAT CSV(header=true, ...)
+	var opts map[string]string
 	if p.lex.Peek().Type == lexer.TokenLParen {
-		p.lex.Next()
-		opts := make(map[string]string)
-		for p.lex.Peek().Type != lexer.TokenRParen && p.lex.Peek().Type != lexer.TokenEOF {
-			keyTok := p.lex.Next()
-			if keyTok.Type != lexer.TokenIdent && !lexer.IsKeyword(keyTok.Type) {
-				return p.errorf(keyTok, "expected option name, got %q", keyTok.Literal)
-			}
-			key := strings.ToLower(keyTok.Literal)
-			if err := p.expect(lexer.TokenEq); err != nil {
-				return err
-			}
-			valTok := p.lex.Next()
-			var val string
-			switch valTok.Type {
-			case lexer.TokenString:
-				val = valTok.Literal
-			case lexer.TokenTrue:
-				val = "true"
-			case lexer.TokenFalse:
-				val = "false"
-			case lexer.TokenInteger:
-				val = valTok.Literal
-			case lexer.TokenIdent:
-				val = valTok.Literal
-			default:
-				return p.errorf(valTok, "expected option value, got %q", valTok.Literal)
-			}
-			opts[key] = val
-			if p.lex.Peek().Type == lexer.TokenComma {
-				p.lex.Next()
-			}
-		}
-		if err := p.expect(lexer.TokenRParen); err != nil {
+		var err error
+		opts, err = p.parseFormatOptions()
+		if err != nil {
 			return err
 		}
-		src.FormatOptions = opts
 	}
+
+	// Handle deprecated DEBEZIUM_AVRO as a single token
+	if firstName == "DEBEZIUM_AVRO" {
+		log.Println("Warning: FORMAT DEBEZIUM_AVRO is deprecated, use FORMAT AVRO DEBEZIUM instead")
+		src.Encoding = "AVRO"
+		src.Envelope = "DEBEZIUM"
+		src.EncodingOpts = opts
+		return nil
+	}
+
+	if isEnvelope(firstName) {
+		// FORMAT DEBEZIUM -> encoding=JSON (default), envelope=DEBEZIUM
+		src.Encoding = "JSON"
+		src.Envelope = firstName
+		src.EncodingOpts = opts
+	} else {
+		src.Encoding = firstName
+		src.EncodingOpts = opts
+
+		// Check for optional envelope: FORMAT AVRO DEBEZIUM
+		nextTok := p.lex.Peek()
+		envName := strings.ToUpper(nextTok.Literal)
+		if (nextTok.Type == lexer.TokenIdent || lexer.IsKeyword(nextTok.Type)) && isEnvelope(envName) {
+			p.lex.Next() // consume envelope token
+			src.Envelope = envName
+		}
+	}
+
 	return nil
+}
+
+// parseFormatOptions parses (key=value, ...) and returns the options map.
+// Caller must have verified that the next token is TokenLParen.
+func (p *Parser) parseFormatOptions() (map[string]string, error) {
+	p.lex.Next() // consume (
+	opts := make(map[string]string)
+	for p.lex.Peek().Type != lexer.TokenRParen && p.lex.Peek().Type != lexer.TokenEOF {
+		keyTok := p.lex.Next()
+		if keyTok.Type != lexer.TokenIdent && !lexer.IsKeyword(keyTok.Type) {
+			return nil, p.errorf(keyTok, "expected option name, got %q", keyTok.Literal)
+		}
+		key := strings.ToLower(keyTok.Literal)
+		if err := p.expect(lexer.TokenEq); err != nil {
+			return nil, err
+		}
+		valTok := p.lex.Next()
+		var val string
+		switch valTok.Type {
+		case lexer.TokenString:
+			val = valTok.Literal
+		case lexer.TokenTrue:
+			val = "true"
+		case lexer.TokenFalse:
+			val = "false"
+		case lexer.TokenInteger:
+			val = valTok.Literal
+		case lexer.TokenIdent:
+			val = valTok.Literal
+		default:
+			return nil, p.errorf(valTok, "expected option value, got %q", valTok.Literal)
+		}
+		opts[key] = val
+		if p.lex.Peek().Type == lexer.TokenComma {
+			p.lex.Next()
+		}
+	}
+	if err := p.expect(lexer.TokenRParen); err != nil {
+		return nil, err
+	}
+	return opts, nil
+}
+
+// isEnvelope returns true if the name is a known envelope format.
+func isEnvelope(name string) bool {
+	switch name {
+	case "DEBEZIUM", "FOLDDB":
+		return true
+	}
+	return false
 }
 
 func (p *Parser) parseSelectList() ([]ast.Column, error) {
@@ -479,48 +502,8 @@ func (p *Parser) parseTableSource() (*ast.TableSource, error) {
 	src := &ast.TableSource{URI: tok.Literal}
 
 	if p.lex.Peek().Type == lexer.TokenFormat {
-		p.lex.Next()
-		fmtTok := p.lex.Next()
-		src.Format = strings.ToUpper(fmtTok.Literal)
-
-		// Parse optional format options: FORMAT CSV(key=value, ...)
-		if p.lex.Peek().Type == lexer.TokenLParen {
-			p.lex.Next()
-			opts := make(map[string]string)
-			for p.lex.Peek().Type != lexer.TokenRParen && p.lex.Peek().Type != lexer.TokenEOF {
-				keyTok := p.lex.Next()
-				if keyTok.Type != lexer.TokenIdent && !lexer.IsKeyword(keyTok.Type) {
-					return nil, p.errorf(keyTok, "expected option name, got %q", keyTok.Literal)
-				}
-				key := strings.ToLower(keyTok.Literal)
-				if err := p.expect(lexer.TokenEq); err != nil {
-					return nil, err
-				}
-				valTok := p.lex.Next()
-				var val string
-				switch valTok.Type {
-				case lexer.TokenString:
-					val = valTok.Literal
-				case lexer.TokenTrue:
-					val = "true"
-				case lexer.TokenFalse:
-					val = "false"
-				case lexer.TokenInteger:
-					val = valTok.Literal
-				case lexer.TokenIdent:
-					val = valTok.Literal
-				default:
-					return nil, p.errorf(valTok, "expected option value, got %q", valTok.Literal)
-				}
-				opts[key] = val
-				if p.lex.Peek().Type == lexer.TokenComma {
-					p.lex.Next()
-				}
-			}
-			if err := p.expect(lexer.TokenRParen); err != nil {
-				return nil, err
-			}
-			src.FormatOptions = opts
+		if err := p.parseFormatInto(src); err != nil {
+			return nil, err
 		}
 	}
 
@@ -597,7 +580,7 @@ func (p *Parser) parseJoinClause() (*ast.JoinClause, error) {
 			return nil, err
 		}
 		// Parse optional FORMAT
-		if execSrc.Format == "" && p.lex.Peek().Type == lexer.TokenFormat {
+		if !ast.HasFormat(execSrc.Encoding, execSrc.Envelope) && p.lex.Peek().Type == lexer.TokenFormat {
 			if err := p.parseFormatIntoExec(execSrc); err != nil {
 				return nil, err
 			}
@@ -684,7 +667,7 @@ func (p *Parser) parseSeedClause() (*ast.SeedClause, error) {
 			return nil, p.errorf(p.lex.Peek(), "SEED FROM EXEC cannot use AS STREAM (seed must be bounded)")
 		}
 		// Parse optional FORMAT
-		if execSrc.Format == "" && p.lex.Peek().Type == lexer.TokenFormat {
+		if !ast.HasFormat(execSrc.Encoding, execSrc.Envelope) && p.lex.Peek().Type == lexer.TokenFormat {
 			if err := p.parseFormatIntoExec(execSrc); err != nil {
 				return nil, err
 			}
@@ -744,8 +727,8 @@ func (p *Parser) parseExecMode(exec *ast.ExecSource) error {
 	return nil
 }
 
-// parseFormatIntoExec consumes a FORMAT clause and writes the format name and
-// options into the given ExecSource. The caller must have already verified
+// parseFormatIntoExec consumes a FORMAT clause and writes the encoding, envelope,
+// and options into the given ExecSource. The caller must have already verified
 // that the next token is TokenFormat.
 func (p *Parser) parseFormatIntoExec(src *ast.ExecSource) error {
 	p.lex.Next() // consume FORMAT
@@ -753,46 +736,45 @@ func (p *Parser) parseFormatIntoExec(src *ast.ExecSource) error {
 	if fmtTok.Type == lexer.TokenEOF {
 		return p.errorf(fmtTok, "expected format name after FORMAT")
 	}
-	src.Format = strings.ToUpper(fmtTok.Literal)
-	// Parse optional format options: FORMAT CSV(key=value, ...)
+
+	firstName := strings.ToUpper(fmtTok.Literal)
+
+	// Parse optional options after first token
+	var opts map[string]string
 	if p.lex.Peek().Type == lexer.TokenLParen {
-		p.lex.Next()
-		opts := make(map[string]string)
-		for p.lex.Peek().Type != lexer.TokenRParen && p.lex.Peek().Type != lexer.TokenEOF {
-			keyTok := p.lex.Next()
-			if keyTok.Type != lexer.TokenIdent && !lexer.IsKeyword(keyTok.Type) {
-				return p.errorf(keyTok, "expected option name, got %q", keyTok.Literal)
-			}
-			key := strings.ToLower(keyTok.Literal)
-			if err := p.expect(lexer.TokenEq); err != nil {
-				return err
-			}
-			valTok := p.lex.Next()
-			var val string
-			switch valTok.Type {
-			case lexer.TokenString:
-				val = valTok.Literal
-			case lexer.TokenTrue:
-				val = "true"
-			case lexer.TokenFalse:
-				val = "false"
-			case lexer.TokenInteger:
-				val = valTok.Literal
-			case lexer.TokenIdent:
-				val = valTok.Literal
-			default:
-				return p.errorf(valTok, "expected option value, got %q", valTok.Literal)
-			}
-			opts[key] = val
-			if p.lex.Peek().Type == lexer.TokenComma {
-				p.lex.Next()
-			}
-		}
-		if err := p.expect(lexer.TokenRParen); err != nil {
+		var err error
+		opts, err = p.parseFormatOptions()
+		if err != nil {
 			return err
 		}
-		src.FormatOptions = opts
 	}
+
+	// Handle deprecated DEBEZIUM_AVRO
+	if firstName == "DEBEZIUM_AVRO" {
+		log.Println("Warning: FORMAT DEBEZIUM_AVRO is deprecated, use FORMAT AVRO DEBEZIUM instead")
+		src.Encoding = "AVRO"
+		src.Envelope = "DEBEZIUM"
+		src.EncodingOpts = opts
+		return nil
+	}
+
+	if isEnvelope(firstName) {
+		src.Encoding = "JSON"
+		src.Envelope = firstName
+		src.EncodingOpts = opts
+	} else {
+		src.Encoding = firstName
+		src.EncodingOpts = opts
+
+		// Check for optional envelope
+		nextTok := p.lex.Peek()
+		envName := strings.ToUpper(nextTok.Literal)
+		if (nextTok.Type == lexer.TokenIdent || lexer.IsKeyword(nextTok.Type)) && isEnvelope(envName) {
+			p.lex.Next()
+			src.Envelope = envName
+		}
+	}
+
 	return nil
 }
 
