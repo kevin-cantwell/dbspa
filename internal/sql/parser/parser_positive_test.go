@@ -724,27 +724,19 @@ func TestPositiveSQL(t *testing.T) {
 				}
 			},
 		},
-		{
-			name: "from with FORMAT DEBEZIUM",
-			sql:  "SELECT * FROM 'kafka://b/t' FORMAT DEBEZIUM",
-			check: func(t *testing.T, stmt *ast.SelectStatement) {
-				if stmt.From.Format() != "DEBEZIUM" {
-					t.Errorf("format: got %q, want %q", stmt.From.Format(), "DEBEZIUM")
-				}
-			},
-		},
+		// FORMAT clause tests (encoding only)
 		{
 			name: "from with FORMAT CSV and options",
 			sql:  "SELECT * FROM 'kafka://b/t' FORMAT CSV(delimiter='|', header=true)",
 			check: func(t *testing.T, stmt *ast.SelectStatement) {
-				if stmt.From.Format() != "CSV" {
-					t.Errorf("format: got %q, want CSV", stmt.From.Format())
+				if stmt.From.Format != "CSV" {
+					t.Errorf("format: got %q, want CSV", stmt.From.Format)
 				}
-				if stmt.From.FormatOptions()["delimiter"] != "|" {
-					t.Errorf("delimiter: got %q, want %q", stmt.From.FormatOptions()["delimiter"], "|")
+				if stmt.From.FormatOpts["delimiter"] != "|" {
+					t.Errorf("delimiter: got %q, want %q", stmt.From.FormatOpts["delimiter"], "|")
 				}
-				if stmt.From.FormatOptions()["header"] != "true" {
-					t.Errorf("header: got %q, want %q", stmt.From.FormatOptions()["header"], "true")
+				if stmt.From.FormatOpts["header"] != "true" {
+					t.Errorf("header: got %q, want %q", stmt.From.FormatOpts["header"], "true")
 				}
 			},
 		},
@@ -752,8 +744,8 @@ func TestPositiveSQL(t *testing.T) {
 			name: "from with FORMAT AVRO",
 			sql:  "SELECT * FROM 'kafka://b/t' FORMAT AVRO",
 			check: func(t *testing.T, stmt *ast.SelectStatement) {
-				if stmt.From.Format() != "AVRO" {
-					t.Errorf("format: got %q, want AVRO", stmt.From.Format())
+				if stmt.From.Format != "AVRO" {
+					t.Errorf("format: got %q, want AVRO", stmt.From.Format)
 				}
 			},
 		},
@@ -761,11 +753,11 @@ func TestPositiveSQL(t *testing.T) {
 			name: "from with FORMAT PROTOBUF with option",
 			sql:  "SELECT * FROM 'kafka://b/t' FORMAT PROTOBUF(message='Order')",
 			check: func(t *testing.T, stmt *ast.SelectStatement) {
-				if stmt.From.Format() != "PROTOBUF" {
-					t.Errorf("format: got %q, want PROTOBUF", stmt.From.Format())
+				if stmt.From.Format != "PROTOBUF" {
+					t.Errorf("format: got %q, want PROTOBUF", stmt.From.Format)
 				}
-				if stmt.From.FormatOptions()["message"] != "Order" {
-					t.Errorf("message opt: got %q", stmt.From.FormatOptions()["message"])
+				if stmt.From.FormatOpts["message"] != "Order" {
+					t.Errorf("message opt: got %q", stmt.From.FormatOpts["message"])
 				}
 			},
 		},
@@ -773,180 +765,241 @@ func TestPositiveSQL(t *testing.T) {
 			name: "from with FORMAT PARQUET",
 			sql:  "SELECT * FROM 'kafka://b/t' FORMAT PARQUET",
 			check: func(t *testing.T, stmt *ast.SelectStatement) {
-				if stmt.From.Format() != "PARQUET" {
-					t.Errorf("format: got %q, want PARQUET", stmt.From.Format())
+				if stmt.From.Format != "PARQUET" {
+					t.Errorf("format: got %q, want PARQUET", stmt.From.Format)
 				}
 			},
 		},
+		// Deprecated FORMAT syntax (backwards compat)
 		{
-			name: "from with FORMAT DEBEZIUM_AVRO",
-			sql:  "SELECT * FROM 'kafka://b/t' FORMAT DEBEZIUM_AVRO",
-			check: func(t *testing.T, stmt *ast.SelectStatement) {
-				if stmt.From.Format() != "DEBEZIUM_AVRO" {
-					t.Errorf("format: got %q, want DEBEZIUM_AVRO", stmt.From.Format())
-				}
-			},
-		},
-		// Two-token FORMAT syntax tests
-		{
-			name: "FORMAT AVRO DEBEZIUM (two-token)",
-			sql:  "SELECT * FROM 'kafka://b/t' FORMAT AVRO DEBEZIUM",
-			check: func(t *testing.T, stmt *ast.SelectStatement) {
-				if stmt.From.Encoding != "AVRO" {
-					t.Errorf("encoding: got %q, want AVRO", stmt.From.Encoding)
-				}
-				if stmt.From.Envelope != "DEBEZIUM" {
-					t.Errorf("envelope: got %q, want DEBEZIUM", stmt.From.Envelope)
-				}
-				if stmt.From.Format() != "DEBEZIUM_AVRO" {
-					t.Errorf("combined format: got %q, want DEBEZIUM_AVRO", stmt.From.Format())
-				}
-			},
-		},
-		{
-			name: "FORMAT JSON DEBEZIUM (two-token)",
-			sql:  "SELECT * FROM 'kafka://b/t' FORMAT JSON DEBEZIUM",
-			check: func(t *testing.T, stmt *ast.SelectStatement) {
-				if stmt.From.Encoding != "JSON" {
-					t.Errorf("encoding: got %q, want JSON", stmt.From.Encoding)
-				}
-				if stmt.From.Envelope != "DEBEZIUM" {
-					t.Errorf("envelope: got %q, want DEBEZIUM", stmt.From.Envelope)
-				}
-				if stmt.From.Format() != "DEBEZIUM" {
-					t.Errorf("combined format: got %q, want DEBEZIUM", stmt.From.Format())
-				}
-			},
-		},
-		{
-			name: "FORMAT DEBEZIUM (shorthand, sets encoding=JSON)",
+			name: "FORMAT DEBEZIUM (deprecated, maps to FORMAT JSON + CHANGELOG DEBEZIUM)",
 			sql:  "SELECT * FROM 'kafka://b/t' FORMAT DEBEZIUM",
 			check: func(t *testing.T, stmt *ast.SelectStatement) {
-				if stmt.From.Encoding != "JSON" {
-					t.Errorf("encoding: got %q, want JSON", stmt.From.Encoding)
+				if stmt.From.Format != "JSON" {
+					t.Errorf("format: got %q, want JSON", stmt.From.Format)
 				}
-				if stmt.From.Envelope != "DEBEZIUM" {
-					t.Errorf("envelope: got %q, want DEBEZIUM", stmt.From.Envelope)
+				if stmt.Changelog != "DEBEZIUM" {
+					t.Errorf("changelog: got %q, want DEBEZIUM", stmt.Changelog)
 				}
 			},
 		},
 		{
-			name: "FORMAT FOLDDB (shorthand)",
+			name: "FORMAT DEBEZIUM_AVRO (deprecated, maps to FORMAT AVRO + CHANGELOG DEBEZIUM)",
+			sql:  "SELECT * FROM 'kafka://b/t' FORMAT DEBEZIUM_AVRO",
+			check: func(t *testing.T, stmt *ast.SelectStatement) {
+				if stmt.From.Format != "AVRO" {
+					t.Errorf("format: got %q, want AVRO", stmt.From.Format)
+				}
+				if stmt.Changelog != "DEBEZIUM" {
+					t.Errorf("changelog: got %q, want DEBEZIUM", stmt.Changelog)
+				}
+			},
+		},
+		{
+			name: "FORMAT AVRO DEBEZIUM (deprecated two-token, maps to FORMAT AVRO + CHANGELOG DEBEZIUM)",
+			sql:  "SELECT * FROM 'kafka://b/t' FORMAT AVRO DEBEZIUM",
+			check: func(t *testing.T, stmt *ast.SelectStatement) {
+				if stmt.From.Format != "AVRO" {
+					t.Errorf("format: got %q, want AVRO", stmt.From.Format)
+				}
+				if stmt.Changelog != "DEBEZIUM" {
+					t.Errorf("changelog: got %q, want DEBEZIUM", stmt.Changelog)
+				}
+			},
+		},
+		{
+			name: "FORMAT JSON DEBEZIUM (deprecated two-token)",
+			sql:  "SELECT * FROM 'kafka://b/t' FORMAT JSON DEBEZIUM",
+			check: func(t *testing.T, stmt *ast.SelectStatement) {
+				if stmt.From.Format != "JSON" {
+					t.Errorf("format: got %q, want JSON", stmt.From.Format)
+				}
+				if stmt.Changelog != "DEBEZIUM" {
+					t.Errorf("changelog: got %q, want DEBEZIUM", stmt.Changelog)
+				}
+			},
+		},
+		{
+			name: "FORMAT FOLDDB (deprecated shorthand)",
 			sql:  "SELECT * FROM stdin FORMAT FOLDDB",
 			check: func(t *testing.T, stmt *ast.SelectStatement) {
-				if stmt.From.Encoding != "JSON" {
-					t.Errorf("encoding: got %q, want JSON", stmt.From.Encoding)
+				if stmt.From.Format != "JSON" {
+					t.Errorf("format: got %q, want JSON", stmt.From.Format)
 				}
-				if stmt.From.Envelope != "FOLDDB" {
-					t.Errorf("envelope: got %q, want FOLDDB", stmt.From.Envelope)
+				if stmt.Changelog != "FOLDDB" {
+					t.Errorf("changelog: got %q, want FOLDDB", stmt.Changelog)
 				}
 			},
 		},
 		{
-			name: "FORMAT JSON FOLDDB (explicit)",
+			name: "FORMAT JSON FOLDDB (deprecated two-token)",
 			sql:  "SELECT * FROM stdin FORMAT JSON FOLDDB",
 			check: func(t *testing.T, stmt *ast.SelectStatement) {
-				if stmt.From.Encoding != "JSON" {
-					t.Errorf("encoding: got %q, want JSON", stmt.From.Encoding)
+				if stmt.From.Format != "JSON" {
+					t.Errorf("format: got %q, want JSON", stmt.From.Format)
 				}
-				if stmt.From.Envelope != "FOLDDB" {
-					t.Errorf("envelope: got %q, want FOLDDB", stmt.From.Envelope)
+				if stmt.Changelog != "FOLDDB" {
+					t.Errorf("changelog: got %q, want FOLDDB", stmt.Changelog)
 				}
 			},
 		},
 		{
-			name: "FORMAT AVRO(registry=...) DEBEZIUM (options + envelope)",
+			name: "FORMAT AVRO(registry=...) DEBEZIUM (deprecated, options + envelope)",
 			sql:  "SELECT * FROM 'kafka://b/t' FORMAT AVRO(registry='http://reg:8081') DEBEZIUM",
 			check: func(t *testing.T, stmt *ast.SelectStatement) {
-				if stmt.From.Encoding != "AVRO" {
-					t.Errorf("encoding: got %q, want AVRO", stmt.From.Encoding)
+				if stmt.From.Format != "AVRO" {
+					t.Errorf("format: got %q, want AVRO", stmt.From.Format)
 				}
-				if stmt.From.Envelope != "DEBEZIUM" {
-					t.Errorf("envelope: got %q, want DEBEZIUM", stmt.From.Envelope)
+				if stmt.Changelog != "DEBEZIUM" {
+					t.Errorf("changelog: got %q, want DEBEZIUM", stmt.Changelog)
 				}
-				if stmt.From.EncodingOpts["registry"] != "http://reg:8081" {
-					t.Errorf("registry opt: got %q", stmt.From.EncodingOpts["registry"])
+				if stmt.From.FormatOpts["registry"] != "http://reg:8081" {
+					t.Errorf("registry opt: got %q", stmt.From.FormatOpts["registry"])
 				}
 			},
 		},
 		{
-			name: "FORMAT CSV(header=true) (options, no envelope)",
+			name: "FORMAT CSV(header=true) (options, no changelog)",
 			sql:  "SELECT * FROM 'file.csv' FORMAT CSV(header=true)",
 			check: func(t *testing.T, stmt *ast.SelectStatement) {
-				if stmt.From.Encoding != "CSV" {
-					t.Errorf("encoding: got %q, want CSV", stmt.From.Encoding)
+				if stmt.From.Format != "CSV" {
+					t.Errorf("format: got %q, want CSV", stmt.From.Format)
 				}
-				if stmt.From.Envelope != "" {
-					t.Errorf("envelope: got %q, want empty", stmt.From.Envelope)
+				if stmt.Changelog != "" {
+					t.Errorf("changelog: got %q, want empty", stmt.Changelog)
 				}
-				if stmt.From.EncodingOpts["header"] != "true" {
-					t.Errorf("header opt: got %q", stmt.From.EncodingOpts["header"])
+				if stmt.From.FormatOpts["header"] != "true" {
+					t.Errorf("header opt: got %q", stmt.From.FormatOpts["header"])
 				}
 			},
 		},
 		{
-			name: "FORMAT AVRO (plain, no envelope)",
+			name: "FORMAT AVRO (plain, no changelog)",
 			sql:  "SELECT * FROM 'kafka://b/t' FORMAT AVRO",
 			check: func(t *testing.T, stmt *ast.SelectStatement) {
-				if stmt.From.Encoding != "AVRO" {
-					t.Errorf("encoding: got %q, want AVRO", stmt.From.Encoding)
+				if stmt.From.Format != "AVRO" {
+					t.Errorf("format: got %q, want AVRO", stmt.From.Format)
 				}
-				if stmt.From.Envelope != "" {
-					t.Errorf("envelope: got %q, want empty", stmt.From.Envelope)
+				if stmt.Changelog != "" {
+					t.Errorf("changelog: got %q, want empty", stmt.Changelog)
 				}
 			},
 		},
 		{
-			name: "FORMAT JSON (plain, no envelope)",
+			name: "FORMAT JSON (plain, no changelog)",
 			sql:  "SELECT * FROM stdin FORMAT JSON",
 			check: func(t *testing.T, stmt *ast.SelectStatement) {
-				if stmt.From.Encoding != "JSON" {
-					t.Errorf("encoding: got %q, want JSON", stmt.From.Encoding)
+				if stmt.From.Format != "JSON" {
+					t.Errorf("format: got %q, want JSON", stmt.From.Format)
 				}
-				if stmt.From.Envelope != "" {
-					t.Errorf("envelope: got %q, want empty", stmt.From.Envelope)
+				if stmt.Changelog != "" {
+					t.Errorf("changelog: got %q, want empty", stmt.Changelog)
 				}
 			},
 		},
 		{
-			name: "FORMAT CSV DEBEZIUM (encoding + envelope)",
+			name: "FORMAT CSV DEBEZIUM (deprecated encoding + envelope)",
 			sql:  "SELECT * FROM 'kafka://b/t' FORMAT CSV DEBEZIUM",
 			check: func(t *testing.T, stmt *ast.SelectStatement) {
-				if stmt.From.Encoding != "CSV" {
-					t.Errorf("encoding: got %q, want CSV", stmt.From.Encoding)
+				if stmt.From.Format != "CSV" {
+					t.Errorf("format: got %q, want CSV", stmt.From.Format)
 				}
-				if stmt.From.Envelope != "DEBEZIUM" {
-					t.Errorf("envelope: got %q, want DEBEZIUM", stmt.From.Envelope)
+				if stmt.Changelog != "DEBEZIUM" {
+					t.Errorf("changelog: got %q, want DEBEZIUM", stmt.Changelog)
 				}
 			},
 		},
 		{
-			name: "FORMAT CSV(header=true) DEBEZIUM (options + envelope)",
+			name: "FORMAT CSV(header=true) DEBEZIUM (deprecated options + envelope)",
 			sql:  "SELECT * FROM 'kafka://b/t' FORMAT CSV(header=true) DEBEZIUM",
 			check: func(t *testing.T, stmt *ast.SelectStatement) {
-				if stmt.From.Encoding != "CSV" {
-					t.Errorf("encoding: got %q, want CSV", stmt.From.Encoding)
+				if stmt.From.Format != "CSV" {
+					t.Errorf("format: got %q, want CSV", stmt.From.Format)
 				}
-				if stmt.From.Envelope != "DEBEZIUM" {
-					t.Errorf("envelope: got %q, want DEBEZIUM", stmt.From.Envelope)
+				if stmt.Changelog != "DEBEZIUM" {
+					t.Errorf("changelog: got %q, want DEBEZIUM", stmt.Changelog)
 				}
-				if stmt.From.EncodingOpts["header"] != "true" {
-					t.Errorf("header opt: got %q", stmt.From.EncodingOpts["header"])
+				if stmt.From.FormatOpts["header"] != "true" {
+					t.Errorf("header opt: got %q", stmt.From.FormatOpts["header"])
 				}
 			},
 		},
 		{
-			name: "FORMAT PROTOBUF(message=Order) encoding+opts, no envelope",
+			name: "FORMAT PROTOBUF(message=Order) encoding+opts, no changelog",
 			sql:  "SELECT * FROM 'kafka://b/t' FORMAT PROTOBUF(message='Order')",
 			check: func(t *testing.T, stmt *ast.SelectStatement) {
-				if stmt.From.Encoding != "PROTOBUF" {
-					t.Errorf("encoding: got %q, want PROTOBUF", stmt.From.Encoding)
+				if stmt.From.Format != "PROTOBUF" {
+					t.Errorf("format: got %q, want PROTOBUF", stmt.From.Format)
 				}
-				if stmt.From.Envelope != "" {
-					t.Errorf("envelope: got %q, want empty", stmt.From.Envelope)
+				if stmt.Changelog != "" {
+					t.Errorf("changelog: got %q, want empty", stmt.Changelog)
 				}
-				if stmt.From.EncodingOpts["message"] != "Order" {
-					t.Errorf("message opt: got %q", stmt.From.EncodingOpts["message"])
+				if stmt.From.FormatOpts["message"] != "Order" {
+					t.Errorf("message opt: got %q", stmt.From.FormatOpts["message"])
+				}
+			},
+		},
+		// New CHANGELOG clause tests
+		{
+			name: "CHANGELOG (bare, auto-detect)",
+			sql:  "SELECT * FROM stdin CHANGELOG",
+			check: func(t *testing.T, stmt *ast.SelectStatement) {
+				if stmt.Changelog != "AUTO" {
+					t.Errorf("changelog: got %q, want AUTO", stmt.Changelog)
+				}
+			},
+		},
+		{
+			name: "CHANGELOG DEBEZIUM (explicit)",
+			sql:  "SELECT * FROM stdin CHANGELOG DEBEZIUM",
+			check: func(t *testing.T, stmt *ast.SelectStatement) {
+				if stmt.Changelog != "DEBEZIUM" {
+					t.Errorf("changelog: got %q, want DEBEZIUM", stmt.Changelog)
+				}
+			},
+		},
+		{
+			name: "CHANGELOG FOLDDB (explicit)",
+			sql:  "SELECT * FROM stdin CHANGELOG FOLDDB",
+			check: func(t *testing.T, stmt *ast.SelectStatement) {
+				if stmt.Changelog != "FOLDDB" {
+					t.Errorf("changelog: got %q, want FOLDDB", stmt.Changelog)
+				}
+			},
+		},
+		{
+			name: "FORMAT AVRO CHANGELOG DEBEZIUM (orthogonal)",
+			sql:  "SELECT * FROM stdin FORMAT AVRO CHANGELOG DEBEZIUM",
+			check: func(t *testing.T, stmt *ast.SelectStatement) {
+				if stmt.From.Format != "AVRO" {
+					t.Errorf("format: got %q, want AVRO", stmt.From.Format)
+				}
+				if stmt.Changelog != "DEBEZIUM" {
+					t.Errorf("changelog: got %q, want DEBEZIUM", stmt.Changelog)
+				}
+			},
+		},
+		{
+			name: "CHANGELOG FORMAT JSON (order flipped)",
+			sql:  "SELECT * FROM stdin CHANGELOG DEBEZIUM FORMAT JSON",
+			check: func(t *testing.T, stmt *ast.SelectStatement) {
+				if stmt.From.Format != "JSON" {
+					t.Errorf("format: got %q, want JSON", stmt.From.Format)
+				}
+				if stmt.Changelog != "DEBEZIUM" {
+					t.Errorf("changelog: got %q, want DEBEZIUM", stmt.Changelog)
+				}
+			},
+		},
+		{
+			name: "CHANGELOG alone (auto everything)",
+			sql:  "SELECT * FROM stdin CHANGELOG",
+			check: func(t *testing.T, stmt *ast.SelectStatement) {
+				if stmt.From.Format != "" {
+					t.Errorf("format: got %q, want empty", stmt.From.Format)
+				}
+				if stmt.Changelog != "AUTO" {
+					t.Errorf("changelog: got %q, want AUTO", stmt.Changelog)
 				}
 			},
 		},
@@ -970,14 +1023,17 @@ func TestPositiveSQL(t *testing.T) {
 			},
 		},
 		{
-			name: "from stdin with FORMAT DEBEZIUM",
+			name: "from stdin with FORMAT DEBEZIUM (deprecated)",
 			sql:  "SELECT * FROM stdin FORMAT DEBEZIUM",
 			check: func(t *testing.T, stmt *ast.SelectStatement) {
 				if stmt.From.URI != "stdin://" {
 					t.Errorf("URI: got %q, want stdin://", stmt.From.URI)
 				}
-				if stmt.From.Format() != "DEBEZIUM" {
-					t.Errorf("format: got %q, want DEBEZIUM", stmt.From.Format())
+				if stmt.From.Format != "JSON" {
+					t.Errorf("format: got %q, want JSON", stmt.From.Format)
+				}
+				if stmt.Changelog != "DEBEZIUM" {
+					t.Errorf("changelog: got %q, want DEBEZIUM", stmt.Changelog)
 				}
 			},
 		},
@@ -1022,8 +1078,8 @@ func TestPositiveSQL(t *testing.T) {
 			name: "join with FORMAT on join source",
 			sql:  "SELECT e.id FROM stdin e JOIN '/tmp/data.csv' FORMAT CSV u ON e.id = u.id",
 			check: func(t *testing.T, stmt *ast.SelectStatement) {
-				if stmt.Join.Source.Format() != "CSV" {
-					t.Errorf("join format: got %q, want CSV", stmt.Join.Source.Format())
+				if stmt.Join.Source.Format != "CSV" {
+					t.Errorf("join format: got %q, want CSV", stmt.Join.Source.Format)
 				}
 			},
 		},
@@ -1088,8 +1144,8 @@ func TestPositiveSQL(t *testing.T) {
 				if stmt.Seed == nil {
 					t.Fatal("expected SEED clause")
 				}
-				if stmt.Seed.Source.Format() != "CSV" {
-					t.Errorf("seed format: got %q, want CSV", stmt.Seed.Source.Format())
+				if stmt.Seed.Source.Format != "CSV" {
+					t.Errorf("seed format: got %q, want CSV", stmt.Seed.Source.Format)
 				}
 			},
 		},
@@ -1671,11 +1727,11 @@ func TestPositiveSQL(t *testing.T) {
 				if stmt.From == nil {
 					t.Fatal("expected FROM to be populated by standalone FORMAT")
 				}
-				if stmt.From.Format() != "CSV" {
-					t.Errorf("format: got %q, want CSV", stmt.From.Format())
+				if stmt.From.Format != "CSV" {
+					t.Errorf("format: got %q, want CSV", stmt.From.Format)
 				}
-				if stmt.From.FormatOptions()["delimiter"] != "," {
-					t.Errorf("delimiter: got %q", stmt.From.FormatOptions()["delimiter"])
+				if stmt.From.FormatOpts["delimiter"] != "," {
+					t.Errorf("delimiter: got %q", stmt.From.FormatOpts["delimiter"])
 				}
 			},
 		},
@@ -1757,11 +1813,14 @@ func TestPositiveSQL(t *testing.T) {
 			},
 		},
 		{
-			name: "format debezium with group_by having",
+			name: "format debezium with group_by having (deprecated)",
 			sql:  "SELECT _after->>'region', COUNT(*) AS cnt FROM 'kafka://b/t' FORMAT DEBEZIUM GROUP BY _after->>'region' HAVING COUNT(*) > 10",
 			check: func(t *testing.T, stmt *ast.SelectStatement) {
-				if stmt.From.Format() != "DEBEZIUM" {
-					t.Errorf("format: got %q, want DEBEZIUM", stmt.From.Format())
+				if stmt.From.Format != "JSON" {
+					t.Errorf("format: got %q, want JSON", stmt.From.Format)
+				}
+				if stmt.Changelog != "DEBEZIUM" {
+					t.Errorf("changelog: got %q, want DEBEZIUM", stmt.Changelog)
 				}
 				if stmt.GroupBy == nil {
 					t.Error("expected GROUP BY")
@@ -1870,11 +1929,11 @@ func TestPositiveSQL(t *testing.T) {
 				if stmt.Join.Type != "LEFT JOIN" {
 					t.Errorf("type: got %q, want LEFT JOIN", stmt.Join.Type)
 				}
-				if stmt.Join.Source.Format() != "CSV" {
-					t.Errorf("format: got %q, want CSV", stmt.Join.Source.Format())
+				if stmt.Join.Source.Format != "CSV" {
+					t.Errorf("format: got %q, want CSV", stmt.Join.Source.Format)
 				}
-				if stmt.Join.Source.FormatOptions()["header"] != "true" {
-					t.Errorf("header opt: got %q", stmt.Join.Source.FormatOptions()["header"])
+				if stmt.Join.Source.FormatOpts["header"] != "true" {
+					t.Errorf("header opt: got %q", stmt.Join.Source.FormatOpts["header"])
 				}
 			},
 		},
@@ -1906,14 +1965,17 @@ func TestPositiveSQL(t *testing.T) {
 			},
 		},
 		{
-			name: "from with alias and trailing format",
+			name: "from with alias and trailing format (deprecated)",
 			sql:  "SELECT * FROM stdin e FORMAT DEBEZIUM",
 			check: func(t *testing.T, stmt *ast.SelectStatement) {
 				if stmt.FromAlias != "e" {
 					t.Errorf("alias: got %q, want e", stmt.FromAlias)
 				}
-				if stmt.From.Format() != "DEBEZIUM" {
-					t.Errorf("format: got %q, want DEBEZIUM", stmt.From.Format())
+				if stmt.From.Format != "JSON" {
+					t.Errorf("format: got %q, want JSON", stmt.From.Format)
+				}
+				if stmt.Changelog != "DEBEZIUM" {
+					t.Errorf("changelog: got %q, want DEBEZIUM", stmt.Changelog)
 				}
 			},
 		},
@@ -1973,11 +2035,11 @@ func TestPositiveSQL(t *testing.T) {
 			name: "format avro with registry option",
 			sql:  "SELECT * FROM 'kafka://b/t' FORMAT AVRO(registry='http://registry:8081')",
 			check: func(t *testing.T, stmt *ast.SelectStatement) {
-				if stmt.From.Format() != "AVRO" {
-					t.Errorf("format: got %q, want AVRO", stmt.From.Format())
+				if stmt.From.Format != "AVRO" {
+					t.Errorf("format: got %q, want AVRO", stmt.From.Format)
 				}
-				if stmt.From.FormatOptions()["registry"] != "http://registry:8081" {
-					t.Errorf("registry: got %q", stmt.From.FormatOptions()["registry"])
+				if stmt.From.FormatOpts["registry"] != "http://registry:8081" {
+					t.Errorf("registry: got %q", stmt.From.FormatOpts["registry"])
 				}
 			},
 		},
@@ -1985,7 +2047,7 @@ func TestPositiveSQL(t *testing.T) {
 			name: "csv format with all options",
 			sql:  `SELECT * FROM 'kafka://b/t' FORMAT CSV(delimiter='|', header=true, quote='"', null_string='')`,
 			check: func(t *testing.T, stmt *ast.SelectStatement) {
-				opts := stmt.From.FormatOptions()
+				opts := stmt.From.FormatOpts
 				if opts["delimiter"] != "|" {
 					t.Errorf("delimiter: got %q", opts["delimiter"])
 				}
@@ -2297,11 +2359,11 @@ func TestPositiveSQL(t *testing.T) {
 			if stmt.FromExec == nil {
 				t.Fatal("expected FromExec")
 			}
-			if stmt.FromExec.Format() != "CSV" {
-				t.Errorf("format: got %q, want %q", stmt.FromExec.Format(), "CSV")
+			if stmt.FromExec.Format != "CSV" {
+				t.Errorf("format: got %q, want %q", stmt.FromExec.Format, "CSV")
 			}
-			if stmt.FromExec.FormatOptions()["header"] != "true" {
-				t.Errorf("header option: got %q, want %q", stmt.FromExec.FormatOptions()["header"], "true")
+			if stmt.FromExec.FormatOpts["header"] != "true" {
+				t.Errorf("header option: got %q, want %q", stmt.FromExec.FormatOpts["header"], "true")
 			}
 		},
 	},
@@ -2330,8 +2392,8 @@ func TestPositiveSQL(t *testing.T) {
 			if stmt.Join == nil || stmt.Join.Exec == nil {
 				t.Fatal("expected JOIN EXEC")
 			}
-			if stmt.Join.Exec.Format() != "CSV" {
-				t.Errorf("format: got %q, want %q", stmt.Join.Exec.Format(), "CSV")
+			if stmt.Join.Exec.Format != "CSV" {
+				t.Errorf("format: got %q, want %q", stmt.Join.Exec.Format, "CSV")
 			}
 		},
 	},
@@ -2426,8 +2488,8 @@ func TestPositiveSQL(t *testing.T) {
 			if stmt.FromExec.Mode != "TABLE" {
 				t.Errorf("mode: got %q, want %q", stmt.FromExec.Mode, "TABLE")
 			}
-			if stmt.FromExec.Format() != "CSV" {
-				t.Errorf("format: got %q, want %q", stmt.FromExec.Format(), "CSV")
+			if stmt.FromExec.Format != "CSV" {
+				t.Errorf("format: got %q, want %q", stmt.FromExec.Format, "CSV")
 			}
 		},
 	},

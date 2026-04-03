@@ -92,17 +92,11 @@ func (p *Parser) parseSelect() (*ast.SelectStatement, error) {
 		}
 	}
 
-	// FORMAT after FROM source+alias but before JOIN (e.g., FROM stdin e FORMAT DEBEZIUM JOIN ...)
-	if stmt.From != nil && !ast.HasFormat(stmt.From.Encoding, stmt.From.Envelope) && p.lex.Peek().Type == lexer.TokenFormat {
-		if err := p.parseFormatInto(stmt.From); err != nil {
-			return nil, err
-		}
-	}
-	// FORMAT after FROM EXEC(...) [alias] FORMAT ...
-	if stmt.FromExec != nil && !ast.HasFormat(stmt.FromExec.Encoding, stmt.FromExec.Envelope) && p.lex.Peek().Type == lexer.TokenFormat {
-		if err := p.parseFormatIntoExec(stmt.FromExec); err != nil {
-			return nil, err
-		}
+	// FORMAT and CHANGELOG clauses — independent, order-independent.
+	// May appear before JOIN, after SEED, or trailing after all other clauses.
+	// We parse them in a loop so they can appear in any order.
+	if err := p.parseFormatAndChangelog(stmt); err != nil {
+		return nil, err
 	}
 
 	// JOIN / LEFT JOIN (optional)
@@ -114,11 +108,9 @@ func (p *Parser) parseSelect() (*ast.SelectStatement, error) {
 		stmt.Join = join
 	}
 
-	// FORMAT after JOIN (e.g., FROM stdin e JOIN ... FORMAT DEBEZIUM WHERE ...)
-	if stmt.From != nil && !ast.HasFormat(stmt.From.Encoding, stmt.From.Envelope) && p.lex.Peek().Type == lexer.TokenFormat {
-		if err := p.parseFormatInto(stmt.From); err != nil {
-			return nil, err
-		}
+	// FORMAT and CHANGELOG again (may appear after JOIN)
+	if err := p.parseFormatAndChangelog(stmt); err != nil {
+		return nil, err
 	}
 
 	// SEED FROM (optional)
@@ -128,6 +120,11 @@ func (p *Parser) parseSelect() (*ast.SelectStatement, error) {
 			return nil, err
 		}
 		stmt.Seed = seed
+	}
+
+	// FORMAT and CHANGELOG again (may appear after SEED)
+	if err := p.parseFormatAndChangelog(stmt); err != nil {
+		return nil, err
 	}
 
 	// WHERE
@@ -258,98 +255,139 @@ func (p *Parser) parseSelect() (*ast.SelectStatement, error) {
 		stmt.Limit = &n
 	}
 
-	// Standalone FORMAT (trailing, after all other clauses)
-	// This allows: SELECT ... WHERE ... FORMAT CSV
-	// Also: SELECT ... FROM stdin JOIN ... WHERE ... FORMAT DEBEZIUM
-	if p.lex.Peek().Type == lexer.TokenFormat {
-		if stmt.FromExec != nil && !ast.HasFormat(stmt.FromExec.Encoding, stmt.FromExec.Envelope) {
-			if err := p.parseFormatIntoExec(stmt.FromExec); err != nil {
-				return nil, err
-			}
-		} else if stmt.From == nil && stmt.FromExec == nil {
-			src, err := p.parseStandaloneFormat()
-			if err != nil {
-				return nil, err
-			}
-			stmt.From = src
-		} else if stmt.From != nil && !ast.HasFormat(stmt.From.Encoding, stmt.From.Envelope) {
-			if err := p.parseFormatInto(stmt.From); err != nil {
-				return nil, err
-			}
-		}
+	// Trailing FORMAT and CHANGELOG (after all other clauses)
+	if err := p.parseFormatAndChangelog(stmt); err != nil {
+		return nil, err
 	}
 
 	return stmt, nil
 }
 
-func (p *Parser) parseStandaloneFormat() (*ast.TableSource, error) {
-	src := &ast.TableSource{}
-	if err := p.parseFormatInto(src); err != nil {
-		return nil, err
+// parseFormatAndChangelog parses FORMAT and CHANGELOG clauses in any order.
+// FORMAT sets the encoding on the source (From or FromExec).
+// CHANGELOG sets the envelope on the statement.
+// Both are optional and independent.
+//
+// Backwards compatibility:
+//   FORMAT DEBEZIUM       -> FORMAT JSON, CHANGELOG DEBEZIUM (deprecated)
+//   FORMAT DEBEZIUM_AVRO  -> FORMAT AVRO, CHANGELOG DEBEZIUM (deprecated)
+//   FORMAT AVRO DEBEZIUM  -> FORMAT AVRO, CHANGELOG DEBEZIUM (deprecated two-token envelope in FORMAT)
+func (p *Parser) parseFormatAndChangelog(stmt *ast.SelectStatement) error {
+	for {
+		switch p.lex.Peek().Type {
+		case lexer.TokenFormat:
+			format, opts, changelog, err := p.parseFormatClause()
+			if err != nil {
+				return err
+			}
+			// Store format on the appropriate source
+			if stmt.FromExec != nil {
+				if stmt.FromExec.Format != "" {
+					return p.errorf(p.lex.Peek(), "duplicate FORMAT clause")
+				}
+				stmt.FromExec.Format = format
+				stmt.FromExec.FormatOpts = opts
+			} else if stmt.From != nil {
+				if stmt.From.Format != "" {
+					return p.errorf(p.lex.Peek(), "duplicate FORMAT clause")
+				}
+				stmt.From.Format = format
+				stmt.From.FormatOpts = opts
+			} else {
+				// No FROM/EXEC yet — create an implicit stdin source
+				stmt.From = &ast.TableSource{
+					Format:     format,
+					FormatOpts: opts,
+				}
+			}
+			// If FORMAT also yielded a changelog (deprecated compat), set it
+			if changelog != "" {
+				if stmt.Changelog != "" {
+					return p.errorf(p.lex.Peek(), "duplicate CHANGELOG (from deprecated FORMAT envelope syntax)")
+				}
+				stmt.Changelog = changelog
+			}
+		case lexer.TokenChangelog:
+			if stmt.Changelog != "" {
+				return p.errorf(p.lex.Peek(), "duplicate CHANGELOG clause")
+			}
+			changelog, err := p.parseChangelogClause()
+			if err != nil {
+				return err
+			}
+			stmt.Changelog = changelog
+		default:
+			return nil
+		}
 	}
-	return src, nil
 }
 
-// parseFormatInto consumes a FORMAT clause and writes the encoding, envelope,
-// and options into the given TableSource. The caller must have already verified
-// that the next token is TokenFormat.
-//
-// Syntax: FORMAT <encoding> [<envelope>]
-//   FORMAT AVRO DEBEZIUM      -> encoding=AVRO, envelope=DEBEZIUM
-//   FORMAT JSON DEBEZIUM      -> encoding=JSON, envelope=DEBEZIUM
-//   FORMAT DEBEZIUM           -> encoding=JSON, envelope=DEBEZIUM (shorthand)
-//   FORMAT FOLDDB             -> encoding=JSON, envelope=FOLDDB (shorthand)
-//   FORMAT JSON FOLDDB        -> encoding=JSON, envelope=FOLDDB
-//   FORMAT AVRO               -> encoding=AVRO
-//   FORMAT CSV(header=true)   -> encoding=CSV, opts={header:true}
-//   FORMAT DEBEZIUM_AVRO      -> encoding=AVRO, envelope=DEBEZIUM (deprecated)
-func (p *Parser) parseFormatInto(src *ast.TableSource) error {
+// parseFormatClause consumes FORMAT <encoding> [(<options>)] and returns
+// the encoding name, options, and any deprecated changelog implied by the
+// old FORMAT DEBEZIUM / FORMAT AVRO DEBEZIUM syntax.
+func (p *Parser) parseFormatClause() (format string, opts map[string]string, changelog string, err error) {
 	p.lex.Next() // consume FORMAT
 	fmtTok := p.lex.Next()
 	if fmtTok.Type == lexer.TokenEOF {
-		return p.errorf(fmtTok, "expected format name after FORMAT")
+		return "", nil, "", p.errorf(fmtTok, "expected format name after FORMAT")
 	}
 
 	firstName := strings.ToUpper(fmtTok.Literal)
 
-	// Parse optional options after first token: FORMAT CSV(header=true, ...)
-	var opts map[string]string
+	// Parse optional options: FORMAT CSV(header=true, ...)
 	if p.lex.Peek().Type == lexer.TokenLParen {
-		var err error
 		opts, err = p.parseFormatOptions()
 		if err != nil {
-			return err
+			return "", nil, "", err
 		}
 	}
 
 	// Handle deprecated DEBEZIUM_AVRO as a single token
 	if firstName == "DEBEZIUM_AVRO" {
-		log.Println("Warning: FORMAT DEBEZIUM_AVRO is deprecated, use FORMAT AVRO DEBEZIUM instead")
-		src.Encoding = "AVRO"
-		src.Envelope = "DEBEZIUM"
-		src.EncodingOpts = opts
-		return nil
+		log.Println("Warning: FORMAT DEBEZIUM_AVRO is deprecated, use FORMAT AVRO CHANGELOG DEBEZIUM instead")
+		return "AVRO", opts, "DEBEZIUM", nil
 	}
 
-	if isEnvelope(firstName) {
-		// FORMAT DEBEZIUM -> encoding=JSON (default), envelope=DEBEZIUM
-		src.Encoding = "JSON"
-		src.Envelope = firstName
-		src.EncodingOpts = opts
-	} else {
-		src.Encoding = firstName
-		src.EncodingOpts = opts
-
-		// Check for optional envelope: FORMAT AVRO DEBEZIUM
-		nextTok := p.lex.Peek()
-		envName := strings.ToUpper(nextTok.Literal)
-		if (nextTok.Type == lexer.TokenIdent || lexer.IsKeyword(nextTok.Type)) && isEnvelope(envName) {
-			p.lex.Next() // consume envelope token
-			src.Envelope = envName
-		}
+	// Handle deprecated envelope-as-format: FORMAT DEBEZIUM, FORMAT FOLDDB
+	if isChangelogFamily(firstName) {
+		log.Printf("Warning: FORMAT %s is deprecated, use FORMAT JSON CHANGELOG %s instead\n", firstName, firstName)
+		return "JSON", opts, firstName, nil
 	}
 
-	return nil
+	format = firstName
+
+	// Check for deprecated two-token envelope in FORMAT: FORMAT AVRO DEBEZIUM
+	nextTok := p.lex.Peek()
+	envName := strings.ToUpper(nextTok.Literal)
+	if (nextTok.Type == lexer.TokenIdent || lexer.IsKeyword(nextTok.Type)) && isChangelogFamily(envName) {
+		p.lex.Next() // consume envelope token
+		log.Printf("Warning: FORMAT %s %s is deprecated, use FORMAT %s CHANGELOG %s instead\n", format, envName, format, envName)
+		changelog = envName
+	}
+
+	return format, opts, changelog, nil
+}
+
+// parseChangelogClause consumes CHANGELOG [<family>] and returns the changelog type.
+// Bare CHANGELOG -> "AUTO". CHANGELOG DEBEZIUM -> "DEBEZIUM".
+func (p *Parser) parseChangelogClause() (string, error) {
+	p.lex.Next() // consume CHANGELOG
+	next := p.lex.Peek()
+	name := strings.ToUpper(next.Literal)
+	if (next.Type == lexer.TokenIdent || lexer.IsKeyword(next.Type)) && isChangelogFamily(name) {
+		p.lex.Next() // consume family name
+		return name, nil
+	}
+	return "AUTO", nil
+}
+
+// isChangelogFamily returns true if the name is a known changelog envelope family.
+func isChangelogFamily(name string) bool {
+	switch name {
+	case "DEBEZIUM", "FOLDDB":
+		return true
+	}
+	return false
 }
 
 // parseFormatOptions parses (key=value, ...) and returns the options map.
@@ -393,14 +431,6 @@ func (p *Parser) parseFormatOptions() (map[string]string, error) {
 	return opts, nil
 }
 
-// isEnvelope returns true if the name is a known envelope format.
-func isEnvelope(name string) bool {
-	switch name {
-	case "DEBEZIUM", "FOLDDB":
-		return true
-	}
-	return false
-}
 
 func (p *Parser) parseSelectList() ([]ast.Column, error) {
 	var cols []ast.Column
@@ -473,12 +503,6 @@ func (p *Parser) parseTableSourceWithAlias() (*ast.TableSource, string, error) {
 			uri = "stdin://"
 		}
 		src = &ast.TableSource{URI: uri}
-		// Check for inline FORMAT after bare identifier (e.g., FROM stdin FORMAT DEBEZIUM)
-		if p.lex.Peek().Type == lexer.TokenFormat {
-			if err := p.parseFormatInto(src); err != nil {
-				return nil, "", err
-			}
-		}
 	} else {
 		return nil, "", p.errorf(tok, "expected source URI or identifier after FROM, got %q", tok.Literal)
 	}
@@ -500,13 +524,6 @@ func (p *Parser) parseTableSource() (*ast.TableSource, error) {
 		return nil, p.errorf(tok, "expected source URI string after FROM, got %q", tok.Literal)
 	}
 	src := &ast.TableSource{URI: tok.Literal}
-
-	if p.lex.Peek().Type == lexer.TokenFormat {
-		if err := p.parseFormatInto(src); err != nil {
-			return nil, err
-		}
-	}
-
 	return src, nil
 }
 
@@ -579,12 +596,6 @@ func (p *Parser) parseJoinClause() (*ast.JoinClause, error) {
 		if err := p.parseExecMode(execSrc); err != nil {
 			return nil, err
 		}
-		// Parse optional FORMAT
-		if !ast.HasFormat(execSrc.Encoding, execSrc.Envelope) && p.lex.Peek().Type == lexer.TokenFormat {
-			if err := p.parseFormatIntoExec(execSrc); err != nil {
-				return nil, err
-			}
-		}
 	} else if p.lex.Peek().Type == lexer.TokenLParen {
 		// Subquery as JOIN source: JOIN (SELECT ...) alias
 		var err error
@@ -603,7 +614,31 @@ func (p *Parser) parseJoinClause() (*ast.JoinClause, error) {
 		if err != nil {
 			return nil, err
 		}
-		// Parse optional alias
+	}
+
+	// Parse optional FORMAT for join source (before or after alias)
+	if p.lex.Peek().Type == lexer.TokenFormat {
+		format, opts, changelog, err := p.parseFormatClause()
+		if err != nil {
+			return nil, err
+		}
+		if src != nil {
+			src.Format = format
+			src.FormatOpts = opts
+			if changelog != "" {
+				src.Changelog = changelog
+			}
+		} else if execSrc != nil {
+			execSrc.Format = format
+			execSrc.FormatOpts = opts
+			if changelog != "" {
+				execSrc.Changelog = changelog
+			}
+		}
+	}
+
+	// Parse optional alias (after source and optional FORMAT)
+	if alias == "" {
 		next := p.lex.Peek()
 		if next.Type == lexer.TokenIdent && !isClauseKeyword(next.Type) {
 			p.lex.Next()
@@ -666,11 +701,14 @@ func (p *Parser) parseSeedClause() (*ast.SeedClause, error) {
 		if execSrc.Mode == "STREAM" {
 			return nil, p.errorf(p.lex.Peek(), "SEED FROM EXEC cannot use AS STREAM (seed must be bounded)")
 		}
-		// Parse optional FORMAT
-		if !ast.HasFormat(execSrc.Encoding, execSrc.Envelope) && p.lex.Peek().Type == lexer.TokenFormat {
-			if err := p.parseFormatIntoExec(execSrc); err != nil {
+		// Parse optional FORMAT for seed EXEC source
+		if execSrc.Format == "" && p.lex.Peek().Type == lexer.TokenFormat {
+			format, opts, _, err := p.parseFormatClause()
+			if err != nil {
 				return nil, err
 			}
+			execSrc.Format = format
+			execSrc.FormatOpts = opts
 		}
 		return &ast.SeedClause{Exec: execSrc}, nil
 	}
@@ -682,6 +720,16 @@ func (p *Parser) parseSeedClause() (*ast.SeedClause, error) {
 	src, err := p.parseTableSource()
 	if err != nil {
 		return nil, err
+	}
+
+	// Parse optional FORMAT for seed file source
+	if src.Format == "" && p.lex.Peek().Type == lexer.TokenFormat {
+		format, opts, _, fmtErr := p.parseFormatClause()
+		if fmtErr != nil {
+			return nil, fmtErr
+		}
+		src.Format = format
+		src.FormatOpts = opts
 	}
 
 	return &ast.SeedClause{Source: src}, nil
@@ -727,56 +775,6 @@ func (p *Parser) parseExecMode(exec *ast.ExecSource) error {
 	return nil
 }
 
-// parseFormatIntoExec consumes a FORMAT clause and writes the encoding, envelope,
-// and options into the given ExecSource. The caller must have already verified
-// that the next token is TokenFormat.
-func (p *Parser) parseFormatIntoExec(src *ast.ExecSource) error {
-	p.lex.Next() // consume FORMAT
-	fmtTok := p.lex.Next()
-	if fmtTok.Type == lexer.TokenEOF {
-		return p.errorf(fmtTok, "expected format name after FORMAT")
-	}
-
-	firstName := strings.ToUpper(fmtTok.Literal)
-
-	// Parse optional options after first token
-	var opts map[string]string
-	if p.lex.Peek().Type == lexer.TokenLParen {
-		var err error
-		opts, err = p.parseFormatOptions()
-		if err != nil {
-			return err
-		}
-	}
-
-	// Handle deprecated DEBEZIUM_AVRO
-	if firstName == "DEBEZIUM_AVRO" {
-		log.Println("Warning: FORMAT DEBEZIUM_AVRO is deprecated, use FORMAT AVRO DEBEZIUM instead")
-		src.Encoding = "AVRO"
-		src.Envelope = "DEBEZIUM"
-		src.EncodingOpts = opts
-		return nil
-	}
-
-	if isEnvelope(firstName) {
-		src.Encoding = "JSON"
-		src.Envelope = firstName
-		src.EncodingOpts = opts
-	} else {
-		src.Encoding = firstName
-		src.EncodingOpts = opts
-
-		// Check for optional envelope
-		nextTok := p.lex.Peek()
-		envName := strings.ToUpper(nextTok.Literal)
-		if (nextTok.Type == lexer.TokenIdent || lexer.IsKeyword(nextTok.Type)) && isEnvelope(envName) {
-			p.lex.Next()
-			src.Envelope = envName
-		}
-	}
-
-	return nil
-}
 
 func (p *Parser) parseWindowClause() (*ast.WindowClause, error) {
 	tok := p.lex.Next()
@@ -1511,7 +1509,9 @@ func suggestFix(tok lexer.Token) string {
 			"DISTINC":   "Did you mean DISTINCT?",
 			"FORAMT":    "Did you mean FORMAT?",
 			"FROMAT":    "Did you mean FORMAT?",
-			"DEBEZIUIM": "Did you mean DEBEZIUM?",
+			"DEBEZIUIM":  "Did you mean DEBEZIUM?",
+			"CHANGLOG":   "Did you mean CHANGELOG?",
+			"CHNAGELOG":  "Did you mean CHANGELOG?",
 		}
 		if s, ok := suggestions[upper]; ok {
 			return s
@@ -1525,8 +1525,8 @@ func isClauseKeyword(tt lexer.TokenType) bool {
 	case lexer.TokenFrom, lexer.TokenWhere, lexer.TokenGroup, lexer.TokenHaving,
 		lexer.TokenOrder, lexer.TokenLimit, lexer.TokenWindow, lexer.TokenEmit,
 		lexer.TokenEvent, lexer.TokenWatermark, lexer.TokenDeduplicate,
-		lexer.TokenFormat, lexer.TokenJoin, lexer.TokenLeft, lexer.TokenOn,
-		lexer.TokenWithin, lexer.TokenExec:
+		lexer.TokenFormat, lexer.TokenChangelog, lexer.TokenJoin, lexer.TokenLeft,
+		lexer.TokenOn, lexer.TokenWithin, lexer.TokenExec:
 		return true
 	}
 	return false

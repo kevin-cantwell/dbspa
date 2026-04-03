@@ -1023,7 +1023,7 @@ func runJoinQuery(t *testing.T, sql string, inputLines []string, tableFile strin
 	// Build join operator
 	tableFormat := ""
 	if stmt.Join.Source != nil {
-		tableFormat = stmt.Join.Source.Format()
+		tableFormat = ast.CombinedFormat(stmt.Join.Source.Format, stmt.Join.Source.Changelog)
 	}
 	tableRecords, err := loadTableFile(tableFile, tableFormat)
 	if err != nil {
@@ -1440,7 +1440,7 @@ func runJoinAggQuery(t *testing.T, sql string, inputLines []string, tableFile st
 	// Build DD join operator
 	tableFormat := ""
 	if stmt.Join.Source != nil {
-		tableFormat = stmt.Join.Source.Format()
+		tableFormat = ast.CombinedFormat(stmt.Join.Source.Format, stmt.Join.Source.Changelog)
 	}
 	tableRecords, err := loadTableFile(tableFile, tableFormat)
 	if err != nil {
@@ -1576,7 +1576,7 @@ func runJoinAggQueryWithOrderBy(t *testing.T, sql string, inputLines []string, t
 	// Build DD join operator
 	tableFormat := ""
 	if stmt.Join.Source != nil {
-		tableFormat = stmt.Join.Source.Format()
+		tableFormat = ast.CombinedFormat(stmt.Join.Source.Format, stmt.Join.Source.Changelog)
 	}
 	tableRecords, err := loadTableFile(tableFile, tableFormat)
 	if err != nil {
@@ -2610,7 +2610,7 @@ func TestIsStreamingSubquery(t *testing.T) {
 			name: "kafka source",
 			sq: &ast.SubquerySource{
 				Query: &ast.SelectStatement{
-					From: &ast.TableSource{URI: "kafka://broker/orders.cdc", Encoding: "JSON", Envelope: "DEBEZIUM"},
+					From: &ast.TableSource{URI: "kafka://broker/orders.cdc", Format: "JSON", Changelog: "DEBEZIUM"},
 				},
 				Alias: "r",
 			},
@@ -2710,7 +2710,8 @@ func TestExecuteStreamingSubquery_RequiresGroupBy(t *testing.T) {
 	// This mirrors the validation in executeStreamingSubquery.
 	stmt := &ast.SelectStatement{
 		Columns: []ast.Column{{Expr: &ast.ColumnRef{Name: "order_id"}, Alias: ""}},
-		From:    &ast.TableSource{URI: "kafka://broker/orders.cdc", Encoding: "JSON", Envelope: "DEBEZIUM"},
+		From:      &ast.TableSource{URI: "kafka://broker/orders.cdc", Format: "JSON", Changelog: "DEBEZIUM"},
+		Changelog: "DEBEZIUM",
 		// No GroupBy, no aggregates
 	}
 

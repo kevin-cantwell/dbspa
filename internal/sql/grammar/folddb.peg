@@ -16,10 +16,11 @@ Statement <- _ SelectStatement _ EOF
 // This enforces the parser's semantic constraint that HAVING and ORDER BY require GROUP BY.
 SelectStatement <- SELECT __ ( DISTINCT __ )? SelectList
     FromClause?
-    PostFromFormatClause?
+    FormatOrChangelogClause*
     JoinClause?
-    PostJoinFormatClause?
+    FormatOrChangelogClause*
     SeedClause?
+    FormatOrChangelogClause*
     WhereClause?
     ( GroupByClause
         HavingClause?
@@ -36,7 +37,7 @@ SelectStatement <- SELECT __ ( DISTINCT __ )? SelectList
         DeduplicateClause?
     )
     LimitClause?
-    TrailingFormatClause?
+    FormatOrChangelogClause*
 
 // ============================================================================
 // SELECT list
@@ -63,7 +64,7 @@ ImplicitAlias <- !ClauseKeyword !AS !ReservedKeyword BareName
 // FROM clause
 // ============================================================================
 
-FromClause <- __ FROM __ ( ExecSource ExecAlias? ExecModeHint? / SubquerySource / Source InlineFromFormat? FromAlias? )
+FromClause <- __ FROM __ ( ExecSource ExecAlias? ExecModeHint? / SubquerySource / Source FromAlias? )
 
 ExecAlias <- __ !ClauseKeyword !AS BareName
 
@@ -79,36 +80,31 @@ SubquerySource <- '(' _ SelectStatement _ ')' __ SubqueryAlias
 
 SubqueryAlias <- !ClauseKeyword BareName
 
-// Format right after source string (inside parseTableSource)
-InlineFromFormat <- __ FORMAT __ FormatName
-
 FromAlias <- __ !ClauseKeyword BareName
 
 // ============================================================================
-// Post-FROM FORMAT (after source + alias, before JOIN)
+// FORMAT and CHANGELOG clauses (independent, order-independent)
 // ============================================================================
 
-PostFromFormatClause <- __ FORMAT __ FormatName
+FormatOrChangelogClause <- __ ( FormatClause / ChangelogClause )
+
+FormatClause <- FORMAT __ FormatName
+
+ChangelogClause <- CHANGELOG ( __ ChangelogFamily )?
+
+ChangelogFamily <- DEBEZIUM / FOLDDB
 
 // ============================================================================
 // JOIN clause
 // ============================================================================
 
-JoinClause <- __ ( LEFT __ )? JOIN __ ( ExecSource ExecAlias? ExecModeHint? ExecJoinFormat? / SubquerySource / StringLiteral JoinSourceFormat? JoinAlias? ) __ ON __ Expression JoinWithin?
+JoinClause <- __ ( LEFT __ )? JOIN __ ( ExecSource ExecAlias? ExecModeHint? / SubquerySource / StringLiteral ) JoinFormat? JoinAlias? __ ON __ Expression JoinWithin?
 
-ExecJoinFormat <- __ FORMAT __ FormatName
-
-JoinSourceFormat <- __ FORMAT __ FormatName
+JoinFormat <- __ FORMAT __ FormatName
 
 JoinAlias <- __ !ClauseKeyword BareName
 
 JoinWithin <- __ WITHIN __ INTERVAL __ StringLiteral
-
-// ============================================================================
-// Post-JOIN FORMAT
-// ============================================================================
-
-PostJoinFormatClause <- __ FORMAT __ FormatName
 
 // ============================================================================
 // SEED clause
@@ -197,12 +193,6 @@ OrderByItem <- Expression ( __ ( ASC / DESC ) )?
 // ============================================================================
 
 LimitClause <- __ LIMIT __ IntegerLiteral
-
-// ============================================================================
-// Trailing FORMAT (standalone, after all other clauses)
-// ============================================================================
-
-TrailingFormatClause <- __ FORMAT __ FormatName
 
 // ============================================================================
 // FORMAT helpers
@@ -423,6 +413,7 @@ STREAM     <- [Ss][Tt][Rr][Ee][Aa][Mm] !IdentChar
 TABLE      <- [Tt][Aa][Bb][Ll][Ee] !IdentChar
 DEBEZIUM   <- [Dd][Ee][Bb][Ee][Zz][Ii][Uu][Mm] !IdentChar
 FOLDDB     <- [Ff][Oo][Ll][Dd][Dd][Bb] !IdentChar
+CHANGELOG  <- [Cc][Hh][Aa][Nn][Gg][Ee][Ll][Oo][Gg] !IdentChar
 
 // Aggregate functions
 COUNT                <- [Cc][Oo][Uu][Nn][Tt] !IdentChar
@@ -476,14 +467,14 @@ CallableKeyword <- ( COUNT / SUM / AVG / MIN / MAX / MEDIAN / FIRST / LAST
 
 // ClauseKeyword: keywords that introduce clauses and cannot be used as implicit aliases
 ClauseKeyword <- ( FROM / WHERE / GROUP / HAVING / ORDER / LIMIT / WINDOW
-    / EMIT / EVENT / WATERMARK / DEDUPLICATE / FORMAT / JOIN / LEFT / ON
+    / EMIT / EVENT / WATERMARK / DEDUPLICATE / FORMAT / CHANGELOG / JOIN / LEFT / ON
     / WITHIN / SEED / EXEC ) !IdentChar
 
 // ReservedKeyword: all keywords that cannot be used as unquoted identifiers
 ReservedKeyword <- ( SELECT / DISTINCT / FROM / WHERE / GROUP / BY / HAVING
     / ORDER / ASC / DESC / LIMIT / WINDOW / TUMBLING / SLIDING / SESSION
     / EMIT / FINAL / EARLY / EVENT / TIME / WATERMARK / DEDUPLICATE / WITHIN
-    / CAPACITY / FORMAT / AS / AND / OR / NOT / IN / BETWEEN / IS / NULL
+    / CAPACITY / FORMAT / CHANGELOG / AS / AND / OR / NOT / IN / BETWEEN / IS / NULL
     / TRUE / FALSE / LIKE / ILIKE / CASE / WHEN / THEN / ELSE / END / INTERVAL
     / CAST / SEED / JOIN / LEFT / ON / EXEC / STREAM / TABLE
     / DEBEZIUM / FOLDDB

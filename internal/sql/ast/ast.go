@@ -14,22 +14,11 @@ type Expr interface {
 
 // ExecSource represents a shell command whose stdout is used as a record source.
 type ExecSource struct {
-	Command      string            // the shell command to execute
-	Encoding     string            // JSON, AVRO, CSV, PROTOBUF, PARQUET (empty = auto-detect)
-	Envelope     string            // DEBEZIUM, FOLDDB, "" (empty = plain records)
-	EncodingOpts map[string]string // options like registry, delimiter, header
-	Mode         string            // "TABLE" (default) or "STREAM"
-}
-
-// Format returns a combined format string for backwards compatibility.
-// Used by call sites that need a single format string for decoder dispatch.
-func (e *ExecSource) Format() string {
-	return CombinedFormat(e.Encoding, e.Envelope)
-}
-
-// FormatOptions returns the encoding options for backwards compatibility.
-func (e *ExecSource) FormatOptions() map[string]string {
-	return e.EncodingOpts
+	Command    string            // the shell command to execute
+	Format     string            // encoding: JSON, AVRO, CSV, PROTOBUF, PARQUET (empty = auto-detect)
+	FormatOpts map[string]string // encoding options: registry, delimiter, header, etc.
+	Changelog  string            // envelope: DEBEZIUM, FOLDDB, "" = none, "AUTO" = auto-detect
+	Mode       string            // "TABLE" (default) or "STREAM"
 }
 
 func (*ExecSource) nodeTag() {}
@@ -54,6 +43,7 @@ type SelectStatement struct {
 	FromAlias    string          // optional alias for the FROM source
 	Join         *JoinClause     // nil means no JOIN
 	Seed         *SeedClause     // nil means no SEED FROM
+	Changelog    string          // "", "AUTO" (bare CHANGELOG), "DEBEZIUM", "FOLDDB"
 	Where       Expr          // nil means no WHERE
 	GroupBy     []Expr        // nil means non-accumulating
 	Having      Expr          // nil means no HAVING
@@ -97,39 +87,24 @@ type Column struct {
 
 // TableSource represents a FROM clause source.
 type TableSource struct {
-	URI          string            // e.g., 'kafka://...' or 'stdin://'
-	Encoding     string            // JSON, AVRO, CSV, PROTOBUF, PARQUET (empty = auto-detect)
-	Envelope     string            // DEBEZIUM, FOLDDB, "" (empty = plain records)
-	EncodingOpts map[string]string // options like registry, delimiter, header
+	URI        string            // e.g., 'kafka://...' or 'stdin://'
+	Format     string            // encoding: JSON, AVRO, CSV, PROTOBUF, PARQUET (empty = auto-detect)
+	FormatOpts map[string]string // encoding options: registry, delimiter, header, etc.
+	Changelog  string            // envelope: DEBEZIUM, FOLDDB, "" = none, "AUTO" = auto-detect
 }
 
-// Format returns a combined format string for backwards compatibility.
-// Used by call sites that need a single format string for decoder dispatch.
-func (t *TableSource) Format() string {
-	return CombinedFormat(t.Encoding, t.Envelope)
-}
-
-// FormatOptions returns the encoding options for backwards compatibility.
-func (t *TableSource) FormatOptions() map[string]string {
-	return t.EncodingOpts
-}
-
-// CombinedFormat produces a single format string from encoding + envelope
-// for backwards-compatible decoder dispatch.
-func CombinedFormat(encoding, envelope string) string {
-	if envelope == "" {
-		return encoding
+// CombinedFormat produces a single format string from encoding + changelog
+// for backwards-compatible decoder dispatch. This is a transitional helper
+// used by call sites that still need a single format string.
+func CombinedFormat(format, changelog string) string {
+	if changelog == "" || changelog == "AUTO" {
+		return format
 	}
-	if encoding == "" || encoding == "JSON" {
-		return envelope
+	if format == "" || format == "JSON" {
+		return changelog
 	}
-	// e.g., encoding=AVRO, envelope=DEBEZIUM -> DEBEZIUM_AVRO
-	return envelope + "_" + encoding
-}
-
-// HasFormat returns true if an encoding or envelope has been explicitly set.
-func HasFormat(encoding, envelope string) bool {
-	return encoding != "" || envelope != ""
+	// e.g., format=AVRO, changelog=DEBEZIUM -> DEBEZIUM_AVRO
+	return changelog + "_" + format
 }
 
 // WindowClause represents a WINDOW specification.

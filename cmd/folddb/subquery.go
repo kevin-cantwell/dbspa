@@ -72,7 +72,7 @@ func executeSubquery(ctx context.Context, stmt *ast.SelectStatement) ([]engine.R
 				// Fallback: load via table loader
 				formatHint := ""
 				if stmt.From != nil {
-					formatHint = stmt.From.Format()
+					formatHint = ast.CombinedFormat(stmt.From.Format, stmt.Changelog)
 				}
 				recs, loadErr := loadTableFile(fromURI, formatHint)
 				if loadErr != nil {
@@ -103,8 +103,8 @@ func executeSubquery(ctx context.Context, stmt *ast.SelectStatement) ([]engine.R
 		var formatStr string
 		var formatOpts map[string]string
 		if stmt.From != nil {
-			formatStr = stmt.From.Format()
-			formatOpts = stmt.From.FormatOptions()
+			formatStr = ast.CombinedFormat(stmt.From.Format, stmt.Changelog)
+			formatOpts = stmt.From.FormatOpts
 		}
 		dec, err := format.NewDecoderWithOptions(formatStr, formatOpts)
 		if err != nil {
@@ -262,7 +262,7 @@ func buildSubqueryJoinOp(ctx context.Context, stmt *ast.SelectStatement) (*engin
 		// JOIN source is a file
 		tableFormat := ""
 		if join.Source != nil {
-			tableFormat = join.Source.Format()
+			tableFormat = ast.CombinedFormat(join.Source.Format, join.Source.Changelog)
 		}
 		tableRecords, err = loadTableFile(join.Source.URI, tableFormat)
 		if err != nil {
@@ -338,8 +338,8 @@ func executeStreamingSubquery(ctx context.Context, stmt *ast.SelectStatement) (<
 	}
 
 	// Build decoder
-	formatStr := stmt.From.Format()
-	formatOpts := stmt.From.FormatOptions()
+	formatStr := ast.CombinedFormat(stmt.From.Format, stmt.Changelog)
+	formatOpts := stmt.From.FormatOpts
 	var dec format.Decoder
 	if cfg.Registry != "" {
 		dec, err = format.NewDecoderForKafka(formatStr, formatOpts, cfg.Registry)
