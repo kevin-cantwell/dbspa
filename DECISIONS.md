@@ -330,6 +330,31 @@ The inner accumulator emits retraction+insertion pairs (Z-set deltas) to a chann
 
 ---
 
+### 15. SEED FROM as Pre-Accumulated State
+
+**Status:** In progress
+
+**Problem:** SEED FROM currently feeds raw records through the full pipeline (filter → accumulate). For a 1B-row seed source, this means processing 1B records to build starting state. The seed should instead provide pre-computed accumulator values — the batch system (BigQuery, DuckDB, Postgres) does the heavy aggregation, FoldDB loads the result as starting state.
+
+**Design:**
+
+The seed query's output must match the outer query's GROUP BY keys + aggregate columns. Each seed row becomes the initial state for that group key:
+
+```sql
+SELECT region, SUM(amount)
+FROM 'kafka://broker/orders.cdc?offset=2026-04-01' FORMAT DEBEZIUM
+SEED FROM EXEC('bq query "SELECT region, SUM(amount) FROM orders WHERE ts < 2026-04-01 GROUP BY region"')
+GROUP BY region
+```
+
+Seed row `{"region":"us-east","sum":1000000}` → accumulator for "us-east" starts at SUM=1000000.
+
+**Bridge responsibility:** The user ensures no overlap/gap between seed cutoff and stream start. No automatic dedup — pre-accumulated state can't be deduplicated against raw stream records since they're different shapes.
+
+**Implementation:** New `ImportInitialState(records []Record)` method on AggregateOp that maps seed row values to accumulator initial states, then emits the initial state to the sink.
+
+---
+
 ### 14. EXEC() Universal Source Adapter
 
 **Status:** In progress
