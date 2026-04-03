@@ -105,6 +105,25 @@ Warnings for compatible schema drift and accumulator type errors are rate-limite
 
 This prevents stderr from being overwhelmed when a data quality issue affects many records.
 
+## EXEC error behavior
+
+When a command run via `EXEC()` exits with a non-zero exit code, FoldDB treats it as a **fatal error** and terminates the process. The tail of the command's stderr is included in the error message to aid debugging.
+
+```
+Fatal: EXEC command exited with code 1: ERROR: relation "orders" does not exist
+```
+
+**Subprocess stderr** is buffered silently during normal execution -- it is only shown on failure. This keeps FoldDB's stderr clean when commands produce informational messages on stderr.
+
+**Exception:** When the query is cancelled via context cancellation (e.g., Ctrl+C), the subprocess exit code is ignored. The subprocess receives SIGTERM and its exit code (typically 143) is not treated as an error.
+
+### Error routing for EXEC
+
+| Error type | Logged to stderr | Routed to dead letter |
+|---|---|---|
+| EXEC non-zero exit | Yes (fatal -- process terminates) | No (process terminates) |
+| EXEC output deserialization error | Yes | Yes |
+
 ## Design philosophy
 
 FoldDB follows a **skip and continue** model:

@@ -266,6 +266,20 @@ folddb "SELECT region, COUNT(*) AS orders
         GROUP BY region"
 ```
 
+### Seed from BigQuery, continue from Kafka CDC
+
+Use EXEC to pull pre-aggregated state from a data warehouse, then continue with live CDC:
+
+```bash
+# Seed from BigQuery, continue from Kafka CDC
+folddb "SELECT region, SUM(amount) AS total
+        FROM 'kafka://broker/orders.cdc?offset=2026-04-01' FORMAT DEBEZIUM
+        SEED FROM EXEC('bq query --format=json \"SELECT region, SUM(amount) AS total FROM orders WHERE ts < ''2026-04-01'' GROUP BY region\"')
+        GROUP BY region"
+```
+
+The seed query's columns (`region`, `total`) match the outer query's GROUP BY key and aggregate alias. FoldDB injects the pre-computed sums directly into the accumulators, then streaming picks up from the Kafka offset where the seed left off.
+
 ## Stateful checkpointing
 
 Survive restarts without replaying from the beginning:

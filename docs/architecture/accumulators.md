@@ -85,6 +85,22 @@ Some accumulators support `Merge()` for combining partial state:
 
 Merge is used when session windows combine: two session accumulators are merged into one.
 
+## Seeding (SetInitial)
+
+When a query includes `SEED FROM`, each accumulator's initial state is set via `SetInitial(value)` before streaming begins. This bypasses the normal `Add`/`Retract` path -- the seed value is treated as the pre-computed result, not as a raw input.
+
+| Accumulator | SetInitial behavior |
+|---|---|
+| `CountStarAccumulator` / `CountAccumulator` | Sets counter to seed value |
+| `SumAccumulator` | Sets running total to seed value |
+| `MinAccumulator` | Sets current minimum to seed value |
+| `MaxAccumulator` | Sets current maximum to seed value |
+| `AvgAccumulator` | Not supported -- cannot decompose into sum + count |
+| `FirstAccumulator` | Not supported -- depends on arrival order |
+| `LastAccumulator` | Not supported -- depends on arrival order |
+
+For unsupported accumulators, attempting to seed logs a warning and leaves the accumulator at its zero value. See [SEED FROM](pipeline.md#seed-from) for the full pipeline details.
+
 ## Serialization
 
 Every accumulator implements `Marshal()` / `Unmarshal()` for [checkpointing](checkpointing.md). The serialized form is JSON. On restore, accumulator state is deserialized and the pipeline resumes as if it never stopped.

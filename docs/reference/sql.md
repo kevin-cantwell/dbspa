@@ -263,7 +263,7 @@ EMIT EARLY '10 seconds' -- periodic partial results
 
 ## SEED FROM
 
-Bootstraps accumulator state from a file or command before streaming.
+Bootstraps **pre-computed accumulator state** from a file or command before streaming. Unlike a regular FROM source, SEED FROM does not inject raw records into the pipeline -- it sets the initial value of each accumulator directly.
 
 ```sql
 -- From a file
@@ -271,11 +271,41 @@ FROM 'kafka://broker/topic' FORMAT DEBEZIUM
 SEED FROM '/path/to/snapshot.parquet'
 GROUP BY region
 
--- From a shell command
-FROM 'kafka://broker/topic' FORMAT DEBEZIUM
-SEED FROM EXEC('bq query --format=json "SELECT * FROM orders_snapshot"')
+-- From a shell command (e.g., BigQuery via EXEC)
+FROM 'kafka://broker/orders.cdc?offset=2026-04-01' FORMAT DEBEZIUM
+SEED FROM EXEC('bq query --format=json "SELECT region, SUM(amount) AS total FROM orders WHERE ts < ''2026-04-01'' GROUP BY region"')
 GROUP BY region
 ```
+
+### Column mapping
+
+The seed query's columns must match the outer query's **GROUP BY keys** and **aggregate aliases**. For the query:
+
+```sql
+SELECT region, SUM(amount) AS total, COUNT(*) AS cnt
+FROM 'kafka://broker/orders.cdc' FORMAT DEBEZIUM
+SEED FROM '/data/seed.json'
+GROUP BY region
+```
+
+The seed data must contain columns `region` (group key), `total` (maps to `SUM(amount)`), and `cnt` (maps to `COUNT(*)`). Each row sets the initial accumulator state for that group key.
+
+Missing seed columns log a warning and start the corresponding accumulator at zero.
+
+### Supported accumulators
+
+| Accumulator | Seedable | Notes |
+|---|---|---|
+| `COUNT` | Yes | Seed with the pre-computed count |
+| `SUM` | Yes | Seed with the pre-computed sum |
+| `MIN` | Yes | Seed with the pre-computed minimum |
+| `MAX` | Yes | Seed with the pre-computed maximum |
+| `AVG` | No | Cannot be seeded directly -- seed `SUM` + `COUNT` separately and compute AVG in the SELECT |
+| `FIRST` | No | Non-deterministic; depends on arrival order |
+| `LAST` | No | Non-deterministic; depends on arrival order |
+
+!!! warning
+    **Bridge responsibility:** The user must ensure there is no overlap or gap between the seed cutoff and the stream offset. For example, if the seed covers data up to `2026-04-01`, the Kafka offset should start at `2026-04-01`. FoldDB does not verify continuity between seed and stream.
 
 See [Checkpointing](../architecture/checkpointing.md) for interaction with `--stateful`.
 

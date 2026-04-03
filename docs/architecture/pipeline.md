@@ -225,8 +225,40 @@ For cold starts when Kafka retention is insufficient:
 FROM 'kafka://broker/topic' SEED FROM '/path/to/snapshot.parquet'
 ```
 
-1. Load seed file and process through accumulators (synchronous, blocking).
-2. Start streaming from Kafka.
-3. Accumulators continue from seeded state.
+### How it works: ImportInitialState
 
-If a checkpoint exists, it takes precedence over the seed (checkpoint is more recent).
+SEED FROM does **not** replay raw records through the pipeline. Instead, it injects pre-computed accumulator state directly:
+
+```
+┌──────────┐     ┌─────────────────┐     ┌─────────────────────────┐     ┌──────────┐
+│ Seed     │────▶│ Parse seed rows │────▶│ Map columns to          │────▶│ Kafka    │
+│ source   │     │ (file or EXEC)  │     │ accumulator.SetInitial  │     │ stream   │
+│          │     │                 │     │ per group key            │     │ begins   │
+└──────────┘     └─────────────────┘     └─────────────────────────┘     └──────────┘
+```
+
+1. **Load seed data** from a file or EXEC command (synchronous, blocking).
+2. **Map seed columns to accumulators.** Each seed row's columns are matched to the outer query's GROUP BY keys and aggregate aliases. For each group key, `SetInitial` is called on the corresponding accumulator with the seed value.
+3. **Start streaming from Kafka.** Accumulators continue from the seeded state -- new records update the pre-existing values.
+
+### Column mapping rules
+
+- GROUP BY columns in the seed identify the group key.
+- Aggregate alias columns (e.g., `total` for `SUM(amount) AS total`) set the initial accumulator value.
+- Missing seed columns log a warning and leave the accumulator at its zero value.
+- Extra seed columns are ignored.
+
+### Why AVG cannot be seeded
+
+`AVG` is internally derived from `SUM / COUNT`. A single pre-computed average cannot be decomposed back into its component sum and count without knowing the original count. To seed an average, use separate `SUM` and `COUNT` accumulators and compute the average in the SELECT list:
+
+```sql
+SELECT region, SUM(amount) / COUNT(*) AS avg_amount
+FROM 'kafka://broker/orders.cdc' FORMAT DEBEZIUM
+SEED FROM EXEC('bq query --format=json "SELECT region, SUM(amount) AS sum_amount, COUNT(*) AS cnt FROM orders GROUP BY region"')
+GROUP BY region
+```
+
+### Checkpoint vs seed precedence
+
+If a checkpoint exists, it takes precedence over the seed (checkpoint is more recent). The seed is skipped entirely when valid checkpoint state is found.
