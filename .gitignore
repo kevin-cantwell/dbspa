@@ -5,3 +5,6 @@ coverage.out
 *.out
 /tmp/
 site/
+bench/harness/results/*
+!bench/harness/results/.gitkeep
+bench/harness/bench-harness

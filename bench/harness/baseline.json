@@ -1,0 +1,202 @@
+{
+  "timestamp": "2026-04-03T01:53:44Z",
+  "folddb_version": "folddb 111f6d8-dirty",
+  "go_version": "go1.25.7",
+  "os": "darwin",
+  "arch": "arm64",
+  "cpu": "Apple M4",
+  "benchmarks": [
+    {
+      "name": "format/ndjson/passthrough",
+      "records": 100000,
+      "runs": [
+        431,
+        425,
+        425
+      ],
+      "median_ms": 425,
+      "records_per_sec": 235294,
+      "input_bytes": 17945365
+    },
+    {
+      "name": "format/ndjson/filter",
+      "records": 100000,
+      "runs": [
+        430,
+        420,
+        422
+      ],
+      "median_ms": 422,
+      "records_per_sec": 236966,
+      "input_bytes": 17945365
+    },
+    {
+      "name": "format/ndjson/groupby",
+      "records": 100000,
+      "runs": [
+        427,
+        432,
+        427
+      ],
+      "median_ms": 427,
+      "records_per_sec": 234192,
+      "input_bytes": 17945365
+    },
+    {
+      "name": "format/avro/passthrough",
+      "records": 100000,
+      "runs": [
+        407,
+        407,
+        410
+      ],
+      "median_ms": 407,
+      "records_per_sec": 245700,
+      "input_bytes": 9033869
+    },
+    {
+      "name": "format/parquet/passthrough",
+      "records": 100000,
+      "runs": [
+        180,
+        182,
+        183
+      ],
+      "median_ms": 182,
+      "records_per_sec": 549450,
+      "input_bytes": 0
+    },
+    {
+      "name": "format/parquet/filter",
+      "records": 100000,
+      "runs": [
+        153,
+        155,
+        153
+      ],
+      "median_ms": 153,
+      "records_per_sec": 653594,
+      "input_bytes": 0
+    },
+    {
+      "name": "format/parquet/groupby",
+      "records": 100000,
+      "runs": [
+        271,
+        269,
+        266
+      ],
+      "median_ms": 269,
+      "records_per_sec": 371747,
+      "input_bytes": 0
+    },
+    {
+      "name": "format/csv/passthrough",
+      "records": 100000,
+      "runs": [
+        293,
+        266,
+        266
+      ],
+      "median_ms": 266,
+      "records_per_sec": 375939,
+      "input_bytes": 5380770
+    },
+    {
+      "name": "cdc/json/groupby",
+      "records": 100000,
+      "runs": [
+        991,
+        978,
+        967
+      ],
+      "median_ms": 978,
+      "records_per_sec": 102249,
+      "input_bytes": 34762352
+    },
+    {
+      "name": "cdc/avro/groupby",
+      "records": 100000,
+      "runs": [
+        706,
+        712,
+        712
+      ],
+      "median_ms": 712,
+      "records_per_sec": 140449,
+      "input_bytes": 14792493
+    },
+    {
+      "name": "join/file/simple",
+      "records": 100000,
+      "runs": [
+        242,
+        250,
+        252
+      ],
+      "median_ms": 250,
+      "records_per_sec": 400000,
+      "input_bytes": 5026917
+    },
+    {
+      "name": "join/file/groupby",
+      "records": 100000,
+      "runs": [
+        261,
+        271,
+        254
+      ],
+      "median_ms": 261,
+      "records_per_sec": 383141,
+      "input_bytes": 5026917
+    },
+    {
+      "name": "join/file/complex",
+      "records": 100000,
+      "runs": [
+        1135,
+        1124,
+        1132
+      ],
+      "median_ms": 1132,
+      "records_per_sec": 88339,
+      "input_bytes": 5026917
+    },
+    {
+      "name": "join/subquery",
+      "records": 100000,
+      "runs": [
+        265,
+        273,
+        266
+      ],
+      "median_ms": 266,
+      "records_per_sec": 375939,
+      "input_bytes": 5026917
+    },
+    {
+      "name": "pipeline/batch_compaction",
+      "records": 100000,
+      "runs": [
+        196,
+        185,
+        196
+      ],
+      "median_ms": 196,
+      "records_per_sec": 510204,
+      "input_bytes": 1889028
+    },
+    {
+      "name": "pipeline/operator_fusion",
+      "records": 100000,
+      "runs": [
+        201,
+        199,
+        201
+      ],
+      "median_ms": 201,
+      "records_per_sec": 497512,
+      "input_bytes": 2377911
+    }
+  ]
+}
