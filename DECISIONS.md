@@ -527,3 +527,38 @@ SELECT * FROM 'pg://host/db/orders' WHERE status = 'pending'
 - But: 70x performance on batch queries is worth it
 
 ---
+
+### 17. Changelog output format: stay with _weight (FOLDDB)
+
+**Status:** Decided
+
+**Problem:** FoldDB's changelog output uses `{"_weight":1, ...}` as a flat NDJSON format. Should we align with an industry standard instead?
+
+**Research:**
+- **Feldera** `insert_delete` (their default output): `{"insert":{...}}` or `{"delete":{...}}` — no integer weights, boolean only
+- **Feldera** `weighted` (input-only, not fully implemented): `{"weight": N, "data":{...}}` — nested record under "data"
+- **Materialize**: `mz_diff` column in SQL result streams
+- **RisingWave**: `op` varchar column in SQL result streams
+- There is **no standard** Z-set wire format across any of these systems
+
+**Decision:** Keep FoldDB's flat `_weight` format. Advantages:
+1. Flat — no nesting, `jq .region` just works
+2. True Z-set semantics — integer weight, not just insert/delete booleans
+3. Composable — `FORMAT FOLDDB` reads it back correctly for piped instances
+4. Feldera's weighted format is input-only and partially unimplemented — not a real standard to align with
+
+Future: may add output format options (Feldera insert_delete, etc.) for interop.
+
+---
+
+### 18. float64→int64 safe integer boundary
+
+**Status:** Decided
+
+**Problem:** `json.Unmarshal` without `UseNumber` decodes all JSON numbers as `float64`. The code recovered integers by checking `val == math.Trunc(val) && val <= math.MaxInt64`, but `float64(math.MaxInt64)` rounds to `9.223372036854776e+18`, which when cast to `int64` overflows to `MinInt64`. CI caught this with `-race` on Linux.
+
+**Decision:** Tighten the safe integer boundary to `2^53` (9007199254740992), which is the largest integer that `float64` can represent exactly. Numbers beyond this come back as `FloatValue`. This matches JavaScript's `Number.MAX_SAFE_INTEGER` convention.
+
+**Alternative considered:** Switch to `json.Decoder` with `UseNumber()` to preserve exact integer values. Rejected — we measured 20% faster decode with `Unmarshal`, and losing precision on numbers > 2^53 is acceptable for a streaming SQL tool (these are typically IDs that should be strings anyway).
+
+---
