@@ -137,22 +137,16 @@ GROUP BY region
 
 ---
 
-## 8. At-least-once delivery by default; exactly-once processing via DEDUPLICATE BY
+## 8. Delivery semantics per sink
 
 **Problem:** Should DBSPA provide exactly-once output semantics?
 
-**Decision:** At-least-once by default. Exactly-once *processing* is available via `DEDUPLICATE BY $source.gtid WITHIN '...'`, which drops duplicate input records before they reach the accumulator. End-to-end exactly-once (including the output sink) is not guaranteed — the sink is not written transactionally.
+**Decision:** Depends on the sink.
 
-The failure window without deduplication:
+- **stdout / HTTP**: at-least-once. A crash between output emission and checkpoint flush causes duplicate output on restart. No mechanism to un-emit.
+- **SQLite (`--stateful`)**: exactly-once output state. On recovery, the accumulator is restored from checkpoint and records are replayed from the checkpointed offset. The accumulator re-derives the correct state and UPSERT overwrites SQLite with that correct value. The converged SQLite state is identical to a no-crash run. This is the same guarantee as Kafka EOS, achieved via idempotent writes + checkpoint restore rather than atomic transactions.
 
-1. Records processed, accumulator updated.
-2. Output emitted to sink.
-3. Checkpoint flushed to disk.
-4. Kafka offsets committed.
-
-A crash between steps 2 and 3 means output was emitted but checkpoint wasn't saved. On restart, records are replayed, producing duplicate output. For changelog consumers maintaining a key-value map, the duplicates are idempotent.
-
-With `DEDUPLICATE BY $source.gtid WITHIN '10 minutes'`, replayed records are dropped before step 1, giving exactly-once processing within the deduplication window. Full end-to-end exactly-once would require transactional coordination between the output sink and the checkpoint store.
+Use `DEDUPLICATE BY $source.gtid WITHIN '...'` on top of either sink to prevent Kafka redeliveries from reaching the accumulator at all.
 
 ---
 

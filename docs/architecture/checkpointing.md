@@ -43,7 +43,15 @@ The gap between the checkpoint and the current stream position is replayed (typi
 
 ## Delivery semantics
 
-DBSPA is **at-least-once** by default. Use `DEDUPLICATE BY` for exactly-once processing semantics.
+Delivery semantics depend on the sink:
+
+| Sink | Semantics |
+|---|---|
+| stdout | at-least-once |
+| HTTP (`serve`) | at-least-once |
+| SQLite (`--stateful`) | **exactly-once** (output state) |
+
+### stdout and HTTP: at-least-once
 
 The failure window:
 
@@ -52,13 +60,11 @@ The failure window:
 3. On checkpoint flush: accumulator state + offsets are written to disk.
 4. After successful flush: offsets are committed to Kafka (if consumer group is set).
 
-**Crash between step 2 and 3:** Output was emitted but checkpoint was not saved. On restart, records are replayed, producing duplicate output. For changelog consumers that maintain a key-value map, the duplicates are idempotent — the map converges to the correct state.
+**Crash between step 2 and 3:** Output was emitted but checkpoint was not saved. On restart, the accumulator is restored from checkpoint and records are replayed from the checkpointed offset, producing duplicate output lines. There is no way to un-emit what was already written to stdout or HTTP.
 
 **Crash between step 3 and 4:** Checkpoint is saved but Kafka offsets are not committed. DBSPA resumes from the locally checkpointed offsets, not the Kafka-committed ones.
 
-### Exactly-once processing with DEDUPLICATE BY
-
-`DEDUPLICATE BY` eliminates duplicate input records within a time window, giving exactly-once processing semantics for the query computation itself:
+Use `DEDUPLICATE BY` to prevent duplicate *input* records from reaching the accumulator when Kafka redelivers messages:
 
 ```sql
 SELECT status, COUNT(*) AS orders
@@ -67,7 +73,15 @@ GROUP BY status
 DEDUPLICATE BY $source.gtid WITHIN '10 minutes'
 ```
 
-If Kafka redelivers a message (e.g. after a consumer rebalance), DBSPA recognises the `$source.gtid` and drops the duplicate before it reaches the accumulator. Note that this is exactly-once *processing* — end-to-end delivery to the sink remains at-least-once because the output is not written transactionally.
+### SQLite: exactly-once output state
+
+When `--stateful` is set, DBSPA maintains accumulated results in a SQLite database via UPSERT. After any crash and recovery, the SQLite state converges to the correct value — identical to what it would have been with no crash.
+
+This works because recovery restores the accumulator to its checkpointed state and replays records from the checkpointed offset. The accumulator re-derives the correct final state, and the UPSERT overwrites whatever SQLite had with that correct value. The UPSERT (last-write-wins) is what makes this safe: there is no way to produce a wrong SQLite row that persists, because the next successful recovery will always overwrite it.
+
+This is the same guarantee as Kafka's transactional EOS, achieved via idempotent writes and checkpoint restore rather than atomic transactions.
+
+The caveat: "exactly-once output state" — the converged SQLite rows are always correct. A reader observing SQLite mid-recovery may briefly see a stale value, but the final state is exact.
 
 ## Disk full handling
 
