@@ -3915,7 +3915,10 @@ func TestE2E_FormatDebezium_UpdateRetraction(t *testing.T) {
 	}
 }
 
-// TestE2E_FormatDBSPA_WeightConsumed: CHANGELOG DBSPA consumes weight as z-set weight
+// TestE2E_FormatDBSPA_WeightConsumed: CHANGELOG DBSPA consumes weight as z-set weight.
+// Phase 3 batch semantics: insert+retract for the same key within one batch net to
+// zero — no output. A Z-set batch is a single time step; if a group's net weight is
+// zero after processing the batch, no changelog entry is emitted.
 func TestE2E_FormatDBSPA_WeightConsumed(t *testing.T) {
 	stdin := "{\"weight\":1,\"data\":{\"x\":10}}\n{\"weight\":-1,\"data\":{\"x\":10}}\n"
 	stdout, stderr, err := runDBSPA(t, "SELECT x, COUNT(*) AS cnt FROM stdin CHANGELOG DBSPA GROUP BY x", stdin)
@@ -3923,25 +3926,14 @@ func TestE2E_FormatDBSPA_WeightConsumed(t *testing.T) {
 		t.Fatalf("dbspa failed: %v\nstderr: %s", err, stderr)
 	}
 	results := parseChangelogOutput(t, stdout)
-	// Insert (weight=1) produces cnt=1, then retraction (weight=-1) removes the group.
-	// The changelog should show: insert cnt=1, then retract cnt=1 (group removed).
-	if len(results) < 2 {
-		t.Fatalf("expected at least 2 changelog entries, got %d: %v", len(results), results)
-	}
-	// First entry: insertion with cnt=1
-	if results[0]["_weight"] != float64(1) {
-		t.Errorf("result[0] _weight: got %v, want 1", results[0]["_weight"])
-	}
-	if results[0]["cnt"] != float64(1) {
-		t.Errorf("result[0] cnt: got %v, want 1", results[0]["cnt"])
-	}
-	// Second entry: retraction (group removed)
-	if results[1]["_weight"] != float64(-1) {
-		t.Errorf("result[1] _weight: got %v, want -1", results[1]["_weight"])
+	// +1 and -1 for the same key arrive in the same batch: net weight = 0, no output.
+	if len(results) != 0 {
+		t.Errorf("expected 0 changelog entries (net-zero batch), got %d: %v", len(results), results)
 	}
 }
 
-// TestE2E_FormatJSONDBSPA_Explicit: FORMAT JSON CHANGELOG DBSPA (explicit encoding)
+// TestE2E_FormatJSONDBSPA_Explicit: FORMAT JSON CHANGELOG DBSPA (explicit encoding).
+// Same net-zero batch semantics as TestE2E_FormatDBSPA_WeightConsumed.
 func TestE2E_FormatJSONDBSPA_Explicit(t *testing.T) {
 	stdin := "{\"weight\":1,\"data\":{\"x\":10}}\n{\"weight\":-1,\"data\":{\"x\":10}}\n"
 	stdout, stderr, err := runDBSPA(t, "SELECT x, COUNT(*) AS cnt FROM stdin FORMAT JSON CHANGELOG DBSPA GROUP BY x", stdin)
@@ -3949,14 +3941,8 @@ func TestE2E_FormatJSONDBSPA_Explicit(t *testing.T) {
 		t.Fatalf("dbspa failed: %v\nstderr: %s", err, stderr)
 	}
 	results := parseChangelogOutput(t, stdout)
-	if len(results) < 2 {
-		t.Fatalf("expected at least 2 changelog entries, got %d: %v", len(results), results)
-	}
-	if results[0]["_weight"] != float64(1) {
-		t.Errorf("result[0] _weight: got %v, want 1", results[0]["_weight"])
-	}
-	if results[1]["_weight"] != float64(-1) {
-		t.Errorf("result[1] _weight: got %v, want -1", results[1]["_weight"])
+	if len(results) != 0 {
+		t.Errorf("expected 0 changelog entries (net-zero batch), got %d: %v", len(results), results)
 	}
 }
 

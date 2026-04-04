@@ -79,13 +79,25 @@ func (op *AggregateOp) Process(in <-chan Record, out chan<- Record) error {
 }
 
 // ProcessBatch applies aggregation to all records in a batch, emitting
-// results to out. Before processing, the batch is compacted: records with
-// identical column fingerprints have their weights summed, and entries
-// whose net weight is zero are dropped entirely.
+// results to out.
+//
+// Phase 3 compaction: after exact-duplicate compaction, partition by GROUP BY
+// key and process each group's sub-batch together, emitting one
+// retraction+insertion per group per batch instead of one per record. For
+// low-cardinality GROUP BY (e.g. 3 status values, batch of 1024) this
+// reduces map lookups and changelog emissions by ~300x.
 func (op *AggregateOp) ProcessBatch(batch Batch, out chan<- Record) {
 	compacted := CompactBatch(batch)
-	for _, rec := range compacted {
-		op.processRecord(rec, out)
+	if len(op.GroupByExprs) == 0 {
+		// No GROUP BY — single implicit group, use per-record path.
+		for _, rec := range compacted {
+			op.processRecord(rec, out)
+		}
+		return
+	}
+	groups := GroupByKey(compacted, op.GroupByExprs)
+	for _, recs := range groups {
+		op.processGroupBatch(recs, out)
 	}
 }
 
@@ -172,26 +184,32 @@ func (op *AggregateOp) ImportInitialState(records []Record, out chan<- Record) {
 	}
 }
 
-func (op *AggregateOp) processRecord(rec Record, out chan<- Record) {
+// processGroupBatch processes all records belonging to a single GROUP BY key
+// in one shot, emitting at most one retraction+insertion pair. This is Phase 3:
+// all accumulator updates for a group happen before any emission, so a batch
+// of N records with the same key produces one output record, not N.
+func (op *AggregateOp) processGroupBatch(recs Batch, out chan<- Record) {
+	if len(recs) == 0 {
+		return
+	}
+
+	// Compute GROUP BY key from the first record (all records in this sub-batch
+	// share the same key by construction from GroupByKey).
+	keyVals := make([]Value, len(op.GroupByExprs))
+	for i, expr := range op.GroupByExprs {
+		if val, err := Eval(expr, recs[0]); err == nil {
+			keyVals[i] = val
+		}
+	}
+	keyStr := compositeKey(keyVals)
+
 	op.mu.Lock()
 	defer op.mu.Unlock()
 
-	// Evaluate GROUP BY key
-	keyVals := make([]Value, len(op.GroupByExprs))
-	for i, expr := range op.GroupByExprs {
-		val, err := Eval(expr, rec)
-		if err != nil {
-			// Skip malformed records
-			continue
-		}
-		keyVals[i] = val
-	}
-
-	keyStr := compositeKey(keyVals)
-
-	// Get or create group
-	gs, exists := op.groups[keyStr]
-	if !exists {
+	existed := true
+	gs, ok := op.groups[keyStr]
+	if !ok {
+		existed = false
 		gs = &groupState{
 			accumulators: op.newAccumulators(),
 			keyValues:    keyVals,
@@ -200,10 +218,16 @@ func (op *AggregateOp) processRecord(rec Record, out chan<- Record) {
 		op.keyOrder = append(op.keyOrder, keyStr)
 	}
 
-	// Apply Add or Retract to each accumulator.
-	// Weight magnitude determines how many times the operation is applied.
-	// This is essential for correctness with batch compaction (Phase 3),
-	// where multiple identical records are merged into one with weight > 1.
+	for _, rec := range recs {
+		op.applyToAccumulators(gs, rec)
+	}
+	op.emitGroupState(keyStr, gs, existed, recs[len(recs)-1], out)
+}
+
+// applyToAccumulators feeds a single record's weight into each aggregate
+// accumulator. Weight magnitude controls how many Add/Retract calls are made,
+// supporting Z-set weights > 1 produced by CompactBatch.
+func (op *AggregateOp) applyToAccumulators(gs *groupState, rec Record) {
 	absWeight := rec.Weight
 	if absWeight < 0 {
 		absWeight = -absWeight
@@ -214,7 +238,7 @@ func (op *AggregateOp) processRecord(rec Record, out chan<- Record) {
 		}
 		var argVal Value
 		if col.IsStar {
-			argVal = IntValue{V: 1} // placeholder for COUNT(*)
+			argVal = IntValue{V: 1}
 		} else {
 			var err error
 			argVal, err = Eval(col.AggArg, rec)
@@ -222,7 +246,6 @@ func (op *AggregateOp) processRecord(rec Record, out chan<- Record) {
 				argVal = NullValue{}
 			}
 		}
-
 		for w := 0; w < absWeight; w++ {
 			if rec.Weight >= 0 {
 				gs.accumulators[i].Add(argVal)
@@ -231,8 +254,12 @@ func (op *AggregateOp) processRecord(rec Record, out chan<- Record) {
 			}
 		}
 	}
+}
 
-	// Check if any accumulator changed
+// emitGroupState checks accumulators for changes and emits a retraction of the
+// previous result followed by an insertion of the new result. It also handles
+// group deletion when COUNT(*) reaches zero and HAVING suppression.
+func (op *AggregateOp) emitGroupState(keyStr string, gs *groupState, existed bool, lastRec Record, out chan<- Record) {
 	anyChanged := false
 	hasAnyAggregate := false
 	for i, col := range op.Columns {
@@ -243,15 +270,10 @@ func (op *AggregateOp) processRecord(rec Record, out chan<- Record) {
 			}
 		}
 	}
-
-	// If no aggregates (GROUP BY without aggregate functions),
-	// only emit when the group is first created
 	if !hasAnyAggregate {
-		anyChanged = !exists
+		anyChanged = !existed
 	}
-
 	if !anyChanged {
-		// Reset changed flags
 		for i, col := range op.Columns {
 			if col.IsAggregate {
 				gs.accumulators[i].ResetChanged()
@@ -260,19 +282,13 @@ func (op *AggregateOp) processRecord(rec Record, out chan<- Record) {
 		return
 	}
 
-	// Check if this group's COUNT(*) hit 0 — if so, remove the group
 	countZero := op.isGroupEmpty(gs)
-
-	// Build current result record
 	resultCols := op.buildResult(gs)
 
-	// Apply HAVING filter if present
 	havingPass := true
 	if op.Having != nil && !countZero {
-		havingResult, err := op.evalHaving(op.Having, gs, rec)
-		if err != nil {
-			havingPass = false
-		} else if havingResult.IsNull() {
+		havingResult, err := op.evalHaving(op.Having, gs, lastRec)
+		if err != nil || havingResult.IsNull() {
 			havingPass = false
 		} else if b, ok := havingResult.(BoolValue); ok {
 			havingPass = b.V
@@ -281,21 +297,15 @@ func (op *AggregateOp) processRecord(rec Record, out chan<- Record) {
 		}
 	}
 
-	// Emit retraction for previous result (if one was emitted)
 	if gs.hasEmitted {
 		retractCols := make(map[string]Value, len(gs.lastEmitted))
 		for i, col := range op.Columns {
 			retractCols[col.Alias] = gs.lastEmitted[i]
 		}
-		out <- Record{
-			Columns:   retractCols,
-			Timestamp: rec.Timestamp,
-			Weight:      -1,
-		}
+		out <- Record{Columns: retractCols, Timestamp: lastRec.Timestamp, Weight: -1}
 	}
 
 	if countZero {
-		// Remove the group — do not emit a new insertion
 		delete(op.groups, keyStr)
 		for i, k := range op.keyOrder {
 			if k == keyStr {
@@ -304,31 +314,51 @@ func (op *AggregateOp) processRecord(rec Record, out chan<- Record) {
 			}
 		}
 	} else if havingPass {
-		// Emit new result
 		resultVals := make([]Value, len(op.Columns))
 		for i, col := range op.Columns {
 			resultVals[i] = resultCols[col.Alias]
 		}
 		gs.lastEmitted = resultVals
 		gs.hasEmitted = true
-
-		out <- Record{
-			Columns:   resultCols,
-			Timestamp: rec.Timestamp,
-			Weight:      1,
-		}
+		out <- Record{Columns: resultCols, Timestamp: lastRec.Timestamp, Weight: 1}
 	} else {
-		// HAVING failed — this group is suppressed (no emission)
 		gs.hasEmitted = false
 		gs.lastEmitted = nil
 	}
 
-	// Reset changed flags
 	for i, col := range op.Columns {
 		if col.IsAggregate {
 			gs.accumulators[i].ResetChanged()
 		}
 	}
+}
+
+func (op *AggregateOp) processRecord(rec Record, out chan<- Record) {
+	keyVals := make([]Value, len(op.GroupByExprs))
+	for i, expr := range op.GroupByExprs {
+		if val, err := Eval(expr, rec); err == nil {
+			keyVals[i] = val
+		}
+	}
+	keyStr := compositeKey(keyVals)
+
+	op.mu.Lock()
+	defer op.mu.Unlock()
+
+	existed := true
+	gs, ok := op.groups[keyStr]
+	if !ok {
+		existed = false
+		gs = &groupState{
+			accumulators: op.newAccumulators(),
+			keyValues:    keyVals,
+		}
+		op.groups[keyStr] = gs
+		op.keyOrder = append(op.keyOrder, keyStr)
+	}
+
+	op.applyToAccumulators(gs, rec)
+	op.emitGroupState(keyStr, gs, existed, rec, out)
 }
 
 // evalHaving evaluates a HAVING expression, resolving aggregate function calls

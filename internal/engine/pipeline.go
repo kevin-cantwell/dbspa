@@ -89,34 +89,107 @@ func (p *Pipeline) ProcessBatches(in <-chan Batch, out chan<- Record) error {
 	return nil
 }
 
-// FusedAggregateProcessor combines WHERE filtering and aggregation into a
-// single pass over each batch. This eliminates the intermediate chan Record
-// and second BatchChannel that the non-fused path requires.
+// FusedAggregateProcessor combines WHERE filtering, column pruning, and
+// aggregation into a single pass over each batch. This eliminates the
+// intermediate chan Record and second BatchChannel that the non-fused path
+// requires.
 //
 // Non-fused path:  decode → chan Record → filter goroutine → chan Record → BatchChannel → AggregateOp.ProcessBatches
 // Fused path:      decode → chan Record → BatchChannel → FusedAggregateProcessor.ProcessBatches
+//
+// Phase 4: after filtering, records are pruned to only the columns referenced
+// by WHERE, GROUP BY, and aggregate expressions. For wide records (many
+// columns), this reduces per-record allocation size before aggregation.
 type FusedAggregateProcessor struct {
 	Where       ast.Expr      // WHERE clause (may be nil)
 	AggregateOp *AggregateOp  // accumulator
 	InputCount  *atomic.Int64 // optional counter for filtered input records
+	neededCols  map[string]bool // nil = no pruning
 }
 
-// ProcessBatches reads batches from in, applies WHERE filter and aggregation
-// in a single loop per batch, and sends changelog records to out.
+// NewFusedAggregateProcessor creates a FusedAggregateProcessor with column
+// pruning computed from all expressions that reference input columns.
+func NewFusedAggregateProcessor(where ast.Expr, agg *AggregateOp, inputCount *atomic.Int64) *FusedAggregateProcessor {
+	needed := make(map[string]bool)
+	collectColRefs(where, needed)
+	for _, expr := range agg.GroupByExprs {
+		collectColRefs(expr, needed)
+	}
+	for _, col := range agg.Columns {
+		if col.IsAggregate && !col.IsStar && col.AggArg != nil {
+			collectColRefs(col.AggArg, needed)
+		}
+	}
+	if agg.Having != nil {
+		collectColRefs(agg.Having, needed)
+	}
+	return &FusedAggregateProcessor{
+		Where:       where,
+		AggregateOp: agg,
+		InputCount:  inputCount,
+		neededCols:  needed,
+	}
+}
+
+// collectColRefs recursively walks an AST expression, adding all referenced
+// column names to into.
+func collectColRefs(expr ast.Expr, into map[string]bool) {
+	if expr == nil {
+		return
+	}
+	switch e := expr.(type) {
+	case *ast.ColumnRef:
+		into[e.Name] = true
+	case *ast.QualifiedRef:
+		into[e.Name] = true
+	case *ast.JsonAccessExpr:
+		collectColRefs(e.Left, into)
+	case *ast.BinaryExpr:
+		collectColRefs(e.Left, into)
+		collectColRefs(e.Right, into)
+	case *ast.UnaryExpr:
+		collectColRefs(e.Expr, into)
+	case *ast.FunctionCall:
+		for _, arg := range e.Args {
+			collectColRefs(arg, into)
+		}
+	case *ast.CastExpr:
+		collectColRefs(e.Expr, into)
+	case *ast.BetweenExpr:
+		collectColRefs(e.Expr, into)
+		collectColRefs(e.Low, into)
+		collectColRefs(e.High, into)
+	case *ast.InExpr:
+		collectColRefs(e.Expr, into)
+		for _, v := range e.Values {
+			collectColRefs(v, into)
+		}
+	case *ast.IsExpr:
+		collectColRefs(e.Expr, into)
+		collectColRefs(e.From, into)
+	case *ast.CaseExpr:
+		for _, w := range e.Whens {
+			collectColRefs(w.Condition, into)
+			collectColRefs(w.Result, into)
+		}
+		collectColRefs(e.Else, into)
+	}
+}
+
+// ProcessBatches reads batches from in, applies WHERE filter, column pruning,
+// and aggregation in a single loop per batch, and sends changelog records to out.
 // It closes out when in is exhausted.
 func (f *FusedAggregateProcessor) ProcessBatches(in <-chan Batch, out chan<- Record) {
 	defer close(out)
 	for batch := range in {
-		// Step 1: filter in one pass, counting input records
-		filtered := f.filterBatch(batch)
-		// Step 2: compact + aggregate
+		filtered := f.filterAndPruneBatch(batch)
 		f.AggregateOp.ProcessBatch(filtered, out)
 	}
 }
 
-// filterBatch applies the WHERE clause to each record in the batch,
-// returning a new batch with only matching records.
-func (f *FusedAggregateProcessor) filterBatch(batch Batch) Batch {
+// filterAndPruneBatch applies the WHERE clause and then prunes each passing
+// record to only the columns needed by aggregation expressions.
+func (f *FusedAggregateProcessor) filterAndPruneBatch(batch Batch) Batch {
 	result := make(Batch, 0, len(batch))
 	for _, rec := range batch {
 		if f.InputCount != nil {
@@ -128,7 +201,21 @@ func (f *FusedAggregateProcessor) filterBatch(batch Batch) Batch {
 				continue
 			}
 		}
+		if len(f.neededCols) > 0 && len(rec.Columns) > len(f.neededCols) {
+			rec = pruneRecord(rec, f.neededCols)
+		}
 		result = append(result, rec)
 	}
 	return result
+}
+
+// pruneRecord returns a copy of rec with only the columns present in needed.
+func pruneRecord(rec Record, needed map[string]bool) Record {
+	pruned := make(map[string]Value, len(needed))
+	for k, v := range rec.Columns {
+		if needed[k] {
+			pruned[k] = v
+		}
+	}
+	return Record{Columns: pruned, Timestamp: rec.Timestamp, Weight: rec.Weight}
 }

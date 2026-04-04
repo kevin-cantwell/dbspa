@@ -1232,11 +1232,7 @@ func runAccumulatingFromBatches(ctx context.Context, stmt *ast.SelectStatement, 
 
 	// Fused filter+aggregate: WHERE filtering and aggregation happen in a
 	// single pass per batch, eliminating the intermediate record channel.
-	fused := &engine.FusedAggregateProcessor{
-		Where:       stmt.Where,
-		AggregateOp: aggOp,
-		InputCount:  inputCount,
-	}
+	fused := engine.NewFusedAggregateProcessor(stmt.Where, aggOp, inputCount)
 
 	aggOutCh := make(chan engine.Record)
 	go func() {
