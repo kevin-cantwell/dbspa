@@ -131,6 +131,23 @@ func NewFusedAggregateProcessor(where ast.Expr, agg *AggregateOp, inputCount *at
 	}
 }
 
+// NeededColumnsForSelect computes the set of input column names required by a
+// non-accumulating query's SELECT list and WHERE clause. Returns nil if any
+// column is a wildcard (*), meaning all columns must be decoded.
+func NeededColumnsForSelect(where ast.Expr, columns []ast.Column) map[string]bool {
+	for _, col := range columns {
+		if _, ok := col.Expr.(*ast.StarExpr); ok {
+			return nil // SELECT * — need everything
+		}
+	}
+	needed := make(map[string]bool)
+	collectColRefs(where, needed)
+	for _, col := range columns {
+		collectColRefs(col.Expr, needed)
+	}
+	return needed
+}
+
 // NeededColumnsFromAST computes the set of input column names referenced by a
 // query's WHERE clause, GROUP BY expressions, aggregate arguments, and HAVING
 // clause. The returned map can be passed to format.JSONDecoder.AllowCols to

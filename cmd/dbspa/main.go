@@ -933,6 +933,13 @@ func runNonAccumulating(ctx context.Context, stmt *ast.SelectStatement, src *sou
 		return runNonAccumulatingFromRecords(ctx, stmt, joinedCh, flags)
 	}
 
+	// For JSON input, skip decoding columns not referenced by the query.
+	if jd, ok := dec.(*format.JSONDecoder); ok {
+		if needed := engine.NeededColumnsForSelect(stmt.Where, stmt.Columns); len(needed) > 0 {
+			jd.AllowCols = needed
+		}
+	}
+
 	rawCh := src.Read()
 
 	if joinOp != nil {
