@@ -18,7 +18,7 @@ type CSVDecoder struct {
 	Header    bool
 
 	// columns holds the column names derived from the header row,
-	// or generated names (col1, col2, ...) when Header is false.
+	// or generated names ("1", "2", ...) when Header is false.
 	columns []string
 	// headerConsumed tracks whether the header row has been consumed.
 	headerConsumed bool
@@ -59,11 +59,11 @@ func (d *CSVDecoder) Decode(data []byte) (engine.Record, error) {
 		return engine.Record{}, ErrHeaderRow
 	}
 
-	// Generate column names if needed
+	// Generate column names if needed (1-based integer strings: "1", "2", ...)
 	if d.columns == nil {
 		d.columns = make([]string, len(fields))
 		for i := range fields {
-			d.columns[i] = fmt.Sprintf("col%d", i+1)
+			d.columns[i] = fmt.Sprintf("%d", i+1)
 		}
 	}
 
@@ -73,7 +73,7 @@ func (d *CSVDecoder) Decode(data []byte) (engine.Record, error) {
 		if i < len(d.columns) {
 			name = d.columns[i]
 		} else {
-			name = fmt.Sprintf("col%d", i+1)
+			name = fmt.Sprintf("%d", i+1)
 		}
 		cols[name] = engine.TextValue{V: f}
 	}

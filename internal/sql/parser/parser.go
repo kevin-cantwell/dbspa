@@ -1377,7 +1377,7 @@ func (p *Parser) parseIdentOrFunction() (ast.Expr, error) {
 	if p.lex.Peek().Type == lexer.TokenDot {
 		p.lex.Next() // consume first '.'
 		colTok := p.lex.Next()
-		if colTok.Type != lexer.TokenIdent && colTok.Type != lexer.TokenStar && !lexer.IsKeyword(colTok.Type) {
+		if colTok.Type != lexer.TokenIdent && colTok.Type != lexer.TokenStar && colTok.Type != lexer.TokenInteger && !lexer.IsKeyword(colTok.Type) {
 			return nil, p.errorf(colTok, "expected column name after %q., got %q", name, colTok.Literal)
 		}
 		if colTok.Type == lexer.TokenStar {
@@ -1398,7 +1398,7 @@ func (p *Parser) parseIdentOrFunction() (ast.Expr, error) {
 		for p.lex.Peek().Type == lexer.TokenDot {
 			p.lex.Next() // consume '.'
 			fieldTok := p.lex.Next()
-			if fieldTok.Type != lexer.TokenIdent && !lexer.IsKeyword(fieldTok.Type) {
+			if fieldTok.Type != lexer.TokenIdent && fieldTok.Type != lexer.TokenInteger && !lexer.IsKeyword(fieldTok.Type) {
 				return nil, p.errorf(fieldTok, "expected field name after dot, got %q", fieldTok.Literal)
 			}
 			segments = append(segments, fieldTok.Literal)

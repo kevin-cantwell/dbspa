@@ -36,14 +36,14 @@ func TestCSVDecodeWithoutHeader(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error: %v", err)
 	}
-	if rec.Columns["col1"].String() != "alice" {
-		t.Errorf("col1: got %q, want %q", rec.Columns["col1"].String(), "alice")
+	if rec.Columns["1"].String() != "alice" {
+		t.Errorf("1: got %q, want %q", rec.Columns["1"].String(), "alice")
 	}
-	if rec.Columns["col2"].String() != "30" {
-		t.Errorf("col2: got %q, want %q", rec.Columns["col2"].String(), "30")
+	if rec.Columns["2"].String() != "30" {
+		t.Errorf("2: got %q, want %q", rec.Columns["2"].String(), "30")
 	}
-	if rec.Columns["col3"].String() != "nyc" {
-		t.Errorf("col3: got %q, want %q", rec.Columns["col3"].String(), "nyc")
+	if rec.Columns["3"].String() != "nyc" {
+		t.Errorf("3: got %q, want %q", rec.Columns["3"].String(), "nyc")
 	}
 }
 
@@ -71,8 +71,8 @@ func TestCSVDecodeQuotedFields(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error: %v", err)
 	}
-	if rec.Columns["col1"].String() != "hello, world" {
-		t.Errorf("col1: got %q, want %q", rec.Columns["col1"].String(), "hello, world")
+	if rec.Columns["1"].String() != "hello, world" {
+		t.Errorf("1: got %q, want %q", rec.Columns["1"].String(), "hello, world")
 	}
 }
 
