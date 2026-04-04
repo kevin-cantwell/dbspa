@@ -2,7 +2,7 @@ VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -ldflags "-X main.Version=$(VERSION)"
 BINARY := dbspa
 
-.PHONY: build test test-unit test-integration test-all verify bench bench-full bench-full-kafka bench-compare stress stress-quick lint release clean docker-up docker-down testdata grammar
+.PHONY: build test test-unit test-integration test-all verify bench bench-full bench-full-kafka bench-compare stress stress-quick stress-report stress-compare lint release clean docker-up docker-down testdata grammar
 
 build:
 	go build $(LDFLAGS) -o $(BINARY) ./cmd/dbspa
@@ -79,6 +79,16 @@ stress: build
 stress-quick: build
 	@echo "Running quick stress tests (~5 minutes)..."
 	./stress/run.sh --duration 1m --scenarios "sustained/passthrough|adversarial/high_card|adversarial/schema|join/enrichment|join/aggregating" --output stress/results/$$(date +%Y%m%d_%H%M%S).json
+
+stress-report:
+	@python3 scripts/stress-report.py $(FILE)
+
+stress-compare:
+	@if [ -z "$(BASELINE)" ] || [ -z "$(NEW)" ]; then \
+		echo "Usage: make stress-compare BASELINE=stress/results/old.json NEW=stress/results/new.json"; \
+		exit 1; \
+	fi
+	@python3 scripts/stress-compare.py $(BASELINE) $(NEW)
 
 clean:
 	rm -rf dist/ $(BINARY) dbspa-gen
