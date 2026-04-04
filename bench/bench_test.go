@@ -16,10 +16,20 @@ import (
 // Run with: go test -tags bench -bench . -benchtime 1x ./bench/
 //
 // Prerequisites: build dbspa and dbspa-gen first (make build)
+//
+// Benchmark hierarchy:
+//
+//   BenchmarkPipeline  — core query patterns (passthrough, filter, group-by, CDC)
+//   BenchmarkFormat    — format comparison (NDJSON vs Avro vs Protobuf vs Parquet)
+//   BenchmarkJoin      — stream-to-table join scenarios
+//   BenchmarkCompaction — batch compaction: high vs low duplication
+//
+// NullSink sub-benchmarks eliminate sink serialization overhead, isolating
+// the pipeline (decode → filter → aggregate → output channel) throughput.
 
 var (
 	dbspaBin = envOr("DBSPA", "../dbspa")
-	genBin    = envOr("DBSPA_GEN", "../dbspa-gen")
+	genBin   = envOr("DBSPA_GEN", "../dbspa-gen")
 )
 
 func envOr(key, fallback string) string {
@@ -101,333 +111,253 @@ func runDBSPANull(b *testing.B, input []byte, sql string) {
 	}
 }
 
-// countLines counts newline-terminated lines in data.
-func countLines(data []byte) int {
-	n := 0
-	for _, c := range data {
-		if c == '\n' {
-			n++
-		}
+func runDBSPAFileNull(b *testing.B, inputFile string, sql string) {
+	b.Helper()
+	cmd := exec.Command(dbspaBin, "query", "--null-output", "--input", inputFile, sql)
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		b.Fatalf("dbspa --null-output --input failed: %v", err)
 	}
-	return n
 }
 
-// --- Non-accumulating benchmarks (filter/project throughput) ---
-
-func BenchmarkPassthrough_100K(b *testing.B) {
-	data := generateFixture(b, "orders", 100_000)
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		runDBSPA(b, data, "SELECT *")
-	}
-	b.ReportMetric(float64(100_000)/b.Elapsed().Seconds(), "records/sec")
-}
-
-func BenchmarkPassthrough_1M(b *testing.B) {
-	data := generateFixture(b, "orders", 1_000_000)
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		runDBSPA(b, data, "SELECT *")
-	}
-	b.ReportMetric(float64(1_000_000)/b.Elapsed().Seconds(), "records/sec")
-}
-
-func BenchmarkFilter_100K(b *testing.B) {
-	data := generateFixture(b, "orders", 100_000)
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		runDBSPA(b, data, "SELECT * WHERE status = 'confirmed'")
-	}
-	b.ReportMetric(float64(100_000)/b.Elapsed().Seconds(), "records/sec")
-}
-
-func BenchmarkFilter_1M(b *testing.B) {
-	data := generateFixture(b, "orders", 1_000_000)
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		runDBSPA(b, data, "SELECT * WHERE status = 'confirmed'")
-	}
-	b.ReportMetric(float64(1_000_000)/b.Elapsed().Seconds(), "records/sec")
-}
-
-// --- Non-accumulating with NullSink (pipeline throughput, no serialization) ---
-
-func BenchmarkPassthrough_1M_NullSink(b *testing.B) {
-	data := generateFixture(b, "orders", 1_000_000)
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		runDBSPANull(b, data, "SELECT *")
-	}
-	b.ReportMetric(float64(1_000_000)/b.Elapsed().Seconds(), "records/sec")
-}
-
-func BenchmarkFilter_1M_NullSink(b *testing.B) {
-	data := generateFixture(b, "orders", 1_000_000)
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		runDBSPANull(b, data, "SELECT * WHERE status = 'confirmed'")
-	}
-	b.ReportMetric(float64(1_000_000)/b.Elapsed().Seconds(), "records/sec")
-}
-
-// --- Accumulating benchmarks (GROUP BY throughput) ---
-
-func BenchmarkGroupBy_100K(b *testing.B) {
-	data := generateFixture(b, "orders", 100_000)
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		runDBSPA(b, data, "SELECT status, COUNT(*) GROUP BY status")
-	}
-	b.ReportMetric(float64(100_000)/b.Elapsed().Seconds(), "records/sec")
-}
-
-func BenchmarkGroupBy_1M(b *testing.B) {
-	data := generateFixture(b, "orders", 1_000_000)
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		runDBSPA(b, data, "SELECT status, COUNT(*) GROUP BY status")
-	}
-	b.ReportMetric(float64(1_000_000)/b.Elapsed().Seconds(), "records/sec")
-}
-
-func BenchmarkGroupByMultiKey_100K(b *testing.B) {
-	data := generateFixture(b, "orders", 100_000)
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		runDBSPA(b, data, "SELECT product, region, COUNT(*), SUM(total) GROUP BY product, region")
-	}
-	b.ReportMetric(float64(100_000)/b.Elapsed().Seconds(), "records/sec")
-}
-
-func BenchmarkGroupByMultiKey_1M(b *testing.B) {
-	data := generateFixture(b, "orders", 1_000_000)
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		runDBSPA(b, data, "SELECT product, region, COUNT(*), SUM(total) GROUP BY product, region")
-	}
-	b.ReportMetric(float64(1_000_000)/b.Elapsed().Seconds(), "records/sec")
-}
-
-func BenchmarkGroupByWithFilter_1M(b *testing.B) {
-	data := generateFixture(b, "orders", 1_000_000)
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		runDBSPA(b, data, "SELECT product, region, COUNT(*), SUM(total) WHERE status = 'confirmed' GROUP BY product, region")
-	}
-	b.ReportMetric(float64(1_000_000)/b.Elapsed().Seconds(), "records/sec")
-}
-
-// --- Accumulating with NullSink ---
-
-func BenchmarkGroupBy_1M_NullSink(b *testing.B) {
-	data := generateFixture(b, "orders", 1_000_000)
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		runDBSPANull(b, data, "SELECT status, COUNT(*) GROUP BY status")
-	}
-	b.ReportMetric(float64(1_000_000)/b.Elapsed().Seconds(), "records/sec")
-}
-
-func BenchmarkGroupByWithFilter_1M_NullSink(b *testing.B) {
-	data := generateFixture(b, "orders", 1_000_000)
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		runDBSPANull(b, data, "SELECT product, region, COUNT(*), SUM(total) WHERE status = 'confirmed' GROUP BY product, region")
-	}
-	b.ReportMetric(float64(1_000_000)/b.Elapsed().Seconds(), "records/sec")
-}
-
-// --- CDC benchmarks (Debezium retraction throughput) ---
-
-func BenchmarkCDC_100K(b *testing.B) {
-	data := generateFixture(b, "orders-cdc", 100_000)
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		runDBSPA(b, data, "SELECT _after->>'status' AS status, COUNT(*) GROUP BY _after->>'status' CHANGELOG DEBEZIUM")
-	}
-	b.ReportMetric(float64(100_000)/b.Elapsed().Seconds(), "records/sec")
-}
-
-// --- Debezium Avro CDC benchmark ---
-
-func BenchmarkCDC_Avro_100K(b *testing.B) {
-	data := generateFixtureFormat(b, "orders-cdc", 100_000, "debezium-avro")
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		runDBSPA(b, data, "SELECT status, COUNT(*) GROUP BY status FORMAT AVRO CHANGELOG DEBEZIUM")
-	}
-	b.ReportMetric(float64(100_000)/b.Elapsed().Seconds(), "records/sec")
-}
-
-// --- JSON decode microbenchmark ---
-
-func BenchmarkJSONDecode_100K(b *testing.B) {
-	data := generateFixture(b, "orders", 100_000)
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		runDBSPA(b, data, "SELECT order_id")
-	}
-	b.ReportMetric(float64(100_000)/b.Elapsed().Seconds(), "records/sec")
+// reportRecordsPerSec sets the records/sec metric for benchstat output.
+func reportRecordsPerSec(b *testing.B, count int) {
+	b.Helper()
+	b.ReportMetric(float64(count)/b.Elapsed().Seconds(), "records/sec")
 }
 
 // =====================================================
-// Format comparison benchmarks: NDJSON vs Avro vs Protobuf
+// BenchmarkPipeline: core query patterns × scale
 // =====================================================
+//
+// Hierarchy: BenchmarkPipeline/<query>/<scale>[/NullSink]
+//
+// NullSink variants measure pipeline throughput without JSON serialization
+// overhead. Compare them against the base variant to understand sink cost.
 
-// --- Passthrough (SELECT *) across formats ---
+func BenchmarkPipeline(b *testing.B) {
+	b.Run("Passthrough", func(b *testing.B) {
+		b.Run("100K", func(b *testing.B) {
+			data := generateFixture(b, "orders", 100_000)
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				runDBSPA(b, data, "SELECT *")
+			}
+			reportRecordsPerSec(b, 100_000)
+		})
+		b.Run("1M", func(b *testing.B) {
+			data := generateFixture(b, "orders", 1_000_000)
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				runDBSPA(b, data, "SELECT *")
+			}
+			reportRecordsPerSec(b, 1_000_000)
+		})
+		b.Run("1M/NullSink", func(b *testing.B) {
+			data := generateFixture(b, "orders", 1_000_000)
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				runDBSPANull(b, data, "SELECT *")
+			}
+			reportRecordsPerSec(b, 1_000_000)
+		})
+	})
 
-func BenchmarkFormat_NDJSON_Passthrough_100K(b *testing.B) {
-	data := generateFixtureFormat(b, "orders", 100_000, "ndjson")
-	b.SetBytes(int64(len(data)))
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		runDBSPA(b, data, "SELECT *")
-	}
-	b.ReportMetric(float64(100_000)/b.Elapsed().Seconds(), "records/sec")
-}
+	b.Run("Filter", func(b *testing.B) {
+		b.Run("100K", func(b *testing.B) {
+			data := generateFixture(b, "orders", 100_000)
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				runDBSPA(b, data, "SELECT * WHERE status = 'confirmed'")
+			}
+			reportRecordsPerSec(b, 100_000)
+		})
+		b.Run("1M", func(b *testing.B) {
+			data := generateFixture(b, "orders", 1_000_000)
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				runDBSPA(b, data, "SELECT * WHERE status = 'confirmed'")
+			}
+			reportRecordsPerSec(b, 1_000_000)
+		})
+		b.Run("1M/NullSink", func(b *testing.B) {
+			data := generateFixture(b, "orders", 1_000_000)
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				runDBSPANull(b, data, "SELECT * WHERE status = 'confirmed'")
+			}
+			reportRecordsPerSec(b, 1_000_000)
+		})
+	})
 
-func BenchmarkFormat_Avro_Passthrough_100K(b *testing.B) {
-	data := generateFixtureFormat(b, "orders", 100_000, "avro")
-	b.SetBytes(int64(len(data)))
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		runDBSPA(b, data, "SELECT * FORMAT AVRO")
-	}
-	b.ReportMetric(float64(100_000)/b.Elapsed().Seconds(), "records/sec")
-}
+	b.Run("GroupBy", func(b *testing.B) {
+		b.Run("100K", func(b *testing.B) {
+			data := generateFixture(b, "orders", 100_000)
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				runDBSPA(b, data, "SELECT status, COUNT(*) GROUP BY status")
+			}
+			reportRecordsPerSec(b, 100_000)
+		})
+		b.Run("1M", func(b *testing.B) {
+			data := generateFixture(b, "orders", 1_000_000)
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				runDBSPA(b, data, "SELECT status, COUNT(*) GROUP BY status")
+			}
+			reportRecordsPerSec(b, 1_000_000)
+		})
+		b.Run("1M/NullSink", func(b *testing.B) {
+			data := generateFixture(b, "orders", 1_000_000)
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				runDBSPANull(b, data, "SELECT status, COUNT(*) GROUP BY status")
+			}
+			reportRecordsPerSec(b, 1_000_000)
+		})
+	})
 
-func BenchmarkFormat_Protobuf_Passthrough_100K(b *testing.B) {
-	data := generateFixtureFormat(b, "orders", 100_000, "protobuf")
-	b.SetBytes(int64(len(data)))
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		runDBSPA(b, data, "SELECT * FORMAT PROTOBUF")
-	}
-	b.ReportMetric(float64(100_000)/b.Elapsed().Seconds(), "records/sec")
-}
+	b.Run("GroupByMultiKey", func(b *testing.B) {
+		b.Run("100K", func(b *testing.B) {
+			data := generateFixture(b, "orders", 100_000)
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				runDBSPA(b, data, "SELECT product, region, COUNT(*), SUM(total) GROUP BY product, region")
+			}
+			reportRecordsPerSec(b, 100_000)
+		})
+		b.Run("1M", func(b *testing.B) {
+			data := generateFixture(b, "orders", 1_000_000)
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				runDBSPA(b, data, "SELECT product, region, COUNT(*), SUM(total) GROUP BY product, region")
+			}
+			reportRecordsPerSec(b, 1_000_000)
+		})
+	})
 
-// --- Filter across formats ---
+	b.Run("GroupByWithFilter", func(b *testing.B) {
+		b.Run("1M", func(b *testing.B) {
+			data := generateFixture(b, "orders", 1_000_000)
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				runDBSPA(b, data, "SELECT product, region, COUNT(*), SUM(total) WHERE status = 'confirmed' GROUP BY product, region")
+			}
+			reportRecordsPerSec(b, 1_000_000)
+		})
+		b.Run("1M/NullSink", func(b *testing.B) {
+			data := generateFixture(b, "orders", 1_000_000)
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				runDBSPANull(b, data, "SELECT product, region, COUNT(*), SUM(total) WHERE status = 'confirmed' GROUP BY product, region")
+			}
+			reportRecordsPerSec(b, 1_000_000)
+		})
+	})
 
-func BenchmarkFormat_NDJSON_Filter_100K(b *testing.B) {
-	data := generateFixtureFormat(b, "orders", 100_000, "ndjson")
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		runDBSPA(b, data, "SELECT * WHERE status = 'confirmed'")
-	}
-	b.ReportMetric(float64(100_000)/b.Elapsed().Seconds(), "records/sec")
-}
+	b.Run("CDC", func(b *testing.B) {
+		b.Run("NDJSON/100K", func(b *testing.B) {
+			data := generateFixture(b, "orders-cdc", 100_000)
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				runDBSPA(b, data, "SELECT _after->>'status' AS status, COUNT(*) GROUP BY _after->>'status' CHANGELOG DEBEZIUM")
+			}
+			reportRecordsPerSec(b, 100_000)
+		})
+		b.Run("Avro/100K", func(b *testing.B) {
+			data := generateFixtureFormat(b, "orders-cdc", 100_000, "debezium-avro")
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				runDBSPA(b, data, "SELECT status, COUNT(*) GROUP BY status FORMAT AVRO CHANGELOG DEBEZIUM")
+			}
+			reportRecordsPerSec(b, 100_000)
+		})
+	})
 
-func BenchmarkFormat_Avro_Filter_100K(b *testing.B) {
-	data := generateFixtureFormat(b, "orders", 100_000, "avro")
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		runDBSPA(b, data, "SELECT * WHERE status = 'confirmed' FORMAT AVRO")
-	}
-	b.ReportMetric(float64(100_000)/b.Elapsed().Seconds(), "records/sec")
-}
-
-func BenchmarkFormat_Protobuf_Filter_100K(b *testing.B) {
-	data := generateFixtureFormat(b, "orders", 100_000, "protobuf")
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		runDBSPA(b, data, "SELECT * WHERE status = 'confirmed' FORMAT PROTOBUF")
-	}
-	b.ReportMetric(float64(100_000)/b.Elapsed().Seconds(), "records/sec")
-}
-
-// --- GROUP BY across formats ---
-
-func BenchmarkFormat_NDJSON_GroupBy_100K(b *testing.B) {
-	data := generateFixtureFormat(b, "orders", 100_000, "ndjson")
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		runDBSPA(b, data, "SELECT product, region, COUNT(*), SUM(total) GROUP BY product, region")
-	}
-	b.ReportMetric(float64(100_000)/b.Elapsed().Seconds(), "records/sec")
-}
-
-func BenchmarkFormat_Avro_GroupBy_100K(b *testing.B) {
-	data := generateFixtureFormat(b, "orders", 100_000, "avro")
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		runDBSPA(b, data, "SELECT product, region, COUNT(*), SUM(total) GROUP BY product, region FORMAT AVRO")
-	}
-	b.ReportMetric(float64(100_000)/b.Elapsed().Seconds(), "records/sec")
-}
-
-func BenchmarkFormat_Protobuf_GroupBy_100K(b *testing.B) {
-	data := generateFixtureFormat(b, "orders", 100_000, "protobuf")
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		runDBSPA(b, data, "SELECT product, region, COUNT(*), SUM(total) GROUP BY product, region FORMAT PROTOBUF")
-	}
-	b.ReportMetric(float64(100_000)/b.Elapsed().Seconds(), "records/sec")
-}
-
-// --- Typed Protobuf benchmarks ---
-
-func BenchmarkFormat_ProtoTyped_Passthrough_100K(b *testing.B) {
-	data := generateFixtureFormat(b, "orders", 100_000, "proto-typed")
-	b.SetBytes(int64(len(data)))
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		runDBSPA(b, data, "SELECT * FORMAT PROTOBUF(message='Order')")
-	}
-	b.ReportMetric(float64(100_000)/b.Elapsed().Seconds(), "records/sec")
-}
-
-func BenchmarkFormat_ProtoTyped_Filter_100K(b *testing.B) {
-	data := generateFixtureFormat(b, "orders", 100_000, "proto-typed")
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		runDBSPA(b, data, "SELECT * WHERE status = 'confirmed' FORMAT PROTOBUF(message='Order')")
-	}
-	b.ReportMetric(float64(100_000)/b.Elapsed().Seconds(), "records/sec")
-}
-
-func BenchmarkFormat_ProtoTyped_GroupBy_100K(b *testing.B) {
-	data := generateFixtureFormat(b, "orders", 100_000, "proto-typed")
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		runDBSPA(b, data, "SELECT product, region, COUNT(*), SUM(total) GROUP BY product, region FORMAT PROTOBUF(message='Order')")
-	}
-	b.ReportMetric(float64(100_000)/b.Elapsed().Seconds(), "records/sec")
-}
-
-// --- Parquet file benchmarks (--input) ---
-
-func BenchmarkFormat_Parquet_Passthrough_100K(b *testing.B) {
-	path := generateParquetFile(b, "orders", 100_000)
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		runDBSPAFile(b, path, "SELECT * FORMAT PARQUET")
-	}
-	b.ReportMetric(float64(100_000)/b.Elapsed().Seconds(), "records/sec")
-}
-
-func BenchmarkFormat_Parquet_Filter_100K(b *testing.B) {
-	path := generateParquetFile(b, "orders", 100_000)
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		runDBSPAFile(b, path, "SELECT * WHERE status = 'confirmed' FORMAT PARQUET")
-	}
-	b.ReportMetric(float64(100_000)/b.Elapsed().Seconds(), "records/sec")
-}
-
-func BenchmarkFormat_Parquet_GroupBy_100K(b *testing.B) {
-	path := generateParquetFile(b, "orders", 100_000)
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		runDBSPAFile(b, path, "SELECT product, region, COUNT(*), SUM(total) GROUP BY product, region FORMAT PARQUET")
-	}
-	b.ReportMetric(float64(100_000)/b.Elapsed().Seconds(), "records/sec")
+	b.Run("SelectiveDecode", func(b *testing.B) {
+		// SELECT <single column> uses token-based selective decode (skips unused fields).
+		// Measures decode optimization gains on wide records.
+		b.Run("100K", func(b *testing.B) {
+			data := generateFixture(b, "orders", 100_000)
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				runDBSPA(b, data, "SELECT order_id")
+			}
+			reportRecordsPerSec(b, 100_000)
+		})
+	})
 }
 
 // =====================================================
-// Join benchmarks
+// BenchmarkFormat: wire format comparison
 // =====================================================
+//
+// Hierarchy: BenchmarkFormat/<format>/<query>/100K
+//
+// All use 100K records. Compare formats within the same query type
+// to understand encoding overhead (NDJSON parse vs Avro decode vs Protobuf decode).
 
+func BenchmarkFormat(b *testing.B) {
+	formats := []struct {
+		name    string
+		genFmt  string
+		sqlSufx string // appended to each SQL query
+		isFile  bool   // use --input (Parquet)
+	}{
+		{"NDJSON", "ndjson", "", false},
+		{"Avro", "avro", " FORMAT AVRO", false},
+		{"Protobuf", "protobuf", " FORMAT PROTOBUF", false},
+		{"ProtoTyped", "proto-typed", " FORMAT PROTOBUF(message='Order')", false},
+		{"Parquet", "parquet", " FORMAT PARQUET", true},
+	}
 
+	queries := []struct {
+		name string
+		sql  string
+	}{
+		{"Passthrough", "SELECT *"},
+		{"Filter", "SELECT * WHERE status = 'confirmed'"},
+		{"GroupBy", "SELECT product, region, COUNT(*), SUM(total) GROUP BY product, region"},
+	}
+
+	for _, fmt := range formats {
+		fmt := fmt
+		b.Run(fmt.name, func(b *testing.B) {
+			for _, q := range queries {
+				q := q
+				b.Run(q.name+"/100K", func(b *testing.B) {
+					sql := q.sql + fmt.sqlSufx
+					if fmt.isFile {
+						path := generateParquetFile(b, "orders", 100_000)
+						b.SetBytes(0) // file size varies
+						b.ResetTimer()
+						for i := 0; i < b.N; i++ {
+							runDBSPAFile(b, path, sql)
+						}
+					} else {
+						data := generateFixtureFormat(b, "orders", 100_000, fmt.genFmt)
+						b.SetBytes(int64(len(data)))
+						b.ResetTimer()
+						for i := 0; i < b.N; i++ {
+							runDBSPA(b, data, sql)
+						}
+					}
+					reportRecordsPerSec(b, 100_000)
+				})
+			}
+		})
+	}
+}
+
+// =====================================================
+// BenchmarkJoin: stream-to-table join scenarios
+// =====================================================
+//
+// Hierarchy: BenchmarkJoin/<scenario>[/NullSink]
+//
+// SmallTable: 100-row lookup table (fits in L1/L2 cache)
+// LargeTable: 10,000-row lookup table (more realistic reference data)
+// WithGroupBy: join + GROUP BY (accumulating path)
 
 // generateTableFile creates an NDJSON file with N rows of {id, tier, name} data.
 // IDs range from 1..size. Returns the file path.
@@ -480,59 +410,63 @@ func generateStreamData(b *testing.B, count, tableSize int) []byte {
 	return buf.Bytes()
 }
 
-func BenchmarkJoin_SmallTable_100K(b *testing.B) {
-	tableFile := generateTableFile(b, 100)
-	streamData := generateStreamData(b, 100_000, 100)
-	sql := fmt.Sprintf("SELECT e.action, u.tier FROM stdin e JOIN '%s' u ON e.customer_id = u.id", tableFile)
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		runDBSPA(b, streamData, sql)
-	}
-	b.ReportMetric(float64(100_000)/b.Elapsed().Seconds(), "records/sec")
-}
+func BenchmarkJoin(b *testing.B) {
+	b.Run("SmallTable/100K", func(b *testing.B) {
+		tableFile := generateTableFile(b, 100)
+		streamData := generateStreamData(b, 100_000, 100)
+		sql := fmt.Sprintf("SELECT e.action, u.tier FROM stdin e JOIN '%s' u ON e.customer_id = u.id", tableFile)
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			runDBSPA(b, streamData, sql)
+		}
+		reportRecordsPerSec(b, 100_000)
+	})
 
-func BenchmarkJoin_LargeTable_100K(b *testing.B) {
-	tableFile := generateTableFile(b, 10_000)
-	streamData := generateStreamData(b, 100_000, 10_000)
-	sql := fmt.Sprintf("SELECT e.action, u.tier FROM stdin e JOIN '%s' u ON e.customer_id = u.id", tableFile)
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		runDBSPA(b, streamData, sql)
-	}
-	b.ReportMetric(float64(100_000)/b.Elapsed().Seconds(), "records/sec")
-}
+	b.Run("LargeTable/100K", func(b *testing.B) {
+		tableFile := generateTableFile(b, 10_000)
+		streamData := generateStreamData(b, 100_000, 10_000)
+		sql := fmt.Sprintf("SELECT e.action, u.tier FROM stdin e JOIN '%s' u ON e.customer_id = u.id", tableFile)
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			runDBSPA(b, streamData, sql)
+		}
+		reportRecordsPerSec(b, 100_000)
+	})
 
-func BenchmarkJoin_WithGroupBy_100K(b *testing.B) {
-	tableFile := generateTableFile(b, 100)
-	streamData := generateStreamData(b, 100_000, 100)
-	sql := fmt.Sprintf("SELECT u.tier, COUNT(*) AS cnt, SUM(e.value) AS total FROM stdin e JOIN '%s' u ON e.customer_id = u.id GROUP BY u.tier", tableFile)
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		runDBSPA(b, streamData, sql)
-	}
-	b.ReportMetric(float64(100_000)/b.Elapsed().Seconds(), "records/sec")
-}
+	b.Run("WithGroupBy/100K", func(b *testing.B) {
+		tableFile := generateTableFile(b, 100)
+		streamData := generateStreamData(b, 100_000, 100)
+		sql := fmt.Sprintf("SELECT u.tier, COUNT(*) AS cnt, SUM(e.value) AS total FROM stdin e JOIN '%s' u ON e.customer_id = u.id GROUP BY u.tier", tableFile)
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			runDBSPA(b, streamData, sql)
+		}
+		reportRecordsPerSec(b, 100_000)
+	})
 
-// --- Join with NullSink ---
-
-func BenchmarkJoin_WithGroupBy_100K_NullSink(b *testing.B) {
-	tableFile := generateTableFile(b, 100)
-	streamData := generateStreamData(b, 100_000, 100)
-	sql := fmt.Sprintf("SELECT u.tier, COUNT(*) AS cnt, SUM(e.value) AS total FROM stdin e JOIN '%s' u ON e.customer_id = u.id GROUP BY u.tier", tableFile)
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		runDBSPANull(b, streamData, sql)
-	}
-	b.ReportMetric(float64(100_000)/b.Elapsed().Seconds(), "records/sec")
+	b.Run("WithGroupBy/100K/NullSink", func(b *testing.B) {
+		tableFile := generateTableFile(b, 100)
+		streamData := generateStreamData(b, 100_000, 100)
+		sql := fmt.Sprintf("SELECT u.tier, COUNT(*) AS cnt, SUM(e.value) AS total FROM stdin e JOIN '%s' u ON e.customer_id = u.id GROUP BY u.tier", tableFile)
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			runDBSPANull(b, streamData, sql)
+		}
+		reportRecordsPerSec(b, 100_000)
+	})
 }
 
 // =====================================================
-// Batch compaction benchmarks
+// BenchmarkCompaction: batch compaction efficiency
 // =====================================================
+//
+// Hierarchy: BenchmarkCompaction/<scenario>/100K
+//
+// HighDuplication: 10 group keys across 100K records — compaction reduces
+//   ~10K batches to 10 keys, aggregation becomes nearly free.
+// LowDuplication: unique key per record — no compaction benefit, measures
+//   raw accumulation overhead with zero redundancy.
 
-// generateBatchData creates NDJSON stream data for batch compaction benchmarks.
-// highDuplication: 90% of records share one of 10 group keys.
-// lowDuplication: each record gets a distinct group key.
 func generateBatchData(b *testing.B, count int, highDuplication bool) []byte {
 	b.Helper()
 	rng := rand.New(rand.NewSource(42))
@@ -566,20 +500,22 @@ func generateBatchData(b *testing.B, count int, highDuplication bool) []byte {
 	return buf.Bytes()
 }
 
-func BenchmarkBatchCompaction_HighDuplication(b *testing.B) {
-	data := generateBatchData(b, 100_000, true)
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		runDBSPA(b, data, "SELECT g, COUNT(*) AS cnt, SUM(v) AS total GROUP BY g")
-	}
-	b.ReportMetric(float64(100_000)/b.Elapsed().Seconds(), "records/sec")
-}
+func BenchmarkCompaction(b *testing.B) {
+	b.Run("HighDuplication/100K", func(b *testing.B) {
+		data := generateBatchData(b, 100_000, true)
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			runDBSPA(b, data, "SELECT g, COUNT(*) AS cnt, SUM(v) AS total GROUP BY g")
+		}
+		reportRecordsPerSec(b, 100_000)
+	})
 
-func BenchmarkBatchCompaction_LowDuplication(b *testing.B) {
-	data := generateBatchData(b, 100_000, false)
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		runDBSPA(b, data, "SELECT g, COUNT(*) AS cnt, SUM(v) AS total GROUP BY g")
-	}
-	b.ReportMetric(float64(100_000)/b.Elapsed().Seconds(), "records/sec")
+	b.Run("LowDuplication/100K", func(b *testing.B) {
+		data := generateBatchData(b, 100_000, false)
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			runDBSPA(b, data, "SELECT g, COUNT(*) AS cnt, SUM(v) AS total GROUP BY g")
+		}
+		reportRecordsPerSec(b, 100_000)
+	})
 }
