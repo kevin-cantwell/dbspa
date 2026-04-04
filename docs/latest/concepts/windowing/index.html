@@ -1520,7 +1520,10 @@
 <a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="n">WINDOW</span><span class="w"> </span><span class="k">SESSION</span><span class="w"> </span><span class="s1">&#39;5 minutes&#39;</span>
 <a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="n">EVENT</span><span class="w"> </span><span class="k">TIME</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">event_time</span>
 </code></pre></div>
-<p>If a new record arrives within the session gap of an existing session, the session is extended. If a record bridges the gap between two existing sessions, the sessions are <strong>merged</strong> — their accumulators are combined, and a retraction is emitted for the old sessions followed by an insertion for the merged session.</p>
+<div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>Session window merging (combining two existing sessions when a record bridges the gap between them) is not yet implemented. Each record currently creates an independent <code>[ts, ts+gap)</code> window rather than extending or merging existing sessions. Use tumbling or sliding windows for production aggregation.</p>
+</div>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
 <p>The session gap boundary is exclusive: <code>gap &gt; timeout</code> starts a new session, <code>gap &lt;= timeout</code> extends the current session.</p>
@@ -1530,7 +1533,7 @@
 <li><strong>Open</strong> — a window is created when its first record arrives.</li>
 <li><strong>Active</strong> — records are accumulated. If <code>EMIT EARLY</code> is configured, partial results are emitted periodically.</li>
 <li><strong>Close</strong> — the watermark advances past <code>window_end</code>. Final results are emitted and state is discarded.</li>
-<li><strong>Late arrival</strong> — a record arrives for a closed window. If within the <code>WATERMARK</code> lateness, the window is re-opened. Otherwise, the record is dropped (or routed to <code>--dead-letter</code>).</li>
+<li><strong>Late arrival</strong> — a record whose event time falls in a closed window is dropped.</li>
 </ol>
 <h2 id="implicit-columns">Implicit columns<a class="headerlink" href="#implicit-columns" title="Permanent link">&para;</a></h2>
 <p>Windowed queries expose two implicit columns:</p>
@@ -1545,12 +1548,12 @@
 <tbody>
 <tr>
 <td><code>window_start</code></td>
-<td>TIMESTAMP</td>
+<td>TEXT (RFC3339)</td>
 <td>Start of the window (inclusive)</td>
 </tr>
 <tr>
 <td><code>window_end</code></td>
-<td>TIMESTAMP</td>
+<td>TEXT (RFC3339)</td>
 <td>End of the window (exclusive)</td>
 </tr>
 </tbody>

@@ -1664,7 +1664,7 @@
 <p>For most data sources (plain JSON from Kafka, stdin, files), every record has <code>weight = +1</code>. You never think about weights -- they're always positive.</p>
 <p>The weight field matters when you use <strong>Debezium CDC</strong>, when the <strong>accumulator emits updates</strong>, or when <strong>batch compaction</strong> combines multiple records.</p>
 <h2 id="why-z-sets">Why Z-sets?<a class="headerlink" href="#why-z-sets" title="Permanent link">&para;</a></h2>
-<p>DBSPA's earlier "diff model" used a <code>Diff int8</code> field that was limited to <code>+1</code> and <code>-1</code>. Z-sets generalize this with full integer weights, which unlocks several capabilities:</p>
+<p>DBSPA uses Z-sets with full integer weights rather than a simple <code>+1</code>/<code>-1</code> boolean. This unlocks several capabilities:</p>
 <p><strong>Compositional incrementalization.</strong> Every relational operator (filter, project, join, aggregate) has a provably correct incremental version when applied to Z-set deltas. This means you can compose operators freely and the result is always correct -- you don't need to special-case retraction handling per operator.</p>
 <p><strong>Batch compaction.</strong> When multiple records share the same group key, their weights can be summed before reaching the accumulator. If a key is inserted 5 times and retracted 3 times in a single batch, the accumulator sees a single entry with weight <code>+2</code> instead of 8 separate operations.</p>
 <p><strong>Formal correctness.</strong> The DBSP framework provides mathematical proofs that incremental evaluation over Z-sets produces the same results as full re-evaluation. This eliminates an entire class of bugs around retractions in complex queries (HAVING with retractions, multi-way joins, nested aggregation).</p>
@@ -1735,7 +1735,7 @@
 </code></pre></div>
 <p>The counts are always correct because updates carry both the removal and addition.</p>
 <h3 id="efficient-sliding-windows">Efficient sliding windows<a class="headerlink" href="#efficient-sliding-windows" title="Permanent link">&para;</a></h3>
-<p>A 7-day sliding window doesn't need to re-scan 7 days of data when the window slides. Records entering the window have <code>weight = +1</code>, records leaving have <code>weight = -1</code>. The accumulator processes both identically.</p>
+<p>A 7-day sliding window doesn't need to re-scan 7 days of data when the window slides. Each record is assigned to all overlapping windows at ingestion time — for a 7-day window with a 1-day slide, each record is stamped into 7 buckets simultaneously. The accumulator for each bucket holds only summary state (counts, sums, etc.), not the original records. When a window closes, its accumulated result is emitted and the state is discarded.</p>
 <h3 id="composable-operators">Composable operators<a class="headerlink" href="#composable-operators" title="Permanent link">&para;</a></h3>
 <p>Every operator (filter, project, aggregate, join) handles weights. A retraction flowing through a filter is passed through if the record would have matched. A retraction flowing through a join triggers a retraction of the joined result. The system is compositional -- this is the core guarantee of the DBSP framework.</p>
 <h3 id="multiset-semantics">Multiset semantics<a class="headerlink" href="#multiset-semantics" title="Permanent link">&para;</a></h3>

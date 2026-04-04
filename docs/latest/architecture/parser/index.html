@@ -1464,9 +1464,10 @@
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="k">SELECT</span><span class="w"> </span><span class="ss">&quot;last&quot;</span><span class="p">,</span><span class="w"> </span><span class="ss">&quot;first&quot;</span><span class="w"> </span><span class="k">WHERE</span><span class="w"> </span><span class="ss">&quot;count&quot;</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="mi">10</span>
 </code></pre></div>
 <h2 id="parser">Parser<a class="headerlink" href="#parser" title="Permanent link">&para;</a></h2>
-<p>The parser (<code>parser.New(input).Parse()</code>) returns an <code>*ast.SelectStatement</code>. Clause ordering is rigid and must follow:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>SELECT → FROM → JOIN → WHERE → GROUP BY → HAVING → WINDOW → EVENT TIME BY → WATERMARK → EMIT → DEDUPLICATE BY → ORDER BY → LIMIT
+<p>The parser (<code>parser.New(input).Parse()</code>) returns an <code>*ast.SelectStatement</code>. The core clause ordering is:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>SELECT → FROM → [FORMAT/CHANGELOG] → [JOIN] → [FORMAT/CHANGELOG] → [SEED FROM] → WHERE → GROUP BY → HAVING → WINDOW → EVENT TIME BY → WATERMARK → EMIT → DEDUPLICATE BY → ORDER BY → LIMIT
 </code></pre></div>
+<p><code>FORMAT</code> and <code>CHANGELOG</code> clauses are order-independent and can appear after <code>FROM</code>, after <code>JOIN</code>, after <code>SEED FROM</code>, or trailing at the end of the query.</p>
 <p>Out-of-order clauses produce a clear error:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>Error: WINDOW clause must appear after HAVING, found at position N
 </code></pre></div>

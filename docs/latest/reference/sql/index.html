@@ -2993,16 +2993,6 @@
 <td>Counts non-NULL values</td>
 </tr>
 <tr>
-<td><code>COUNT(DISTINCT x)</code></td>
-<td>O(n)</td>
-<td>Exact count of distinct values</td>
-</tr>
-<tr>
-<td><code>APPROX_COUNT_DISTINCT(x)</code></td>
-<td>O(1)</td>
-<td>HyperLogLog approximation</td>
-</tr>
-<tr>
 <td><code>SUM(x)</code></td>
 <td>O(1)</td>
 <td></td>
@@ -3015,27 +3005,12 @@
 <tr>
 <td><code>MIN(x)</code></td>
 <td>O(n)</td>
-<td>Retraction-aware via heap</td>
+<td>Retraction-aware; stores all values in sorted slice</td>
 </tr>
 <tr>
 <td><code>MAX(x)</code></td>
 <td>O(n)</td>
-<td>Retraction-aware via heap</td>
-</tr>
-<tr>
-<td><code>MEDIAN(x)</code></td>
-<td>O(n)</td>
-<td>Dual-heap</td>
-</tr>
-<tr>
-<td><code>PERCENTILE_CONT(p) WITHIN GROUP (ORDER BY x)</code></td>
-<td>O(n)</td>
-<td>PostgreSQL syntax</td>
-</tr>
-<tr>
-<td><code>ARRAY_AGG(x)</code></td>
-<td>O(n)</td>
-<td>Includes NULLs</td>
+<td>Retraction-aware; stores all values in sorted slice</td>
 </tr>
 <tr>
 <td><code>FIRST(x)</code></td>
@@ -3046,6 +3021,31 @@
 <td><code>LAST(x)</code></td>
 <td>O(1)</td>
 <td>Most recent non-NULL; ignores retractions</td>
+</tr>
+<tr>
+<td><code>COUNT(DISTINCT x)</code></td>
+<td>—</td>
+<td><strong>Not yet implemented</strong></td>
+</tr>
+<tr>
+<td><code>APPROX_COUNT_DISTINCT(x)</code></td>
+<td>—</td>
+<td><strong>Not yet implemented</strong></td>
+</tr>
+<tr>
+<td><code>MEDIAN(x)</code></td>
+<td>—</td>
+<td><strong>Not yet implemented</strong></td>
+</tr>
+<tr>
+<td><code>PERCENTILE_CONT(p) WITHIN GROUP (ORDER BY x)</code></td>
+<td>—</td>
+<td><strong>Not yet implemented</strong></td>
+</tr>
+<tr>
+<td><code>ARRAY_AGG(x)</code></td>
+<td>—</td>
+<td><strong>Not yet implemented</strong></td>
 </tr>
 </tbody>
 </table>

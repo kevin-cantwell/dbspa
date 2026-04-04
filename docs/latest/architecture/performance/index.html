@@ -1082,15 +1082,15 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#optimization-history" class="md-nav__link">
+  <a href="#optimization-breakdown" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Optimization History
+        Optimization Breakdown
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Optimization History">
+    <nav class="md-nav" aria-label="Optimization Breakdown">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -1676,15 +1676,15 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#optimization-history" class="md-nav__link">
+  <a href="#optimization-breakdown" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Optimization History
+        Optimization Breakdown
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Optimization History">
+    <nav class="md-nav" aria-label="Optimization Breakdown">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -1993,8 +1993,8 @@
 <p>The bottleneck is JSON decoding, not Kafka consumption or aggregation. With Avro encoding, throughput increases proportionally to the decode savings.</p>
 <h3 id="sustained-throughput">Sustained Throughput<a class="headerlink" href="#sustained-throughput" title="Permanent link">&para;</a></h3>
 <p>For sustained streaming (producer rate-limited to match consumer), DBSPA processes at the same throughput as the stdin benchmarks above -- the Kafka consumer adds negligible overhead once messages are in the fetch buffer.</p>
-<h2 id="optimization-history">Optimization History<a class="headerlink" href="#optimization-history" title="Permanent link">&para;</a></h2>
-<p>The full complex query (CDC + JOIN + 7 aggregates) went through five rounds of optimization:</p>
+<h2 id="optimization-breakdown">Optimization Breakdown<a class="headerlink" href="#optimization-breakdown" title="Permanent link">&para;</a></h2>
+<p>The full complex query (CDC + JOIN + 7 aggregates) was optimized in five rounds:</p>
 <table>
 <thead>
 <tr>

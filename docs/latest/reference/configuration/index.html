@@ -1188,17 +1188,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#memory-limit" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Memory limit
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#arrangement-memory-limit" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1452,17 +1441,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#memory-limit" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Memory limit
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#arrangement-memory-limit" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1608,8 +1586,6 @@
 <p><strong>Schema:</strong> The <code>result</code> table schema is derived from the query's output columns. GROUP BY columns become the composite primary key (for UPSERT).</p>
 <p><strong>Non-accumulating queries:</strong> Records are INSERTed (append-only) with auto-increment <code>_rowid</code> and <code>_ingested_at</code> columns.</p>
 <p><strong>File locking:</strong> If another process holds a write lock, DBSPA retries with exponential backoff (100ms to 5s). After 30 seconds total, it exits with an error.</p>
-<h2 id="memory-limit">Memory limit<a class="headerlink" href="#memory-limit" title="Permanent link">&para;</a></h2>
-<p>DBSPA keeps all accumulator state in memory. The default limit is 1GB. When exceeded, a warning is logged but processing continues.</p>
 <h2 id="arrangement-memory-limit">Arrangement memory limit<a class="headerlink" href="#arrangement-memory-limit" title="Permanent link">&para;</a></h2>
 <p>For joins and windowed queries, the <code>--arrangement-mem-limit</code> flag controls how many records are kept in memory per arrangement before spilling to disk (via <a href="https://github.com/dgraph-io/badger">Badger</a>):</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>dbspa<span class="w"> </span>--arrangement-mem-limit<span class="w"> </span><span class="m">10000</span><span class="w"> </span><span class="s2">&quot;SELECT ... FROM ... JOIN ...&quot;</span>

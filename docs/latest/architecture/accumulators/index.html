@@ -1555,38 +1555,14 @@
 <tr>
 <td><code>MinAccumulator</code></td>
 <td>O(n) — all values</td>
-<td>min-heap</td>
-<td>remove from heap, O(log n)</td>
+<td>sorted slice</td>
+<td>linear scan to remove retracted value, O(n)</td>
 </tr>
 <tr>
 <td><code>MaxAccumulator</code></td>
 <td>O(n) — all values</td>
-<td>max-heap</td>
-<td>remove from heap, O(log n)</td>
-</tr>
-<tr>
-<td><code>MedianAccumulator</code></td>
-<td>O(n) — all values</td>
-<td>dual-heap</td>
-<td>maintains two heaps split at median</td>
-</tr>
-<tr>
-<td><code>PercentileAccumulator</code></td>
-<td>O(n) — all values</td>
-<td>sorted set</td>
-<td>recomputes on change</td>
-</tr>
-<tr>
-<td><code>CountDistinctAccumulator</code></td>
-<td>O(n) — distinct set</td>
-<td>hash set</td>
-<td>remove from set</td>
-</tr>
-<tr>
-<td><code>ArrayAggAccumulator</code></td>
-<td>O(n) — all values</td>
-<td>list</td>
-<td>remove first matching value</td>
+<td>sorted slice</td>
+<td>linear scan to remove retracted value, O(n)</td>
 </tr>
 <tr>
 <td><code>FirstAccumulator</code></td>
@@ -1606,9 +1582,8 @@
 <p>State cost determines memory usage and checkpoint size:</p>
 <ul>
 <li><strong>O(1) aggregates</strong> (<code>COUNT</code>, <code>SUM</code>, <code>AVG</code>): a few numbers per group key. 10M groups uses ~80MB.</li>
-<li><strong>O(n) aggregates</strong> (<code>MIN</code>, <code>MAX</code>, <code>MEDIAN</code>, <code>PERCENTILE</code>, <code>COUNT(DISTINCT)</code>, <code>ARRAY_AGG</code>): all values retained per group key. 10M groups with 100 values each uses ~8GB.</li>
+<li><strong>O(n) aggregates</strong> (<code>MIN</code>, <code>MAX</code>): all values retained per group key. 10M groups with 100 values each uses ~8GB.</li>
 </ul>
-<p>DBSPA logs a warning when O(n) aggregates exceed a configurable memory threshold.</p>
 <h2 id="null-handling">NULL handling<a class="headerlink" href="#null-handling" title="Permanent link">&para;</a></h2>
 <p>All aggregates skip NULL input values (SQL standard):</p>
 <ul>
@@ -1616,7 +1591,6 @@
 <li><code>COUNT(x)</code> counts only non-NULL values.</li>
 <li>If all inputs are NULL, aggregates return NULL — except <code>COUNT(*)</code> and <code>COUNT(x)</code> which return 0.</li>
 <li><code>FIRST(x)</code> returns the first non-NULL value. <code>LAST(x)</code> returns the most recent non-NULL value.</li>
-<li><code>ARRAY_AGG(x)</code> includes NULLs.</li>
 </ul>
 <h2 id="emission-logic">Emission logic<a class="headerlink" href="#emission-logic" title="Permanent link">&para;</a></h2>
 <p>The accumulator is a hash map: <code>composite_key -&gt; []Accumulator</code>. After each <code>Add</code> or <code>Retract</code>, the pipeline checks <code>HasChanged()</code>. If true:</p>
@@ -1636,8 +1610,8 @@
 </thead>
 <tbody>
 <tr>
-<td><code>COUNT</code>, <code>SUM</code>, <code>MIN</code>, <code>MAX</code>, HLL</td>
-<td><code>MEDIAN</code>, <code>PERCENTILE</code></td>
+<td><code>COUNT</code>, <code>SUM</code>, <code>AVG</code>, <code>MIN</code>, <code>MAX</code></td>
+<td><code>FIRST</code>, <code>LAST</code></td>
 </tr>
 </tbody>
 </table>
