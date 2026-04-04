@@ -414,22 +414,22 @@ func TestPositiveSQL(t *testing.T) {
 			},
 		},
 		{
-			name: "select integer column index (CSV no-header)",
-			sql:  "SELECT b.1, b.2 FROM stdin b FORMAT CSV(header=false)",
+			name: "select named columns (CSV no-header)",
+			sql:  "SELECT b.col1, b.col2 FROM stdin b FORMAT CSV(header=false)",
 			check: func(t *testing.T, stmt *ast.SelectStatement) {
 				ref0, ok := stmt.Columns[0].Expr.(*ast.QualifiedRef)
 				if !ok {
 					t.Fatalf("col 0: expected QualifiedRef, got %T", stmt.Columns[0].Expr)
 				}
-				if ref0.Qualifier != "b" || ref0.Name != "1" {
-					t.Errorf("col 0: got %s.%s, want b.1", ref0.Qualifier, ref0.Name)
+				if ref0.Qualifier != "b" || ref0.Name != "col1" {
+					t.Errorf("col 0: got %s.%s, want b.col1", ref0.Qualifier, ref0.Name)
 				}
 				ref1, ok := stmt.Columns[1].Expr.(*ast.QualifiedRef)
 				if !ok {
 					t.Fatalf("col 1: expected QualifiedRef, got %T", stmt.Columns[1].Expr)
 				}
-				if ref1.Qualifier != "b" || ref1.Name != "2" {
-					t.Errorf("col 1: got %s.%s, want b.2", ref1.Qualifier, ref1.Name)
+				if ref1.Qualifier != "b" || ref1.Name != "col2" {
+					t.Errorf("col 1: got %s.%s, want b.col2", ref1.Qualifier, ref1.Name)
 				}
 			},
 		},

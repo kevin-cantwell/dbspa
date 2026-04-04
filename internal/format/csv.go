@@ -59,11 +59,11 @@ func (d *CSVDecoder) Decode(data []byte) (engine.Record, error) {
 		return engine.Record{}, ErrHeaderRow
 	}
 
-	// Generate column names if needed (1-based integer strings: "1", "2", ...)
+	// Generate column names if needed (1-based: "col1", "col2", ...)
 	if d.columns == nil {
 		d.columns = make([]string, len(fields))
 		for i := range fields {
-			d.columns[i] = fmt.Sprintf("%d", i+1)
+			d.columns[i] = fmt.Sprintf("col%d", i+1)
 		}
 	}
 

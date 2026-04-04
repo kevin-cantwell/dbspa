@@ -1377,7 +1377,7 @@ func (p *Parser) parseIdentOrFunction() (ast.Expr, error) {
 	if p.lex.Peek().Type == lexer.TokenDot {
 		p.lex.Next() // consume first '.'
 		colTok := p.lex.Next()
-		if colTok.Type != lexer.TokenIdent && colTok.Type != lexer.TokenStar && colTok.Type != lexer.TokenInteger && !lexer.IsKeyword(colTok.Type) {
+		if colTok.Type != lexer.TokenIdent && colTok.Type != lexer.TokenStar && !lexer.IsKeyword(colTok.Type) {
 			return nil, p.errorf(colTok, "expected column name after %q., got %q", name, colTok.Literal)
 		}
 		if colTok.Type == lexer.TokenStar {
