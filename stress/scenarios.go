@@ -75,6 +75,7 @@ func AllScenarios() []Scenario {
 
 		// --- Profiling ---
 		{Name: "profile/cpu", Category: "profile", Run: cpuProfile},
+		{Name: "profile/wide_records", Category: "profile", Run: cpuProfileWideRecords},
 	}
 }
 
@@ -635,6 +636,54 @@ func cpuProfile(ctx context.Context, cfg *Config) (*StressResult, error) {
 
 	// Copy to results dir for later analysis
 	resultsProf := "stress/results/cpu.prof"
+	copyFile(profFile, resultsProf)
+
+	r.Passed = true
+	r.Details = fmt.Sprintf("profile: %s (%.1f KB), analyze with: go tool pprof %s", resultsProf, float64(info.Size())/1024, resultsProf)
+
+	return r, nil
+}
+
+// cpuProfileWideRecords profiles the wide-records workload — the slowest
+// non-disk scenario. 50 columns, 3-level nesting, GROUP BY with COUNT.
+// Use this to identify bottlenecks specific to wide/deeply-nested records.
+func cpuProfileWideRecords(ctx context.Context, cfg *Config) (*StressResult, error) {
+	count := 500_000
+	data := ReaderToBytes(WideRecordStream(count, 50, 3))
+
+	profFile := filepath.Join(cfg.TempDir, "cpu_wide.prof")
+
+	cmd := exec.Command(cfg.DBSPABin, "query", "--cpuprofile", profFile,
+		"SELECT group_key, COUNT(*) AS cnt GROUP BY group_key")
+	cmd.Stdin = bytes.NewReader(data)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	start := time.Now()
+	err := cmd.Run()
+	elapsed := time.Since(start)
+
+	r := &StressResult{
+		Name:          "profile/wide_records",
+		DurationMS:    elapsed.Milliseconds(),
+		Duration:      elapsed.Round(time.Millisecond).String(),
+		RecordsTotal:  int64(count),
+		ThroughputAvg: float64(count) / elapsed.Seconds(),
+	}
+
+	if err != nil {
+		r.Error = fmt.Sprintf("process failed: %v", err)
+		return r, nil
+	}
+
+	info, statErr := os.Stat(profFile)
+	if statErr != nil || info.Size() == 0 {
+		r.Error = "CPU profile file not created or empty"
+		return r, nil
+	}
+
+	resultsProf := "stress/results/cpu_wide.prof"
 	copyFile(profFile, resultsProf)
 
 	r.Passed = true
