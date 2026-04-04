@@ -929,45 +929,91 @@ func runNonAccumulating(ctx context.Context, stmt *ast.SelectStatement, src *sou
 	}
 
 	rawCh := src.Read()
-	go func() {
-		defer close(recordCh)
-		var offset int64
-		for raw := range rawCh {
-			recs, err := decodeWithCSVHeader(dec, raw)
-			if err != nil {
-				handleDeserError(dl, err, raw, offset, 0)
-				offset++
-				continue
-			}
-			for _, rec := range recs {
-				select {
-				case recordCh <- rec:
-				case <-ctx.Done():
-					return
-				}
-			}
-			offset++
-		}
-	}()
 
-	// Apply JOIN if present
-	var finalCh <-chan engine.Record = recordCh
 	if joinOp != nil {
-		finalCh = applyJoin(ctx, joinOp, recordCh)
+		// JOIN path: decode per-record for the join probe.
+		decodedCh := make(chan engine.Record, 256)
+		go func() {
+			defer close(decodedCh)
+			var offset int64
+			for raw := range rawCh {
+				recs, err := decodeWithCSVHeader(dec, raw)
+				if err != nil {
+					handleDeserError(dl, err, raw, offset, 0)
+					offset++
+					continue
+				}
+				for _, rec := range recs {
+					select {
+					case decodedCh <- rec:
+					case <-ctx.Done():
+						return
+					}
+				}
+				offset++
+			}
+		}()
+		return runNonAccumulatingFromRecords(ctx, stmt, applyJoin(ctx, joinOp, decodedCh), flags)
 	}
 
-	return runNonAccumulatingFromRecords(ctx, stmt, finalCh, flags)
+	// Hot path: merge decode + schema tracking + batching into one goroutine.
+	tracker := engine.NewSchemaTracker()
+	batchedCh := engine.BatchChannelFromRaw(
+		ctx,
+		rawCh,
+		func(raw []byte) ([]engine.Record, error) {
+			return decodeWithCSVHeader(dec, raw)
+		},
+		func(err error, raw []byte, offset int64) {
+			handleDeserError(dl, err, raw, offset, 0)
+		},
+		func(rec engine.Record) bool {
+			if err := tracker.Track(rec); err != nil {
+				if activeDLWriter != nil {
+					rawJSON, _ := json.Marshal(rec.Columns)
+					activeDLWriter.Write(err.Error(), rawJSON, 0, 0)
+				}
+				fmt.Fprintf(os.Stderr, "Error: %v (record skipped)\n", err)
+				return false
+			}
+			return true
+		},
+		engine.DefaultBatchSize,
+	)
+	return runNonAccumulatingFromBatches(ctx, stmt, batchedCh, flags)
 }
 
 func runNonAccumulatingFromRecords(ctx context.Context, stmt *ast.SelectStatement, recordCh <-chan engine.Record, flags cliFlags) error {
-	// Schema drift detection
-	recordCh = withSchemaTracking(ctx, recordCh)
+	// Merge schema tracking and batching into one goroutine (join / stream-decoder path).
+	tracker := engine.NewSchemaTracker()
+	batchedCh := engine.BatchChannelFromRecords(
+		ctx,
+		recordCh,
+		func(rec engine.Record) bool {
+			if err := tracker.Track(rec); err != nil {
+				if activeDLWriter != nil {
+					rawJSON, _ := json.Marshal(rec.Columns)
+					activeDLWriter.Write(err.Error(), rawJSON, 0, 0)
+				}
+				fmt.Fprintf(os.Stderr, "Error: %v (record skipped)\n", err)
+				return false
+			}
+			return true
+		},
+		engine.DefaultBatchSize,
+	)
 
-	// Wire dedup if present
+	// Wire dedup if present (operates on the batched channel after schema tracking).
 	if stmt.Deduplicate != nil {
+		recordCh = engine.UnbatchChannel(batchedCh)
 		recordCh = applyDedup(ctx, stmt.Deduplicate, recordCh)
+		batchedCh = engine.BatchChannel(recordCh, engine.DefaultBatchSize)
 	}
 
+	return runNonAccumulatingFromBatches(ctx, stmt, batchedCh, flags)
+}
+
+func runNonAccumulatingFromBatches(ctx context.Context, stmt *ast.SelectStatement, batchedCh <-chan engine.Batch, flags cliFlags) error {
 	pipeline := &engine.Pipeline{
 		Columns: stmt.Columns,
 		Where:   stmt.Where,
@@ -984,11 +1030,7 @@ func runNonAccumulatingFromRecords(ctx context.Context, stmt *ast.SelectStatemen
 		snk = &sink.JSONSink{Writer: os.Stdout}
 	}
 
-	// Batch records before filter+projection to amortize channel overhead.
-	batchedCh := engine.BatchChannel(recordCh, engine.DefaultBatchSize)
-
-	outputCh := make(chan engine.Record)
-
+	outputCh := make(chan engine.Record, 128)
 	go func() {
 		pipeline.ProcessBatches(batchedCh, outputCh)
 	}()
