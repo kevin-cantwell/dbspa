@@ -11,7 +11,11 @@ import (
 )
 
 // JSONDecoder decodes NDJSON lines into Records.
-type JSONDecoder struct{}
+// If AllowCols is non-nil, only columns present in the set are decoded;
+// all others are skipped at parse time, reducing allocations for wide records.
+type JSONDecoder struct {
+	AllowCols map[string]bool
+}
 
 // Decode parses a JSON object and maps keys to column names with type inference:
 // number -> IntValue or FloatValue, string -> TextValue,
@@ -31,6 +35,9 @@ func (d *JSONDecoder) Decode(data []byte) (engine.Record, error) {
 
 	cols := make(map[string]engine.Value, len(raw))
 	for k, v := range raw {
+		if d.AllowCols != nil && !d.AllowCols[k] {
+			continue
+		}
 		cols[k] = inferValue(v)
 	}
 

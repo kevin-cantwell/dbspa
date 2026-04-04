@@ -131,6 +131,25 @@ func NewFusedAggregateProcessor(where ast.Expr, agg *AggregateOp, inputCount *at
 	}
 }
 
+// NeededColumnsFromAST computes the set of input column names referenced by a
+// query's WHERE clause, GROUP BY expressions, aggregate arguments, and HAVING
+// clause. The returned map can be passed to format.JSONDecoder.AllowCols to
+// skip decoding unused columns at parse time.
+func NeededColumnsFromAST(where ast.Expr, groupBy []ast.Expr, columns []AggColumn, having ast.Expr) map[string]bool {
+	needed := make(map[string]bool)
+	collectColRefs(where, needed)
+	for _, expr := range groupBy {
+		collectColRefs(expr, needed)
+	}
+	for _, col := range columns {
+		if col.IsAggregate && !col.IsStar && col.AggArg != nil {
+			collectColRefs(col.AggArg, needed)
+		}
+	}
+	collectColRefs(having, needed)
+	return needed
+}
+
 // collectColRefs recursively walks an AST expression, adding all referenced
 // column names to into.
 func collectColRefs(expr ast.Expr, into map[string]bool) {

@@ -1039,6 +1039,17 @@ func runAccumulating(ctx context.Context, stmt *ast.SelectStatement, src *source
 		return runAccumulatingFromRecords(ctx, stmt, joined, flags)
 	}
 
+	// For JSON input, skip decoding columns not referenced by the query.
+	// Compute needed cols from the AST before starting the decode goroutine.
+	if jd, ok := dec.(*format.JSONDecoder); ok {
+		if aggCols, err := engine.ParseAggColumns(stmt.Columns, stmt.GroupBy); err == nil {
+			needed := engine.NeededColumnsFromAST(stmt.Where, stmt.GroupBy, aggCols, stmt.Having)
+			if len(needed) > 0 {
+				jd.AllowCols = needed
+			}
+		}
+	}
+
 	// Decode raw lines into records
 	rawCh := src.Read()
 	decodedCh := make(chan engine.Record)
