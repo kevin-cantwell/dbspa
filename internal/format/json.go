@@ -1,6 +1,7 @@
 package format
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -12,7 +13,8 @@ import (
 
 // JSONDecoder decodes NDJSON lines into Records.
 // If AllowCols is non-nil, only columns present in the set are decoded;
-// all others are skipped at parse time, reducing allocations for wide records.
+// all others are skipped at the token level — no engine.Value is allocated
+// for them, and nested objects/arrays are depth-walked without heap copies.
 type JSONDecoder struct {
 	AllowCols map[string]bool
 }
@@ -25,27 +27,99 @@ func (d *JSONDecoder) Decode(data []byte) (engine.Record, error) {
 		return engine.Record{}, fmt.Errorf("JSON decode error: empty input")
 	}
 
-	// Use go-json (goccy/go-json) — drop-in replacement for encoding/json,
-	// 2-4x faster for unmarshaling. Numbers decoded as float64 by default;
-	// we recover int vs float by checking for whole-number values below.
-	var raw map[string]any
-	if err := gojson.Unmarshal(data, &raw); err != nil {
-		return engine.Record{}, fmt.Errorf("JSON decode error: %w", err)
-	}
+	var cols map[string]engine.Value
+	var err error
 
-	cols := make(map[string]engine.Value, len(raw))
-	for k, v := range raw {
-		if d.AllowCols != nil && !d.AllowCols[k] {
-			continue
+	if d.AllowCols != nil {
+		// Selective path: stream-parse and skip unused fields before allocation.
+		cols, err = decodeSelectiveCols(data, d.AllowCols)
+		if err != nil {
+			return engine.Record{}, fmt.Errorf("JSON decode error: %w", err)
 		}
-		cols[k] = inferValue(v)
+	} else {
+		// Fast path: bulk unmarshal. Numbers decoded as float64 by default;
+		// we recover int vs float by checking for whole-number values below.
+		var raw map[string]any
+		if err := gojson.Unmarshal(data, &raw); err != nil {
+			return engine.Record{}, fmt.Errorf("JSON decode error: %w", err)
+		}
+		cols = make(map[string]engine.Value, len(raw))
+		for k, v := range raw {
+			cols[k] = inferValue(v)
+		}
 	}
 
 	return engine.Record{
 		Columns:   cols,
 		Timestamp: time.Now(),
-		Weight:      1,
+		Weight:    1,
 	}, nil
+}
+
+// decodeSelectiveCols streams the JSON object token-by-token, decoding only
+// keys present in allow. Keys absent from allow are skipped by advancing the
+// token stream — no heap allocation occurs for their values.
+func decodeSelectiveCols(data []byte, allow map[string]bool) (map[string]engine.Value, error) {
+	dec := gojson.NewDecoder(bytes.NewReader(data))
+
+	// Consume opening '{'
+	if _, err := dec.Token(); err != nil {
+		return nil, err
+	}
+
+	cols := make(map[string]engine.Value, len(allow))
+	for dec.More() {
+		keyTok, err := dec.Token()
+		if err != nil {
+			return nil, err
+		}
+		key, _ := keyTok.(string)
+
+		if !allow[key] {
+			if err := skipJSONValue(dec); err != nil {
+				return nil, err
+			}
+			continue
+		}
+
+		var v any
+		if err := dec.Decode(&v); err != nil {
+			return nil, err
+		}
+		cols[key] = inferValue(v)
+	}
+	return cols, nil
+}
+
+// skipJSONValue advances dec past one JSON value without allocating it.
+// Primitives are consumed by a single Token() call. Objects and arrays are
+// depth-tracked until their matching close delimiter, handling arbitrary
+// nesting (e.g. {"a": [{"b": 1}]}) correctly.
+func skipJSONValue(dec *gojson.Decoder) error {
+	t, err := dec.Token()
+	if err != nil {
+		return err
+	}
+	if _, ok := t.(json.Delim); !ok {
+		return nil // primitive (number, string, bool, null) — already consumed
+	}
+	// Opening delimiter consumed; read tokens until depth returns to zero.
+	depth := 1
+	for depth > 0 {
+		tok, err := dec.Token()
+		if err != nil {
+			return err
+		}
+		if d, ok := tok.(json.Delim); ok {
+			switch d {
+			case '{', '[':
+				depth++
+			case '}', ']':
+				depth--
+			}
+		}
+	}
+	return nil
 }
 
 func inferValue(v any) engine.Value {
