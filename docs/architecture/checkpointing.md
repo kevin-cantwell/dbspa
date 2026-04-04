@@ -18,13 +18,13 @@ A checkpoint contains:
 |---|---|
 | Query fingerprint | SHA-256 hash of the normalized SQL |
 | Accumulator state | Serialized group key -> accumulator map |
-| Kafka offsets | Per-partition last processed offset |
-| Dedup cache | If `DEDUPLICATE BY` is active |
 | Timestamp | When the checkpoint was flushed |
+
+Kafka offsets and the dedup cache are **not** part of the checkpoint. Kafka offset tracking relies on the consumer group commit (if `?group=` is configured) or on replaying from the configured `?offset=` on restart.
 
 ## Flush cadence
 
-Checkpoints are flushed every `--checkpoint-interval` (default 5 seconds) or every 10,000 records, whichever comes first.
+Checkpoints are flushed on a time-based interval: every `--checkpoint-interval` (default 5 seconds).
 
 The flush is atomic: write to a temp file, `fsync`, then rename. A crash mid-flush never corrupts the checkpoint — the previous checkpoint remains intact.
 
@@ -33,10 +33,10 @@ The flush is atomic: write to a temp file, `fsync`, then rename. A crash mid-flu
 On restart with `--stateful`:
 
 1. Look for an existing checkpoint matching the query fingerprint.
-2. If found: restore accumulator state, resume from saved Kafka offsets.
+2. If found: restore accumulator state. Kafka resumes from the consumer group's committed offset (or the configured `?offset=` parameter if no group is set).
 3. If not found or fingerprint mismatch: start fresh.
 
-The gap between the checkpoint and the current stream position is replayed (typically seconds of data).
+Records between the checkpoint timestamp and the current stream position are replayed through the accumulator, which re-derives the correct state since accumulators are idempotent.
 
 !!! warning
     If you change the SQL query, the fingerprint changes and the old checkpoint is ignored. Use `dbspa state reset <hash>` to explicitly delete old checkpoints.
@@ -57,12 +57,9 @@ The failure window:
 
 1. Records are processed and the in-memory accumulator is updated.
 2. Output is emitted to the sink.
-3. On checkpoint flush: accumulator state + offsets are written to disk.
-4. After successful flush: offsets are committed to Kafka (if consumer group is set).
+3. On checkpoint flush: accumulator state is written to disk.
 
-**Crash between step 2 and 3:** Output was emitted but checkpoint was not saved. On restart, the accumulator is restored from checkpoint and records are replayed from the checkpointed offset, producing duplicate output lines. There is no way to un-emit what was already written to stdout or HTTP.
-
-**Crash between step 3 and 4:** Checkpoint is saved but Kafka offsets are not committed. DBSPA resumes from the locally checkpointed offsets, not the Kafka-committed ones.
+**Crash between step 2 and 3:** Output was emitted but checkpoint was not saved. On restart, the accumulator is restored from the previous checkpoint and records are replayed, producing duplicate output lines. There is no way to un-emit what was already written to stdout or HTTP.
 
 Use `DEDUPLICATE BY` to prevent duplicate *input* records from reaching the accumulator when Kafka redelivers messages:
 
@@ -85,11 +82,7 @@ The caveat: "exactly-once output state" — the converged SQLite rows are always
 
 ## Disk full handling
 
-If the disk is full during checkpoint write, the write fails and the previous checkpoint remains intact. DBSPA logs an error and retries on the next interval. If the disk remains full for 3 consecutive intervals, DBSPA exits with:
-
-```
-Error: disk full — unable to write checkpoint for 3 consecutive intervals.
-```
+If the disk is full during checkpoint write, the write fails and the previous checkpoint remains intact. DBSPA logs an error and retries on the next interval.
 
 ## State directory
 
@@ -103,23 +96,12 @@ Override: `--state-dir /path/to/dir`
 # List all checkpointed queries
 dbspa state list
 
-# Inspect a specific checkpoint
-dbspa state inspect a1b2c3d4
-
 # Delete a checkpoint (next run replays from scratch)
 dbspa state reset a1b2c3d4
 ```
 
-Example `inspect` output:
-
-```
-Query:       SELECT region, COUNT(*) FROM 'kafka://broker/orders.cdc' ...
-Hash:        a1b2c3d4
-Offsets:     partition 0 = 48291042, partition 1 = 47103821
-Keys:        48
-State size:  12 KB
-Last flush:  2026-03-28T14:02:31Z
-```
+!!! note
+    `dbspa state inspect` is not yet implemented.
 
 ## Interaction with SQLite state
 

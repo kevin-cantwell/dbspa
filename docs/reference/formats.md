@@ -30,7 +30,7 @@ Each top-level JSON key becomes a column. Nested objects are accessible via JSON
 
 ```sql
 FORMAT CSV
-FORMAT CSV(delimiter=',', header=true, quote='"', null_string='')
+FORMAT CSV(delimiter=',', header=true, quote='"')
 ```
 
 | Option | Default | Description |
@@ -38,7 +38,6 @@ FORMAT CSV(delimiter=',', header=true, quote='"', null_string='')
 | `delimiter` | `,` | Field separator character |
 | `header` | `true` | First line contains column names |
 | `quote` | `"` | Quote character for fields containing delimiters |
-| `null_string` | `''` | String representation of NULL |
 
 ```bash
 cat data.csv | dbspa "SELECT name, age WHERE age > 25 FORMAT CSV"

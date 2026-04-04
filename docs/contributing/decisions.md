@@ -81,7 +81,7 @@ Endpoints:
 
 **Design choices:**
 - Simplest possible HTTP layer — just `net/http`, no framework.
-- No authentication in v0 (assume trusted network / sidecar).
+- No authentication (assume trusted network / sidecar).
 - Single query per server instance (not a multi-tenant query service).
 - The HTTPSink maintains the result set in memory (like TUISink's row map), protected by RWMutex.
 
@@ -154,11 +154,11 @@ Use `DEDUPLICATE BY $source.gtid WITHIN '...'` on top of either sink to prevent 
 
 **Problem:** Should the accumulator be sharded across goroutines for parallelism?
 
-**Decision:** No. Single goroutine is sufficient for v0.
+**Decision:** No. Single goroutine is sufficient.
 
 At 200K records/sec with O(1) aggregates, the accumulator goroutine consumes ~20ms/sec of CPU. The bottleneck is JSON decoding and Kafka fetch, which are parallelized across partition goroutines. The single-goroutine design eliminates concurrency bugs and simplifies checkpoint serialization.
 
-**When this breaks down:** O(n) aggregates (MEDIAN, PERCENTILE_CONT) with high-cardinality group keys. The v1 mitigation is to shard the accumulator map by group key hash.
+**When this breaks down:** O(n) aggregates (MEDIAN, PERCENTILE_CONT) with high-cardinality group keys. The mitigation is to shard the accumulator map by group key hash.
 
 ---
 
@@ -176,4 +176,4 @@ Streaming extensions (`WINDOW TUMBLING`, `EMIT`, `EVENT TIME BY`, etc.) are DBSP
 
 **Problem:** `github.com/mattn/go-sqlite3` requires CGo. Should we use it for performance?
 
-**Decision:** Use `modernc.org/sqlite` (pure Go) for v0 to keep the build simple — single static binary, no C toolchain required. Revisit if SQLite write performance becomes a bottleneck.
+**Decision:** Use `modernc.org/sqlite` (pure Go) to keep the build simple — single static binary, no C toolchain required. Revisit if SQLite write performance becomes a bottleneck.

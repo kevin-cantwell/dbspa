@@ -28,7 +28,7 @@ The weight field matters when you use **Debezium CDC**, when the **accumulator e
 
 ## Why Z-sets?
 
-DBSPA's earlier "diff model" used a `Diff int8` field that was limited to `+1` and `-1`. Z-sets generalize this with full integer weights, which unlocks several capabilities:
+DBSPA uses Z-sets with full integer weights rather than a simple `+1`/`-1` boolean. This unlocks several capabilities:
 
 **Compositional incrementalization.** Every relational operator (filter, project, join, aggregate) has a provably correct incremental version when applied to Z-set deltas. This means you can compose operators freely and the result is always correct -- you don't need to special-case retraction handling per operator.
 
@@ -99,7 +99,7 @@ The counts are always correct because updates carry both the removal and additio
 
 ### Efficient sliding windows
 
-A 7-day sliding window doesn't need to re-scan 7 days of data when the window slides. Records entering the window have `weight = +1`, records leaving have `weight = -1`. The accumulator processes both identically.
+A 7-day sliding window doesn't need to re-scan 7 days of data when the window slides. Each record is assigned to all overlapping windows at ingestion time — for a 7-day window with a 1-day slide, each record is stamped into 7 buckets simultaneously. The accumulator for each bucket holds only summary state (counts, sums, etc.), not the original records. When a window closes, its accumulated result is emitted and the state is discarded.
 
 ### Composable operators
 

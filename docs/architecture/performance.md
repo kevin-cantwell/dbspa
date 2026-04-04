@@ -116,9 +116,9 @@ The bottleneck is JSON decoding, not Kafka consumption or aggregation. With Avro
 
 For sustained streaming (producer rate-limited to match consumer), DBSPA processes at the same throughput as the stdin benchmarks above -- the Kafka consumer adds negligible overhead once messages are in the fetch buffer.
 
-## Optimization History
+## Optimization Breakdown
 
-The full complex query (CDC + JOIN + 7 aggregates) went through five rounds of optimization:
+The full complex query (CDC + JOIN + 7 aggregates) was optimized in five rounds:
 
 | Optimization | Throughput | Cumulative |
 |---|---|---|

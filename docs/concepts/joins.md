@@ -258,5 +258,5 @@ Retractions flow end-to-end through the pipeline:
 
 ## Limitations
 
-- **Only simple equi-joins.** Composite keys (multiple conditions with AND) are not supported in v0.
-- **Stream-to-stream requires WITHIN.** DBSPA errors at parse time if `WITHIN INTERVAL` is missing for a stream-stream join.
+- **Only simple equi-joins.** Composite keys (multiple conditions with AND) are not supported.
+- **Stream-to-stream requires WITHIN.** DBSPA errors at startup if `WITHIN INTERVAL` is missing for a stream-stream join.

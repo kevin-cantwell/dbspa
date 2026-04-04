@@ -125,10 +125,6 @@ sqlite3 orders.db "SELECT * FROM result ORDER BY cnt DESC"
 
 **File locking:** If another process holds a write lock, DBSPA retries with exponential backoff (100ms to 5s). After 30 seconds total, it exits with an error.
 
-## Memory limit
-
-DBSPA keeps all accumulator state in memory. The default limit is 1GB. When exceeded, a warning is logged but processing continues.
-
 ## Arrangement memory limit
 
 For joins and windowed queries, the `--arrangement-mem-limit` flag controls how many records are kept in memory per arrangement before spilling to disk (via [Badger](https://github.com/dgraph-io/badger)):

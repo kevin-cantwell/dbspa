@@ -28,11 +28,13 @@ SELECT "last", "first" WHERE "count" > 10
 
 ## Parser
 
-The parser (`parser.New(input).Parse()`) returns an `*ast.SelectStatement`. Clause ordering is rigid and must follow:
+The parser (`parser.New(input).Parse()`) returns an `*ast.SelectStatement`. The core clause ordering is:
 
 ```
-SELECT → FROM → JOIN → WHERE → GROUP BY → HAVING → WINDOW → EVENT TIME BY → WATERMARK → EMIT → DEDUPLICATE BY → ORDER BY → LIMIT
+SELECT → FROM → [FORMAT/CHANGELOG] → [JOIN] → [FORMAT/CHANGELOG] → [SEED FROM] → WHERE → GROUP BY → HAVING → WINDOW → EVENT TIME BY → WATERMARK → EMIT → DEDUPLICATE BY → ORDER BY → LIMIT
 ```
+
+`FORMAT` and `CHANGELOG` clauses are order-independent and can appear after `FROM`, after `JOIN`, after `SEED FROM`, or trailing at the end of the query.
 
 Out-of-order clauses produce a clear error:
 

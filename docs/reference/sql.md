@@ -510,17 +510,17 @@ CASE status WHEN 'active' THEN 1 WHEN 'inactive' THEN 0 ELSE -1 END
 |---|---|---|
 | `COUNT(*)` | O(1) | Counts all rows including NULLs |
 | `COUNT(x)` | O(1) | Counts non-NULL values |
-| `COUNT(DISTINCT x)` | O(n) | Exact count of distinct values |
-| `APPROX_COUNT_DISTINCT(x)` | O(1) | HyperLogLog approximation |
 | `SUM(x)` | O(1) | |
 | `AVG(x)` | O(1) | |
-| `MIN(x)` | O(n) | Retraction-aware via heap |
-| `MAX(x)` | O(n) | Retraction-aware via heap |
-| `MEDIAN(x)` | O(n) | Dual-heap |
-| `PERCENTILE_CONT(p) WITHIN GROUP (ORDER BY x)` | O(n) | PostgreSQL syntax |
-| `ARRAY_AGG(x)` | O(n) | Includes NULLs |
+| `MIN(x)` | O(n) | Retraction-aware; stores all values in sorted slice |
+| `MAX(x)` | O(n) | Retraction-aware; stores all values in sorted slice |
 | `FIRST(x)` | O(1) | First non-NULL; not retractable |
 | `LAST(x)` | O(1) | Most recent non-NULL; ignores retractions |
+| `COUNT(DISTINCT x)` | — | **Not yet implemented** |
+| `APPROX_COUNT_DISTINCT(x)` | — | **Not yet implemented** |
+| `MEDIAN(x)` | — | **Not yet implemented** |
+| `PERCENTILE_CONT(p) WITHIN GROUP (ORDER BY x)` | — | **Not yet implemented** |
+| `ARRAY_AGG(x)` | — | **Not yet implemented** |
 
 ## Scalar functions
 

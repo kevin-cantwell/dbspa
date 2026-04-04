@@ -31,7 +31,7 @@ Capability
 
 | | DBSPA | Flink |
 |---|---|---|
-| Install | `brew install dbspa` | Cluster: JobManager + TaskManagers + ZooKeeper |
+| Install | `go install` or pre-built binary | Cluster: JobManager + TaskManagers + ZooKeeper |
 | First query | 10 seconds | 30+ minutes (write job, configure, deploy) |
 | State backend | In-memory + checkpoint to disk | RocksDB (distributed, terabytes) |
 | Exactly-once output | SQLite sink (`--stateful`) | Yes (built-in) |

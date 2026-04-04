@@ -42,7 +42,8 @@ WINDOW SESSION '5 minutes'
 EVENT TIME BY event_time
 ```
 
-If a new record arrives within the session gap of an existing session, the session is extended. If a record bridges the gap between two existing sessions, the sessions are **merged** — their accumulators are combined, and a retraction is emitted for the old sessions followed by an insertion for the merged session.
+!!! warning
+    Session window merging (combining two existing sessions when a record bridges the gap between them) is not yet implemented. Each record currently creates an independent `[ts, ts+gap)` window rather than extending or merging existing sessions. Use tumbling or sliding windows for production aggregation.
 
 !!! note
     The session gap boundary is exclusive: `gap > timeout` starts a new session, `gap <= timeout` extends the current session.
@@ -52,7 +53,7 @@ If a new record arrives within the session gap of an existing session, the sessi
 1. **Open** — a window is created when its first record arrives.
 2. **Active** — records are accumulated. If `EMIT EARLY` is configured, partial results are emitted periodically.
 3. **Close** — the watermark advances past `window_end`. Final results are emitted and state is discarded.
-4. **Late arrival** — a record arrives for a closed window. If within the `WATERMARK` lateness, the window is re-opened. Otherwise, the record is dropped (or routed to `--dead-letter`).
+4. **Late arrival** — a record whose event time falls in a closed window is dropped.
 
 ## Implicit columns
 
@@ -60,8 +61,8 @@ Windowed queries expose two implicit columns:
 
 | Column | Type | Description |
 |---|---|---|
-| `window_start` | TIMESTAMP | Start of the window (inclusive) |
-| `window_end` | TIMESTAMP | End of the window (exclusive) |
+| `window_start` | TEXT (RFC3339) | Start of the window (inclusive) |
+| `window_end` | TEXT (RFC3339) | End of the window (exclusive) |
 
 These can be used in SELECT and ORDER BY.
 
