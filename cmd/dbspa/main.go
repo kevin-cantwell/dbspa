@@ -67,6 +67,9 @@ type QueryCmd struct {
 
 	// Profiling
 	CPUProfile string `help:"Write CPU profile to file." placeholder:"FILE" name:"cpuprofile"`
+
+	// Benchmarking
+	NullOutput bool `help:"Discard all output (benchmarking only)." name:"null-output" hidden:""`
 }
 
 // ServeCmd runs a query and serves results via HTTP.
@@ -158,6 +161,7 @@ type cliFlags struct {
 	stateDir           string
 	checkpointInterval time.Duration
 	sql                string // original SQL for fingerprinting
+	nullOutput         bool   // discard all output (benchmarking)
 }
 
 // activeDLWriter is the package-level dead letter writer, set in run().
@@ -379,6 +383,7 @@ func run() error {
 		stateDir:           q.StateDir,
 		checkpointInterval: q.CheckpointInterval,
 		sql:                sql,
+		nullOutput:         q.NullOutput,
 	}
 
 	// FROM subquery: execute inner query, feed results into outer pipeline
@@ -1020,7 +1025,9 @@ func runNonAccumulatingFromBatches(ctx context.Context, stmt *ast.SelectStatemen
 	}
 
 	var snk sink.Sink
-	if flags.stateDB != "" {
+	if flags.nullOutput {
+		snk = &sink.NullSink{}
+	} else if flags.stateDB != "" {
 		sqliteSink, err := sink.NewSQLiteSink(flags.stateDB, nil, nil, false)
 		if err != nil {
 			return fmt.Errorf("SQLite state output error: %w", err)
@@ -1199,7 +1206,9 @@ func runAccumulatingFromBatches(ctx context.Context, stmt *ast.SelectStatement, 
 	orderBy := resolveOrderBy(stmt.OrderBy)
 
 	var snk sink.Sink
-	if flags.stateDB != "" {
+	if flags.nullOutput {
+		snk = &sink.NullSink{}
+	} else if flags.stateDB != "" {
 		// SQLite state output
 		var pkCols []string
 		for _, col := range aggCols {
@@ -1545,7 +1554,9 @@ func runWindowedFromRecords(ctx context.Context, stmt *ast.SelectStatement, reco
 
 	// Determine output sink
 	var snk sink.Sink
-	if flags.stateDB != "" {
+	if flags.nullOutput {
+		snk = &sink.NullSink{}
+	} else if flags.stateDB != "" {
 		// Determine primary keys from GROUP BY column aliases
 		var pkCols []string
 		for _, col := range aggCols {

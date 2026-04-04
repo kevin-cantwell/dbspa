@@ -89,6 +89,18 @@ func runDBSPA(b *testing.B, input []byte, sql string) []byte {
 	return out.Bytes()
 }
 
+// runDBSPANull runs dbspa with --null-output, discarding all output.
+// Use this to measure pipeline throughput without sink serialization overhead.
+func runDBSPANull(b *testing.B, input []byte, sql string) {
+	b.Helper()
+	cmd := exec.Command(dbspaBin, "query", "--null-output", sql)
+	cmd.Stdin = bytes.NewReader(input)
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		b.Fatalf("dbspa --null-output failed: %v", err)
+	}
+}
+
 // countLines counts newline-terminated lines in data.
 func countLines(data []byte) int {
 	n := 0
@@ -138,6 +150,26 @@ func BenchmarkFilter_1M(b *testing.B) {
 	b.ReportMetric(float64(1_000_000)/b.Elapsed().Seconds(), "records/sec")
 }
 
+// --- Non-accumulating with NullSink (pipeline throughput, no serialization) ---
+
+func BenchmarkPassthrough_1M_NullSink(b *testing.B) {
+	data := generateFixture(b, "orders", 1_000_000)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		runDBSPANull(b, data, "SELECT *")
+	}
+	b.ReportMetric(float64(1_000_000)/b.Elapsed().Seconds(), "records/sec")
+}
+
+func BenchmarkFilter_1M_NullSink(b *testing.B) {
+	data := generateFixture(b, "orders", 1_000_000)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		runDBSPANull(b, data, "SELECT * WHERE status = 'confirmed'")
+	}
+	b.ReportMetric(float64(1_000_000)/b.Elapsed().Seconds(), "records/sec")
+}
+
 // --- Accumulating benchmarks (GROUP BY throughput) ---
 
 func BenchmarkGroupBy_100K(b *testing.B) {
@@ -181,6 +213,26 @@ func BenchmarkGroupByWithFilter_1M(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		runDBSPA(b, data, "SELECT product, region, COUNT(*), SUM(total) WHERE status = 'confirmed' GROUP BY product, region")
+	}
+	b.ReportMetric(float64(1_000_000)/b.Elapsed().Seconds(), "records/sec")
+}
+
+// --- Accumulating with NullSink ---
+
+func BenchmarkGroupBy_1M_NullSink(b *testing.B) {
+	data := generateFixture(b, "orders", 1_000_000)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		runDBSPANull(b, data, "SELECT status, COUNT(*) GROUP BY status")
+	}
+	b.ReportMetric(float64(1_000_000)/b.Elapsed().Seconds(), "records/sec")
+}
+
+func BenchmarkGroupByWithFilter_1M_NullSink(b *testing.B) {
+	data := generateFixture(b, "orders", 1_000_000)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		runDBSPANull(b, data, "SELECT product, region, COUNT(*), SUM(total) WHERE status = 'confirmed' GROUP BY product, region")
 	}
 	b.ReportMetric(float64(1_000_000)/b.Elapsed().Seconds(), "records/sec")
 }
@@ -375,6 +427,8 @@ func BenchmarkFormat_Parquet_GroupBy_100K(b *testing.B) {
 // Join benchmarks
 // =====================================================
 
+
+
 // generateTableFile creates an NDJSON file with N rows of {id, tier, name} data.
 // IDs range from 1..size. Returns the file path.
 func generateTableFile(b *testing.B, size int) string {
@@ -455,6 +509,19 @@ func BenchmarkJoin_WithGroupBy_100K(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		runDBSPA(b, streamData, sql)
+	}
+	b.ReportMetric(float64(100_000)/b.Elapsed().Seconds(), "records/sec")
+}
+
+// --- Join with NullSink ---
+
+func BenchmarkJoin_WithGroupBy_100K_NullSink(b *testing.B) {
+	tableFile := generateTableFile(b, 100)
+	streamData := generateStreamData(b, 100_000, 100)
+	sql := fmt.Sprintf("SELECT u.tier, COUNT(*) AS cnt, SUM(e.value) AS total FROM stdin e JOIN '%s' u ON e.customer_id = u.id GROUP BY u.tier", tableFile)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		runDBSPANull(b, streamData, sql)
 	}
 	b.ReportMetric(float64(100_000)/b.Elapsed().Seconds(), "records/sec")
 }
