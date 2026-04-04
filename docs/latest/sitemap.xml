@@ -2,98 +2,98 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
     <url>
          <loc>https://kevin-cantwell.github.io/dbspa/docs/latest/</loc>
-         <lastmod>2026-04-03</lastmod>
+         <lastmod>2026-04-04</lastmod>
     </url>
     <url>
          <loc>https://kevin-cantwell.github.io/dbspa/docs/latest/architecture/accumulators/</loc>
-         <lastmod>2026-04-03</lastmod>
+         <lastmod>2026-04-04</lastmod>
     </url>
     <url>
          <loc>https://kevin-cantwell.github.io/dbspa/docs/latest/architecture/checkpointing/</loc>
-         <lastmod>2026-04-03</lastmod>
+         <lastmod>2026-04-04</lastmod>
     </url>
     <url>
          <loc>https://kevin-cantwell.github.io/dbspa/docs/latest/architecture/overview/</loc>
-         <lastmod>2026-04-03</lastmod>
+         <lastmod>2026-04-04</lastmod>
     </url>
     <url>
          <loc>https://kevin-cantwell.github.io/dbspa/docs/latest/architecture/parser/</loc>
-         <lastmod>2026-04-03</lastmod>
+         <lastmod>2026-04-04</lastmod>
     </url>
     <url>
          <loc>https://kevin-cantwell.github.io/dbspa/docs/latest/architecture/performance/</loc>
-         <lastmod>2026-04-03</lastmod>
+         <lastmod>2026-04-04</lastmod>
     </url>
     <url>
          <loc>https://kevin-cantwell.github.io/dbspa/docs/latest/architecture/pipeline/</loc>
-         <lastmod>2026-04-03</lastmod>
+         <lastmod>2026-04-04</lastmod>
     </url>
     <url>
          <loc>https://kevin-cantwell.github.io/dbspa/docs/latest/concepts/changelog-output/</loc>
-         <lastmod>2026-04-03</lastmod>
+         <lastmod>2026-04-04</lastmod>
     </url>
     <url>
          <loc>https://kevin-cantwell.github.io/dbspa/docs/latest/concepts/diff-model/</loc>
-         <lastmod>2026-04-03</lastmod>
+         <lastmod>2026-04-04</lastmod>
     </url>
     <url>
          <loc>https://kevin-cantwell.github.io/dbspa/docs/latest/concepts/error-handling/</loc>
-         <lastmod>2026-04-03</lastmod>
+         <lastmod>2026-04-04</lastmod>
     </url>
     <url>
          <loc>https://kevin-cantwell.github.io/dbspa/docs/latest/concepts/joins/</loc>
-         <lastmod>2026-04-03</lastmod>
+         <lastmod>2026-04-04</lastmod>
     </url>
     <url>
          <loc>https://kevin-cantwell.github.io/dbspa/docs/latest/concepts/streams-vs-tables/</loc>
-         <lastmod>2026-04-03</lastmod>
+         <lastmod>2026-04-04</lastmod>
     </url>
     <url>
          <loc>https://kevin-cantwell.github.io/dbspa/docs/latest/concepts/when-to-use/</loc>
-         <lastmod>2026-04-03</lastmod>
+         <lastmod>2026-04-04</lastmod>
     </url>
     <url>
          <loc>https://kevin-cantwell.github.io/dbspa/docs/latest/concepts/windowing/</loc>
-         <lastmod>2026-04-03</lastmod>
+         <lastmod>2026-04-04</lastmod>
     </url>
     <url>
          <loc>https://kevin-cantwell.github.io/dbspa/docs/latest/contributing/decisions/</loc>
-         <lastmod>2026-04-03</lastmod>
+         <lastmod>2026-04-04</lastmod>
     </url>
     <url>
          <loc>https://kevin-cantwell.github.io/dbspa/docs/latest/contributing/development/</loc>
-         <lastmod>2026-04-03</lastmod>
+         <lastmod>2026-04-04</lastmod>
     </url>
     <url>
          <loc>https://kevin-cantwell.github.io/dbspa/docs/latest/getting-started/examples/</loc>
-         <lastmod>2026-04-03</lastmod>
+         <lastmod>2026-04-04</lastmod>
     </url>
     <url>
          <loc>https://kevin-cantwell.github.io/dbspa/docs/latest/getting-started/install/</loc>
-         <lastmod>2026-04-03</lastmod>
+         <lastmod>2026-04-04</lastmod>
     </url>
     <url>
          <loc>https://kevin-cantwell.github.io/dbspa/docs/latest/getting-started/quickstart/</loc>
-         <lastmod>2026-04-03</lastmod>
+         <lastmod>2026-04-04</lastmod>
     </url>
     <url>
          <loc>https://kevin-cantwell.github.io/dbspa/docs/latest/reference/cli/</loc>
-         <lastmod>2026-04-03</lastmod>
+         <lastmod>2026-04-04</lastmod>
     </url>
     <url>
          <loc>https://kevin-cantwell.github.io/dbspa/docs/latest/reference/configuration/</loc>
-         <lastmod>2026-04-03</lastmod>
+         <lastmod>2026-04-04</lastmod>
     </url>
     <url>
          <loc>https://kevin-cantwell.github.io/dbspa/docs/latest/reference/formats/</loc>
-         <lastmod>2026-04-03</lastmod>
+         <lastmod>2026-04-04</lastmod>
     </url>
     <url>
          <loc>https://kevin-cantwell.github.io/dbspa/docs/latest/reference/grammar/</loc>
-         <lastmod>2026-04-03</lastmod>
+         <lastmod>2026-04-04</lastmod>
     </url>
     <url>
          <loc>https://kevin-cantwell.github.io/dbspa/docs/latest/reference/sql/</loc>
-         <lastmod>2026-04-03</lastmod>
+         <lastmod>2026-04-04</lastmod>
     </url>
 </urlset>

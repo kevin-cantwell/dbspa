@@ -943,10 +943,21 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#exactly-once-processing-with-deduplicate-by" class="md-nav__link">
+  <a href="#stdout-and-http-at-least-once" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Exactly-once processing with DEDUPLICATE BY
+        stdout and HTTP: at-least-once
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#sqlite-exactly-once-output-state" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SQLite: exactly-once output state
       
     </span>
   </a>
@@ -1469,10 +1480,21 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#exactly-once-processing-with-deduplicate-by" class="md-nav__link">
+  <a href="#stdout-and-http-at-least-once" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Exactly-once processing with DEDUPLICATE BY
+        stdout and HTTP: at-least-once
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#sqlite-exactly-once-output-state" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SQLite: exactly-once output state
       
     </span>
   </a>
@@ -1625,7 +1647,30 @@
 <p>If you change the SQL query, the fingerprint changes and the old checkpoint is ignored. Use <code>dbspa state reset &lt;hash&gt;</code> to explicitly delete old checkpoints.</p>
 </div>
 <h2 id="delivery-semantics">Delivery semantics<a class="headerlink" href="#delivery-semantics" title="Permanent link">&para;</a></h2>
-<p>DBSPA is <strong>at-least-once</strong> by default. Use <code>DEDUPLICATE BY</code> for exactly-once processing semantics.</p>
+<p>Delivery semantics depend on the sink:</p>
+<table>
+<thead>
+<tr>
+<th>Sink</th>
+<th>Semantics</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>stdout</td>
+<td>at-least-once</td>
+</tr>
+<tr>
+<td>HTTP (<code>serve</code>)</td>
+<td>at-least-once</td>
+</tr>
+<tr>
+<td>SQLite (<code>--stateful</code>)</td>
+<td><strong>exactly-once</strong> (output state)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="stdout-and-http-at-least-once">stdout and HTTP: at-least-once<a class="headerlink" href="#stdout-and-http-at-least-once" title="Permanent link">&para;</a></h3>
 <p>The failure window:</p>
 <ol>
 <li>Records are processed and the in-memory accumulator is updated.</li>
@@ -1633,16 +1678,19 @@
 <li>On checkpoint flush: accumulator state + offsets are written to disk.</li>
 <li>After successful flush: offsets are committed to Kafka (if consumer group is set).</li>
 </ol>
-<p><strong>Crash between step 2 and 3:</strong> Output was emitted but checkpoint was not saved. On restart, records are replayed, producing duplicate output. For changelog consumers that maintain a key-value map, the duplicates are idempotent — the map converges to the correct state.</p>
+<p><strong>Crash between step 2 and 3:</strong> Output was emitted but checkpoint was not saved. On restart, the accumulator is restored from checkpoint and records are replayed from the checkpointed offset, producing duplicate output lines. There is no way to un-emit what was already written to stdout or HTTP.</p>
 <p><strong>Crash between step 3 and 4:</strong> Checkpoint is saved but Kafka offsets are not committed. DBSPA resumes from the locally checkpointed offsets, not the Kafka-committed ones.</p>
-<h3 id="exactly-once-processing-with-deduplicate-by">Exactly-once processing with DEDUPLICATE BY<a class="headerlink" href="#exactly-once-processing-with-deduplicate-by" title="Permanent link">&para;</a></h3>
-<p><code>DEDUPLICATE BY</code> eliminates duplicate input records within a time window, giving exactly-once processing semantics for the query computation itself:</p>
+<p>Use <code>DEDUPLICATE BY</code> to prevent duplicate <em>input</em> records from reaching the accumulator when Kafka redelivers messages:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="k">SELECT</span><span class="w"> </span><span class="n">status</span><span class="p">,</span><span class="w"> </span><span class="k">COUNT</span><span class="p">(</span><span class="o">*</span><span class="p">)</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">orders</span>
 <a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="k">FROM</span><span class="w"> </span><span class="s1">&#39;kafka://broker/orders.cdc&#39;</span><span class="w"> </span><span class="n">CHANGELOG</span><span class="w"> </span><span class="n">DEBEZIUM</span>
 <a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="k">GROUP</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">status</span>
 <a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="n">DEDUPLICATE</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="err">$</span><span class="k">source</span><span class="p">.</span><span class="n">gtid</span><span class="w"> </span><span class="n">WITHIN</span><span class="w"> </span><span class="s1">&#39;10 minutes&#39;</span>
 </code></pre></div>
-<p>If Kafka redelivers a message (e.g. after a consumer rebalance), DBSPA recognises the <code>$source.gtid</code> and drops the duplicate before it reaches the accumulator. Note that this is exactly-once <em>processing</em> — end-to-end delivery to the sink remains at-least-once because the output is not written transactionally.</p>
+<h3 id="sqlite-exactly-once-output-state">SQLite: exactly-once output state<a class="headerlink" href="#sqlite-exactly-once-output-state" title="Permanent link">&para;</a></h3>
+<p>When <code>--stateful</code> is set, DBSPA maintains accumulated results in a SQLite database via UPSERT. After any crash and recovery, the SQLite state converges to the correct value — identical to what it would have been with no crash.</p>
+<p>This works because recovery restores the accumulator to its checkpointed state and replays records from the checkpointed offset. The accumulator re-derives the correct final state, and the UPSERT overwrites whatever SQLite had with that correct value. The UPSERT (last-write-wins) is what makes this safe: there is no way to produce a wrong SQLite row that persists, because the next successful recovery will always overwrite it.</p>
+<p>This is the same guarantee as Kafka's transactional EOS, achieved via idempotent writes and checkpoint restore rather than atomic transactions.</p>
+<p>The caveat: "exactly-once output state" — the converged SQLite rows are always correct. A reader observing SQLite mid-recovery may briefly see a stale value, but the final state is exact.</p>
 <h2 id="disk-full-handling">Disk full handling<a class="headerlink" href="#disk-full-handling" title="Permanent link">&para;</a></h2>
 <p>If the disk is full during checkpoint write, the write fails and the previous checkpoint remains intact. DBSPA logs an error and retries on the next interval. If the disk remains full for 3 consecutive intervals, DBSPA exits with:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>Error: disk full — unable to write checkpoint for 3 consecutive intervals.
