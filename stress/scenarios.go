@@ -635,7 +635,7 @@ func cpuProfile(ctx context.Context, cfg *Config) (*StressResult, error) {
 	}
 
 	// Copy to results dir for later analysis
-	resultsProf := "stress/results/cpu.prof"
+	resultsProf := "../stress/results/cpu.prof"
 	copyFile(profFile, resultsProf)
 
 	r.Passed = true
@@ -683,7 +683,7 @@ func cpuProfileWideRecords(ctx context.Context, cfg *Config) (*StressResult, err
 		return r, nil
 	}
 
-	resultsProf := "stress/results/cpu_wide.prof"
+	resultsProf := "../stress/results/cpu_wide.prof"
 	copyFile(profFile, resultsProf)
 
 	r.Passed = true
