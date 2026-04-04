@@ -553,6 +553,48 @@ SELECT * FROM 'pg://host/db/orders' WHERE status = 'pending'
 
 ---
 
+### 19. April 2026 performance optimization pass
+
+**Status:** Implemented
+
+**Problem:** Baseline throughput (~460K rec/sec passthrough, ~447K rec/sec GROUP BY) was dominated by GC pressure (33% of CPU) and goroutine scheduling overhead (45% of CPU). The pipeline had too many unbuffered per-record channel hops: decode → schemaTrack → batch → filter → aggregate.
+
+**Optimizations (in order applied):**
+
+1. **Token-based selective JSON decoding** (`AllowCols` on `JSONDecoder`): For queries that don't use `SELECT *`, skip unneeded fields at parse time using `json.Decoder.Token()` with depth-tracking. Zero heap allocation in the skip path. Benefit: only decodes columns actually referenced by WHERE, GROUP BY, and SELECT.
+
+2. **`BatchChannelFromRaw`** — fused decode+schema-track+batch goroutine: Replaced the 3-stage pipeline (rawCh → decode goroutine → decodedCh → schemaTrack goroutine → schemaTrackedCh → BatchChannel goroutine → batchCh) with a single goroutine. Eliminates two unbuffered per-record channel hops. 10ms flush timer and context cancellation preserved.
+
+3. **`BatchChannelFromRecords`** — fused schema-track+batch for post-join paths: Same idea for the `runAccumulatingFromRecords` and `runNonAccumulatingFromRecords` paths (after DD join). Eliminates one per-record channel hop on join paths.
+
+4. **Buffered `aggOutCh`**: Changed `make(chan engine.Record)` → `make(chan engine.Record, 128)` at all 3 aggregate output channel sites. Reduces back-pressure stalls between the aggregate goroutine and the sink writer.
+
+5. **Selective decoding for non-accumulating queries**: Extended `AllowCols` to the non-accumulating path using `NeededColumnsForSelect`. Returns nil for `SELECT *` (can't skip columns that appear in output), so passthrough and filter-only queries still decode all fields.
+
+6. **`NullSink`** for isolation: Added `--null-output` flag and `NullSink` type (discards all records). Used in benchmarks to separate pipeline throughput from sink serialization. JSON sink's `sort.Strings` for deterministic column order is visible in the delta.
+
+**pprof before vs after (sustained GROUP BY workload):**
+- GC: 33% → 13%
+- Goroutine scheduling: 45% → near-zero
+- JSON decode: dominant remaining cost (expected — can't skip for SELECT *)
+
+**Throughput results (Apple M4, sustained 5M-record runs):**
+
+| scenario            | before  | after   | delta  |
+|---------------------|---------|---------|--------|
+| passthrough         | ~460K/s | ~840K/s | +83%   |
+| GROUP BY            | ~447K/s | ~991K/s | +122%  |
+| CDC (Debezium NDJSON)| ~225K/s | ~324K/s | +44%   |
+| join + GROUP BY     | ~baseline | significantly improved | +98–124% |
+
+**Why passthrough ≈ filter (both SELECT *):** `NeededColumnsForSelect` returns nil for `SELECT *` queries — all columns must be decoded. The WHERE clause can't narrow the decode set when the output needs every field. Only narrowing SELECT + WHERE can benefit (e.g., `SELECT status WHERE status = 'confirmed'`).
+
+**NullSink vs JSON sink delta:** ~2% difference on GROUP BY (low output cardinality). Higher cardinality or wider outputs would show a larger delta — the `sort.Strings` call in the JSON sink is O(n columns) per record.
+
+**Future headroom:** Kafka consumer fetch tuning and parallel partition decode. Target: 200K+ rec/sec for complex Avro+join+7-agg queries (current Avro baseline ~300K/s for simple GROUP BY).
+
+---
+
 ### 18. float64→int64 safe integer boundary
 
 **Status:** Decided
