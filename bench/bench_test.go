@@ -191,7 +191,7 @@ func BenchmarkCDC_100K(b *testing.B) {
 	data := generateFixture(b, "orders-cdc", 100_000)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		runDBSPA(b, data, "SELECT _after->>'status' AS status, COUNT(*) GROUP BY _after->>'status' FORMAT DEBEZIUM")
+		runDBSPA(b, data, "SELECT _after->>'status' AS status, COUNT(*) GROUP BY _after->>'status' CHANGELOG DEBEZIUM")
 	}
 	b.ReportMetric(float64(100_000)/b.Elapsed().Seconds(), "records/sec")
 }
@@ -202,7 +202,7 @@ func BenchmarkCDC_Avro_100K(b *testing.B) {
 	data := generateFixtureFormat(b, "orders-cdc", 100_000, "debezium-avro")
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		runDBSPA(b, data, "SELECT status, COUNT(*) GROUP BY status FORMAT DEBEZIUM_AVRO")
+		runDBSPA(b, data, "SELECT status, COUNT(*) GROUP BY status FORMAT AVRO CHANGELOG DEBEZIUM")
 	}
 	b.ReportMetric(float64(100_000)/b.Elapsed().Seconds(), "records/sec")
 }
