@@ -61,6 +61,11 @@ func AllScenarios() []Scenario {
 		{Name: "adversarial/high_retraction", Category: "adversarial", Run: highRetraction},
 		{Name: "adversarial/wide_records", Category: "adversarial", Run: wideRecords},
 
+		// --- Join scenarios ---
+		{Name: "join/enrichment", Category: "join", Run: joinEnrichment},
+		{Name: "join/aggregating", Category: "join", Run: joinAggregating},
+		{Name: "join/large_ref_table", Category: "join", Run: joinLargeRefTable},
+
 		// --- Boundary conditions ---
 		{Name: "boundary/spill_to_disk", Category: "boundary", Run: spillToDisk},
 		{Name: "boundary/checkpoint_recovery", Category: "boundary", Run: checkpointRecovery},
@@ -240,6 +245,81 @@ func wideRecords(ctx context.Context, cfg *Config) (*StressResult, error) {
 			}
 			r.Details = fmt.Sprintf("50 columns, 3-level nesting, throughput %.0f rec/sec", r.ThroughputAvg)
 		})
+}
+
+// ============================================================
+// Join scenarios
+// ============================================================
+
+// joinEnrichment: stream-to-table join, passthrough output.
+// 2M events joined against a 1K-user reference table (100% match rate).
+// Tests raw join throughput — hash table probe cost per record.
+func joinEnrichment(ctx context.Context, cfg *Config) (*StressResult, error) {
+	count := 2_000_000
+	tableSize := 1_000
+	streamData := ReaderToBytes(JoinStream(count, tableSize, 1.0))
+
+	tableFile := filepath.Join(cfg.TempDir, "join_enrichment_users.ndjson")
+	defer os.Remove(tableFile)
+	writeUserTable(tableFile, tableSize)
+
+	sql := fmt.Sprintf(
+		"SELECT e.user_id, e.amount, u.tier, u.region FROM stdin e JOIN '%s' u ON e.user_id = u.id",
+		tableFile)
+
+	return runMonitored(cfg, streamData, sql, count, func(r *StressResult) {
+		r.Passed = true
+		r.Details = fmt.Sprintf("2M events × 1K users, throughput %.0f rec/sec", r.ThroughputAvg)
+	})
+}
+
+// joinAggregating: join + GROUP BY. The most realistic production query:
+// enrich stream events with reference data, then aggregate by enriched field.
+// 2M events, 1K users, GROUP BY tier (4 values from the reference table).
+func joinAggregating(ctx context.Context, cfg *Config) (*StressResult, error) {
+	count := 2_000_000
+	tableSize := 1_000
+	streamData := ReaderToBytes(JoinStream(count, tableSize, 1.0))
+
+	tableFile := filepath.Join(cfg.TempDir, "join_agg_users.ndjson")
+	defer os.Remove(tableFile)
+	writeUserTable(tableFile, tableSize)
+
+	sql := fmt.Sprintf(
+		"SELECT u.tier, COUNT(*) AS cnt, SUM(e.amount) AS total FROM stdin e JOIN '%s' u ON e.user_id = u.id GROUP BY u.tier",
+		tableFile)
+
+	return runMonitored(cfg, streamData, sql, count, func(r *StressResult) {
+		r.Passed = true
+		r.Details = fmt.Sprintf("2M events × 1K users, GROUP BY tier (4 values), throughput %.0f rec/sec", r.ThroughputAvg)
+	})
+}
+
+// joinLargeRefTable: join against a large reference table (100K rows).
+// Tests hash table build cost and probe efficiency at scale.
+// 1M events, 100K-row reference table.
+func joinLargeRefTable(ctx context.Context, cfg *Config) (*StressResult, error) {
+	count := 1_000_000
+	tableSize := 100_000
+	streamData := ReaderToBytes(JoinStream(count, tableSize, 1.0))
+
+	tableFile := filepath.Join(cfg.TempDir, "join_large_users.ndjson")
+	defer os.Remove(tableFile)
+	writeUserTable(tableFile, tableSize)
+
+	sql := fmt.Sprintf(
+		"SELECT e.user_id, e.amount, u.tier FROM stdin e JOIN '%s' u ON e.user_id = u.id",
+		tableFile)
+
+	return runMonitored(cfg, streamData, sql, count, func(r *StressResult) {
+		if r.PeakRSSMB > 2048 {
+			r.Passed = false
+			r.Error = fmt.Sprintf("peak RSS %.1fMB exceeds 2GB limit", r.PeakRSSMB)
+		} else {
+			r.Passed = true
+		}
+		r.Details = fmt.Sprintf("1M events × 100K users, peak RSS %.1fMB, throughput %.0f rec/sec", r.PeakRSSMB, r.ThroughputAvg)
+	})
 }
 
 // ============================================================
@@ -534,6 +614,27 @@ func percentile(sorted []float64, p float64) float64 {
 	}
 	frac := idx - float64(lower)
 	return sorted[lower]*(1-frac) + sorted[upper]*frac
+}
+
+// writeUserTable writes a reference table with string ids matching JoinStream's
+// "user_N" format, plus tier and region columns for enrichment queries.
+func writeUserTable(path string, count int) {
+	f, err := os.Create(path)
+	if err != nil {
+		panic(err)
+	}
+	defer f.Close()
+	enc := json.NewEncoder(f)
+	enc.SetEscapeHTML(false)
+	tiers := []string{"gold", "silver", "bronze", "platinum"}
+	regions := []string{"us-east", "us-west", "eu-west", "ap-south"}
+	for i := 0; i < count; i++ {
+		enc.Encode(map[string]any{
+			"id":     fmt.Sprintf("user_%d", i),
+			"tier":   tiers[i%len(tiers)],
+			"region": regions[i%len(regions)],
+		})
+	}
 }
 
 func writeTableFile(path string, count int) {

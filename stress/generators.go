@@ -202,6 +202,34 @@ func PlainStream(count int, groups int) io.Reader {
 	return r
 }
 
+// JoinStream generates NDJSON stream events with a user_id that randomly
+// references entries in a reference table of tableSize users. matchPct controls
+// the fraction of events whose user_id falls within [0, tableSize) — the
+// remaining events use an out-of-range id and will not match the join.
+func JoinStream(count int, tableSize int, matchPct float64) io.Reader {
+	r, w := io.Pipe()
+	go func() {
+		defer w.Close()
+		rng := rand.New(rand.NewSource(42))
+		enc := json.NewEncoder(w)
+		enc.SetEscapeHTML(false)
+		for i := 0; i < count; i++ {
+			var userID int
+			if rng.Float64() < matchPct {
+				userID = rng.Intn(tableSize)
+			} else {
+				userID = tableSize + rng.Intn(tableSize) // out-of-range, no match
+			}
+			enc.Encode(map[string]any{
+				"event_id": i,
+				"user_id":  fmt.Sprintf("user_%d", userID),
+				"amount":   rng.Intn(1000),
+			})
+		}
+	}()
+	return r
+}
+
 // ReaderToBytes drains an io.Reader into a byte slice.
 func ReaderToBytes(r io.Reader) []byte {
 	b, err := io.ReadAll(r)

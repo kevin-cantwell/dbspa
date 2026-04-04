@@ -78,7 +78,7 @@ stress: build
 
 stress-quick: build
 	@echo "Running quick stress tests (~5 minutes)..."
-	./stress/run.sh --duration 1m --scenarios "sustained/passthrough|adversarial/high_card|adversarial/schema" --output stress/results/$$(date +%Y%m%d_%H%M%S).json
+	./stress/run.sh --duration 1m --scenarios "sustained/passthrough|adversarial/high_card|adversarial/schema|join/enrichment|join/aggregating" --output stress/results/$$(date +%Y%m%d_%H%M%S).json
 
 clean:
 	rm -rf dist/ $(BINARY) dbspa-gen
