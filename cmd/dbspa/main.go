@@ -1050,40 +1050,64 @@ func runAccumulating(ctx context.Context, stmt *ast.SelectStatement, src *source
 		}
 	}
 
-	// Decode raw lines into records
 	rawCh := src.Read()
-	decodedCh := make(chan engine.Record)
 
-	go func() {
-		defer close(decodedCh)
-		var offset int64
-		for raw := range rawCh {
-			recs, err := decodeWithCSVHeader(dec, raw)
-			if err != nil {
-				handleDeserError(dl, err, raw, offset, 0)
-				offset++
-				continue
-			}
-			for _, rec := range recs {
-				select {
-				case decodedCh <- rec:
-				case <-ctx.Done():
-					return
-				}
-			}
-			offset++
-		}
-	}()
-
-	// Apply JOIN if present (before WHERE filtering)
-	var joinedCh <-chan engine.Record = decodedCh
 	if joinOp != nil {
-		joinedCh = applyJoin(ctx, joinOp, decodedCh)
+		// JOIN path: decode into individual records so the join operator can
+		// probe the reference table per-record, then use the standard path.
+		decodedCh := make(chan engine.Record)
+		go func() {
+			defer close(decodedCh)
+			var offset int64
+			for raw := range rawCh {
+				recs, err := decodeWithCSVHeader(dec, raw)
+				if err != nil {
+					handleDeserError(dl, err, raw, offset, 0)
+					offset++
+					continue
+				}
+				for _, rec := range recs {
+					select {
+					case decodedCh <- rec:
+					case <-ctx.Done():
+						return
+					}
+				}
+				offset++
+			}
+		}()
+		return runAccumulatingFromRecords(ctx, stmt, applyJoin(ctx, joinOp, decodedCh), flags)
 	}
 
-	// Batch unfiltered records. WHERE filtering is fused with aggregation
-	// inside runAccumulatingFromBatches via FusedAggregateProcessor.
-	return runAccumulatingFromRecords(ctx, stmt, joinedCh, flags)
+	// Hot path (no JOIN): merge decode + schema tracking + batching into a
+	// single goroutine, eliminating the two unbuffered per-record channel hops
+	// (decodedCh and schemaTrackedCh) that the three-stage pipeline requires.
+	tracker := engine.NewSchemaTracker()
+	var inputCount atomic.Int64
+	batchedCh := engine.BatchChannelFromRaw(
+		ctx,
+		rawCh,
+		func(raw []byte) ([]engine.Record, error) {
+			return decodeWithCSVHeader(dec, raw)
+		},
+		func(err error, raw []byte, offset int64) {
+			handleDeserError(dl, err, raw, offset, 0)
+		},
+		func(rec engine.Record) bool {
+			inputCount.Add(1)
+			if err := tracker.Track(rec); err != nil {
+				if activeDLWriter != nil {
+					rawJSON, _ := json.Marshal(rec.Columns)
+					activeDLWriter.Write(err.Error(), rawJSON, 0, 0)
+				}
+				fmt.Fprintf(os.Stderr, "Error: %v (record skipped)\n", err)
+				return false
+			}
+			return true
+		},
+		engine.DefaultBatchSize,
+	)
+	return runAccumulatingFromBatches(ctx, stmt, batchedCh, &inputCount, flags)
 }
 
 func runAccumulatingFromRecords(ctx context.Context, stmt *ast.SelectStatement, recordCh <-chan engine.Record, flags cliFlags) error {
@@ -1245,7 +1269,7 @@ func runAccumulatingFromBatches(ctx context.Context, stmt *ast.SelectStatement, 
 	// single pass per batch, eliminating the intermediate record channel.
 	fused := engine.NewFusedAggregateProcessor(stmt.Where, aggOp, inputCount)
 
-	aggOutCh := make(chan engine.Record)
+	aggOutCh := make(chan engine.Record, 128)
 	go func() {
 		fused.ProcessBatches(batchedCh, aggOutCh)
 	}()
@@ -1497,7 +1521,7 @@ func runWindowedFromRecords(ctx context.Context, stmt *ast.SelectStatement, reco
 		}
 	}
 
-	aggOutCh := make(chan engine.Record)
+	aggOutCh := make(chan engine.Record, 128)
 	go func() {
 		windowedOp.Process(dedupedCh, aggOutCh)
 	}()
@@ -2059,7 +2083,7 @@ func runServeAccumulatingFromRecords(ctx context.Context, stmt *ast.SelectStatem
 	// Batch records before aggregation to amortize channel overhead.
 	batchedCh := engine.BatchChannel(filteredCh, engine.DefaultBatchSize)
 
-	aggOutCh := make(chan engine.Record)
+	aggOutCh := make(chan engine.Record, 128)
 	go func() {
 		aggOp.ProcessBatches(batchedCh, aggOutCh)
 	}()

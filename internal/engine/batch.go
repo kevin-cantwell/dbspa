@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"context"
 	"time"
 
 	"github.com/kevin-cantwell/dbspa/internal/sql/ast"
@@ -55,6 +56,85 @@ func BatchChannel(in <-chan Record, batchSize int) <-chan Batch {
 					batch = make(Batch, 0, batchSize)
 				}
 				timer.Reset(batchFlushTimeout)
+			}
+		}
+	}()
+	return out
+}
+
+// BatchChannelFromRaw merges decoding, schema tracking, and batching into a
+// single goroutine, eliminating the two unbuffered per-record channel hops
+// that the separate decode→schemaTracking→BatchChannel pipeline requires.
+//
+// decode is called for each raw line and may return multiple records (e.g. CSV).
+// Returning nil records with a nil error silently skips the line (e.g. header rows).
+// onDecodeErr is called for non-nil errors; the line is skipped.
+// trackSchema is called for each decoded record; returning false drops the record.
+// All three callbacks execute in the same goroutine — no synchronization needed.
+func BatchChannelFromRaw(
+	ctx context.Context,
+	rawCh <-chan []byte,
+	decode func([]byte) ([]Record, error),
+	onDecodeErr func(error, []byte, int64),
+	trackSchema func(Record) bool,
+	batchSize int,
+) <-chan Batch {
+	out := make(chan Batch, 4)
+	go func() {
+		defer close(out)
+		batch := make(Batch, 0, batchSize)
+		timer := time.NewTimer(batchFlushTimeout)
+		defer timer.Stop()
+		var offset int64
+		for {
+			select {
+			case raw, ok := <-rawCh:
+				if !ok {
+					if len(batch) > 0 {
+						out <- batch
+					}
+					return
+				}
+				recs, err := decode(raw)
+				if err != nil {
+					onDecodeErr(err, raw, offset)
+					offset++
+					continue
+				}
+				offset++
+				for _, rec := range recs {
+					if !trackSchema(rec) {
+						continue
+					}
+					batch = append(batch, rec)
+					if len(batch) >= batchSize {
+						select {
+						case out <- batch:
+						case <-ctx.Done():
+							return
+						}
+						batch = make(Batch, 0, batchSize)
+						if !timer.Stop() {
+							select {
+							case <-timer.C:
+							default:
+							}
+						}
+						timer.Reset(batchFlushTimeout)
+					}
+				}
+			case <-timer.C:
+				if len(batch) > 0 {
+					select {
+					case out <- batch:
+					case <-ctx.Done():
+						return
+					}
+					batch = make(Batch, 0, batchSize)
+				}
+				timer.Reset(batchFlushTimeout)
+			case <-ctx.Done():
+				return
 			}
 		}
 	}()
