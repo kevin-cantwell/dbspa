@@ -68,6 +68,8 @@ func AllScenarios() []Scenario {
 
 		// --- Boundary conditions ---
 		{Name: "boundary/spill_to_disk", Category: "boundary", Run: spillToDisk},
+		{Name: "boundary/disk_join_aggressive", Category: "boundary", Run: diskJoinAggressive},
+		{Name: "boundary/disk_join_full", Category: "boundary", Run: diskJoinFull},
 		{Name: "boundary/checkpoint_recovery", Category: "boundary", Run: checkpointRecovery},
 		{Name: "boundary/large_orderby", Category: "boundary", Run: largeOrderBy},
 
@@ -389,6 +391,110 @@ func spillToDisk(ctx context.Context, cfg *Config) (*StressResult, error) {
 	r.Details = fmt.Sprintf("--max-memory 128MB, peak RSS %.1fMB", r.PeakRSSMB)
 
 	return r, nil
+}
+
+// diskJoinAggressive: join with --max-memory 1MB (~5K records in memory out of
+// 100K), forcing ~95% of the reference table to Badger (disk). Measures
+// throughput when most join lookups are disk-backed.
+func diskJoinAggressive(ctx context.Context, cfg *Config) (*StressResult, error) {
+	count := 1_000_000
+	tableSize := 100_000
+	streamData := ReaderToBytes(JoinStream(count, tableSize, 1.0))
+
+	tableFile := filepath.Join(cfg.TempDir, "disk_join_agg_users.ndjson")
+	defer os.Remove(tableFile)
+	writeUserTable(tableFile, tableSize)
+
+	sql := fmt.Sprintf(
+		"SELECT e.user_id, e.amount, u.tier FROM stdin e JOIN '%s' u ON e.user_id = u.id",
+		tableFile)
+
+	cmd := exec.Command(cfg.DBSPABin, "query", "--max-memory", "1MB", sql)
+	cmd.Stdin = bytes.NewReader(streamData)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	start := time.Now()
+	if err := cmd.Start(); err != nil {
+		return &StressResult{Name: "boundary/disk_join_aggressive", Error: err.Error()}, nil
+	}
+
+	mon := NewProcessMonitor(cmd.Process.Pid, 500*time.Millisecond)
+	mon.Start()
+	err := cmd.Wait()
+	points := mon.Stop()
+	elapsed := time.Since(start)
+
+	r := buildSpillResult("boundary/disk_join_aggressive", count, elapsed, mon, points)
+	if err != nil {
+		r.Error = fmt.Sprintf("process failed: %v\nstderr: %s", err, stderr.String())
+		return r, nil
+	}
+	r.Passed = true
+	r.Details = fmt.Sprintf("1M events × 100K users, --max-memory 1MB (~95%% on disk), peak RSS %.1fMB, throughput %.0f rec/sec", r.PeakRSSMB, r.ThroughputAvg)
+	return r, nil
+}
+
+// diskJoinFull: join with --arrangement-mem-limit 1 (effectively 0 in-memory
+// budget — every lookup hits Badger). This is the worst-case disk scenario:
+// pure disk-backed join throughput with no in-memory caching.
+func diskJoinFull(ctx context.Context, cfg *Config) (*StressResult, error) {
+	count := 500_000
+	tableSize := 100_000
+	streamData := ReaderToBytes(JoinStream(count, tableSize, 1.0))
+
+	tableFile := filepath.Join(cfg.TempDir, "disk_join_full_users.ndjson")
+	defer os.Remove(tableFile)
+	writeUserTable(tableFile, tableSize)
+
+	sql := fmt.Sprintf(
+		"SELECT e.user_id, e.amount, u.tier FROM stdin e JOIN '%s' u ON e.user_id = u.id",
+		tableFile)
+
+	cmd := exec.Command(cfg.DBSPABin, "query", "--arrangement-mem-limit", "1", sql)
+	cmd.Stdin = bytes.NewReader(streamData)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	start := time.Now()
+	if err := cmd.Start(); err != nil {
+		return &StressResult{Name: "boundary/disk_join_full", Error: err.Error()}, nil
+	}
+
+	mon := NewProcessMonitor(cmd.Process.Pid, 500*time.Millisecond)
+	mon.Start()
+	err := cmd.Wait()
+	points := mon.Stop()
+	elapsed := time.Since(start)
+
+	r := buildSpillResult("boundary/disk_join_full", count, elapsed, mon, points)
+	if err != nil {
+		r.Error = fmt.Sprintf("process failed: %v\nstderr: %s", err, stderr.String())
+		return r, nil
+	}
+	r.Passed = true
+	r.Details = fmt.Sprintf("500K events × 100K users, --arrangement-mem-limit 1 (100%% disk), peak RSS %.1fMB, throughput %.0f rec/sec", r.PeakRSSMB, r.ThroughputAvg)
+	return r, nil
+}
+
+// buildSpillResult constructs a StressResult from a monitored spill run.
+func buildSpillResult(name string, count int, elapsed time.Duration, mon *ProcessMonitor, points []TimePoint) *StressResult {
+	r := &StressResult{
+		Name:          name,
+		DurationMS:    elapsed.Milliseconds(),
+		Duration:      elapsed.Round(time.Millisecond).String(),
+		RecordsTotal:  int64(count),
+		ThroughputAvg: float64(count) / elapsed.Seconds(),
+		PeakRSSMB:     mon.PeakRSSMB(),
+		FinalRSSMB:    mon.FinalRSSMB(),
+		TimeSeries:    points,
+	}
+	if len(points) > 1 {
+		r.RSSGrowthMB = points[len(points)-1].RSSMB - points[0].RSSMB
+	}
+	return r
 }
 
 func checkpointRecovery(ctx context.Context, cfg *Config) (*StressResult, error) {
