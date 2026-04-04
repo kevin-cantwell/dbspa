@@ -15,6 +15,11 @@ type Accumulator interface {
 	Add(value Value)
 	// Retract removes a value (diff=-1).
 	Retract(value Value)
+	// AddN incorporates n copies of value. Equivalent to calling Add n times
+	// but avoids the per-call overhead for common accumulators (COUNT, SUM).
+	AddN(value Value, n int)
+	// RetractN removes n copies of value. Equivalent to calling Retract n times.
+	RetractN(value Value, n int)
 	// Result returns the current aggregate value.
 	Result() Value
 	// HasChanged reports whether Result() changed after the last Add/Retract.
@@ -66,6 +71,19 @@ func (a *CountStarAccumulator) Result() Value {
 	return IntValue{V: a.count}
 }
 
+func (a *CountStarAccumulator) AddN(_ Value, n int) {
+	a.prev = a.count
+	a.count += int64(n)
+	a.changed = a.count != a.prev
+}
+func (a *CountStarAccumulator) RetractN(_ Value, n int) {
+	a.prev = a.count
+	a.count -= int64(n)
+	if a.count < 0 {
+		a.count = 0
+	}
+	a.changed = a.count != a.prev
+}
 func (a *CountStarAccumulator) HasChanged() bool { return a.changed }
 func (a *CountStarAccumulator) ResetChanged()    { a.changed = false }
 func (a *CountStarAccumulator) CanMerge() bool    { return true }
@@ -129,6 +147,25 @@ func (a *CountAccumulator) Result() Value {
 	return IntValue{V: a.count}
 }
 
+func (a *CountAccumulator) AddN(value Value, n int) {
+	if value.IsNull() {
+		return
+	}
+	a.prev = a.count
+	a.count += int64(n)
+	a.changed = a.count != a.prev
+}
+func (a *CountAccumulator) RetractN(value Value, n int) {
+	if value.IsNull() {
+		return
+	}
+	a.prev = a.count
+	a.count -= int64(n)
+	if a.count < 0 {
+		a.count = 0
+	}
+	a.changed = a.count != a.prev
+}
 func (a *CountAccumulator) HasChanged() bool { return a.changed }
 func (a *CountAccumulator) ResetChanged()    { a.changed = false }
 func (a *CountAccumulator) CanMerge() bool    { return true }
@@ -217,6 +254,38 @@ func (a *SumAccumulator) Result() Value {
 	return FloatValue{V: a.sum}
 }
 
+func (a *SumAccumulator) AddN(value Value, n int) {
+	if value.IsNull() {
+		return
+	}
+	f, ok := valueToFloat(value)
+	if !ok {
+		warnIncompatibleAggregate("SUM", value)
+		a.hasValue = true
+		a.changed = true
+		return
+	}
+	a.prevSum = a.sum
+	a.prevCnt = a.count
+	a.sum += f * float64(n)
+	a.count += int64(n)
+	a.hasValue = true
+	a.changed = true
+}
+func (a *SumAccumulator) RetractN(value Value, n int) {
+	if value.IsNull() {
+		return
+	}
+	f, ok := valueToFloat(value)
+	if !ok {
+		return
+	}
+	a.prevSum = a.sum
+	a.prevCnt = a.count
+	a.sum -= f * float64(n)
+	a.count -= int64(n)
+	a.changed = true
+}
 func (a *SumAccumulator) HasChanged() bool { return a.changed }
 func (a *SumAccumulator) ResetChanged()    { a.changed = false }
 func (a *SumAccumulator) CanMerge() bool    { return true }
@@ -309,6 +378,33 @@ func (a *AvgAccumulator) Result() Value {
 	return FloatValue{V: a.sum / float64(a.count)}
 }
 
+func (a *AvgAccumulator) AddN(value Value, n int) {
+	if value.IsNull() {
+		return
+	}
+	f, ok := valueToFloat(value)
+	if !ok {
+		warnIncompatibleAggregate("AVG", value)
+		return
+	}
+	a.prevRes = a.Result()
+	a.sum += f * float64(n)
+	a.count += int64(n)
+	a.changed = !valuesEqual(a.prevRes, a.Result())
+}
+func (a *AvgAccumulator) RetractN(value Value, n int) {
+	if value.IsNull() {
+		return
+	}
+	f, ok := valueToFloat(value)
+	if !ok {
+		return
+	}
+	a.prevRes = a.Result()
+	a.sum -= f * float64(n)
+	a.count -= int64(n)
+	a.changed = !valuesEqual(a.prevRes, a.Result())
+}
 func (a *AvgAccumulator) HasChanged() bool { return a.changed }
 func (a *AvgAccumulator) ResetChanged()    { a.changed = false }
 func (a *AvgAccumulator) CanMerge() bool    { return true }
@@ -393,6 +489,43 @@ func (a *MinAccumulator) Result() Value {
 	return FloatValue{V: v}
 }
 
+func (a *MinAccumulator) AddN(value Value, n int) {
+	if value.IsNull() {
+		return
+	}
+	f, ok := valueToFloat(value)
+	if !ok {
+		warnIncompatibleAggregate("MIN", value)
+		return
+	}
+	a.prevRes = a.Result()
+	for i := 0; i < n; i++ {
+		a.values = append(a.values, f)
+	}
+	sort.Float64s(a.values)
+	a.changed = !valuesEqual(a.prevRes, a.Result())
+}
+func (a *MinAccumulator) RetractN(value Value, n int) {
+	if value.IsNull() {
+		return
+	}
+	f, ok := valueToFloat(value)
+	if !ok {
+		return
+	}
+	a.prevRes = a.Result()
+	removed := 0
+	remaining := make([]float64, 0, len(a.values)-n)
+	for _, v := range a.values {
+		if v == f && removed < n {
+			removed++
+		} else {
+			remaining = append(remaining, v)
+		}
+	}
+	a.values = remaining
+	a.changed = !valuesEqual(a.prevRes, a.Result())
+}
 func (a *MinAccumulator) HasChanged() bool { return a.changed }
 func (a *MinAccumulator) ResetChanged()    { a.changed = false }
 func (a *MinAccumulator) CanMerge() bool    { return true }
@@ -475,6 +608,43 @@ func (a *MaxAccumulator) Result() Value {
 	return FloatValue{V: v}
 }
 
+func (a *MaxAccumulator) AddN(value Value, n int) {
+	if value.IsNull() {
+		return
+	}
+	f, ok := valueToFloat(value)
+	if !ok {
+		warnIncompatibleAggregate("MAX", value)
+		return
+	}
+	a.prevRes = a.Result()
+	for i := 0; i < n; i++ {
+		a.values = append(a.values, f)
+	}
+	sort.Float64s(a.values)
+	a.changed = !valuesEqual(a.prevRes, a.Result())
+}
+func (a *MaxAccumulator) RetractN(value Value, n int) {
+	if value.IsNull() {
+		return
+	}
+	f, ok := valueToFloat(value)
+	if !ok {
+		return
+	}
+	a.prevRes = a.Result()
+	removed := 0
+	remaining := make([]float64, 0, len(a.values)-n)
+	for _, v := range a.values {
+		if v == f && removed < n {
+			removed++
+		} else {
+			remaining = append(remaining, v)
+		}
+	}
+	a.values = remaining
+	a.changed = !valuesEqual(a.prevRes, a.Result())
+}
 func (a *MaxAccumulator) HasChanged() bool { return a.changed }
 func (a *MaxAccumulator) ResetChanged()    { a.changed = false }
 func (a *MaxAccumulator) CanMerge() bool    { return true }
@@ -536,10 +706,12 @@ func (a *FirstAccumulator) Result() Value {
 	return a.value
 }
 
-func (a *FirstAccumulator) HasChanged() bool { return a.changed }
-func (a *FirstAccumulator) ResetChanged()    { a.changed = false }
-func (a *FirstAccumulator) CanMerge() bool    { return false }
-func (a *FirstAccumulator) Merge(_ Accumulator) {}
+func (a *FirstAccumulator) AddN(value Value, n int) { a.Add(value) }
+func (a *FirstAccumulator) RetractN(_ Value, _ int)  {}
+func (a *FirstAccumulator) HasChanged() bool         { return a.changed }
+func (a *FirstAccumulator) ResetChanged()            { a.changed = false }
+func (a *FirstAccumulator) CanMerge() bool           { return false }
+func (a *FirstAccumulator) Merge(_ Accumulator)      {}
 
 func (a *FirstAccumulator) SetInitial(value Value) {
 	log.Printf("Warning: FIRST cannot be seeded from pre-accumulated state.")
@@ -596,10 +768,12 @@ func (a *LastAccumulator) Result() Value {
 	return a.value
 }
 
-func (a *LastAccumulator) HasChanged() bool { return a.changed }
-func (a *LastAccumulator) ResetChanged()    { a.changed = false }
-func (a *LastAccumulator) CanMerge() bool    { return false }
-func (a *LastAccumulator) Merge(_ Accumulator) {}
+func (a *LastAccumulator) AddN(value Value, n int) { a.Add(value) }
+func (a *LastAccumulator) RetractN(_ Value, _ int)  {}
+func (a *LastAccumulator) HasChanged() bool         { return a.changed }
+func (a *LastAccumulator) ResetChanged()            { a.changed = false }
+func (a *LastAccumulator) CanMerge() bool           { return false }
+func (a *LastAccumulator) Merge(_ Accumulator)      {}
 
 func (a *LastAccumulator) SetInitial(value Value) {
 	log.Printf("Warning: LAST cannot be seeded from pre-accumulated state.")

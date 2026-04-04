@@ -5,6 +5,7 @@ go 1.25.7
 require (
 	github.com/alecthomas/kong v1.14.0
 	github.com/dgraph-io/badger/v4 v4.9.1
+	github.com/goccy/go-json v0.10.5
 	github.com/linkedin/goavro/v2 v2.15.0
 	github.com/marcboeker/go-duckdb v1.8.5
 	github.com/parquet-go/parquet-go v0.29.0
@@ -24,7 +25,6 @@ require (
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-viper/mapstructure/v2 v2.2.1 // indirect
-	github.com/goccy/go-json v0.10.5 // indirect
 	github.com/golang/snappy v0.0.4 // indirect
 	github.com/google/flatbuffers v25.2.10+incompatible // indirect
 	github.com/google/uuid v1.6.0 // indirect

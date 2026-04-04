@@ -6,6 +6,7 @@ import (
 	"math"
 	"time"
 
+	gojson "github.com/goccy/go-json"
 	"github.com/kevin-cantwell/dbspa/internal/engine"
 )
 
@@ -20,11 +21,11 @@ func (d *JSONDecoder) Decode(data []byte) (engine.Record, error) {
 		return engine.Record{}, fmt.Errorf("JSON decode error: empty input")
 	}
 
-	// Use Unmarshal (faster than NewDecoder for single objects).
-	// Without UseNumber, Go decodes JSON numbers as float64.
-	// We recover int vs float by checking if the float64 is a whole number.
+	// Use go-json (goccy/go-json) — drop-in replacement for encoding/json,
+	// 2-4x faster for unmarshaling. Numbers decoded as float64 by default;
+	// we recover int vs float by checking for whole-number values below.
 	var raw map[string]any
-	if err := json.Unmarshal(data, &raw); err != nil {
+	if err := gojson.Unmarshal(data, &raw); err != nil {
 		return engine.Record{}, fmt.Errorf("JSON decode error: %w", err)
 	}
 

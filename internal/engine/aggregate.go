@@ -96,6 +96,15 @@ func (op *AggregateOp) ProcessBatch(batch Batch, out chan<- Record) {
 		return
 	}
 	groups := GroupByKey(compacted, op.GroupByExprs)
+	// If every record landed in its own group (high-cardinality GROUP BY),
+	// GroupByKey added overhead with no batching benefit. Fall back to the
+	// per-record path to avoid the sub-batch allocation cost.
+	if len(groups) == len(compacted) {
+		for _, rec := range compacted {
+			op.processRecord(rec, out)
+		}
+		return
+	}
 	for _, recs := range groups {
 		op.processGroupBatch(recs, out)
 	}
@@ -225,8 +234,7 @@ func (op *AggregateOp) processGroupBatch(recs Batch, out chan<- Record) {
 }
 
 // applyToAccumulators feeds a single record's weight into each aggregate
-// accumulator. Weight magnitude controls how many Add/Retract calls are made,
-// supporting Z-set weights > 1 produced by CompactBatch.
+// accumulator. Uses AddN/RetractN to avoid the per-unit loop for weights > 1.
 func (op *AggregateOp) applyToAccumulators(gs *groupState, rec Record) {
 	absWeight := rec.Weight
 	if absWeight < 0 {
@@ -246,12 +254,10 @@ func (op *AggregateOp) applyToAccumulators(gs *groupState, rec Record) {
 				argVal = NullValue{}
 			}
 		}
-		for w := 0; w < absWeight; w++ {
-			if rec.Weight >= 0 {
-				gs.accumulators[i].Add(argVal)
-			} else {
-				gs.accumulators[i].Retract(argVal)
-			}
+		if rec.Weight >= 0 {
+			gs.accumulators[i].AddN(argVal, absWeight)
+		} else {
+			gs.accumulators[i].RetractN(argVal, absWeight)
 		}
 	}
 }
@@ -721,16 +727,18 @@ func compositeKey(vals []Value) string {
 // noopAccumulator is a placeholder for non-aggregate columns in the accumulator slice.
 type noopAccumulator struct{}
 
-func (a *noopAccumulator) Add(_ Value)              {}
-func (a *noopAccumulator) Retract(_ Value)           {}
-func (a *noopAccumulator) Result() Value             { return NullValue{} }
-func (a *noopAccumulator) HasChanged() bool          { return false }
-func (a *noopAccumulator) ResetChanged()             {}
-func (a *noopAccumulator) CanMerge() bool            { return false }
-func (a *noopAccumulator) Merge(_ Accumulator)       {}
-func (a *noopAccumulator) SetInitial(_ Value)        {}
-func (a *noopAccumulator) Marshal() ([]byte, error)  { return nil, nil }
-func (a *noopAccumulator) Unmarshal(_ []byte) error  { return nil }
+func (a *noopAccumulator) Add(_ Value)               {}
+func (a *noopAccumulator) Retract(_ Value)            {}
+func (a *noopAccumulator) AddN(_ Value, _ int)        {}
+func (a *noopAccumulator) RetractN(_ Value, _ int)    {}
+func (a *noopAccumulator) Result() Value              { return NullValue{} }
+func (a *noopAccumulator) HasChanged() bool           { return false }
+func (a *noopAccumulator) ResetChanged()              {}
+func (a *noopAccumulator) CanMerge() bool             { return false }
+func (a *noopAccumulator) Merge(_ Accumulator)        {}
+func (a *noopAccumulator) SetInitial(_ Value)         {}
+func (a *noopAccumulator) Marshal() ([]byte, error)   { return nil, nil }
+func (a *noopAccumulator) Unmarshal(_ []byte) error   { return nil }
 
 // ParseAggColumns analyzes the SELECT list and GROUP BY expressions
 // to produce AggColumn descriptors and validate the query structure.
