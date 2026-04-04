@@ -1055,7 +1055,8 @@ func runAccumulating(ctx context.Context, stmt *ast.SelectStatement, src *source
 	if joinOp != nil {
 		// JOIN path: decode into individual records so the join operator can
 		// probe the reference table per-record, then use the standard path.
-		decodedCh := make(chan engine.Record)
+		// Buffer decodedCh so the decode goroutine can run ahead of the join.
+		decodedCh := make(chan engine.Record, 256)
 		go func() {
 			defer close(decodedCh)
 			var offset int64
@@ -1111,14 +1112,27 @@ func runAccumulating(ctx context.Context, stmt *ast.SelectStatement, src *source
 }
 
 func runAccumulatingFromRecords(ctx context.Context, stmt *ast.SelectStatement, recordCh <-chan engine.Record, flags cliFlags) error {
-	// Schema drift detection
-	recordCh = withSchemaTracking(ctx, recordCh)
-
-	// Batch unfiltered records. The FusedAggregateProcessor applies WHERE
-	// filtering and aggregation in a single pass per batch, eliminating the
-	// intermediate filtered channel and second batch/unbatch cycle.
+	// Merge schema tracking and batching into a single goroutine, eliminating
+	// the unbuffered withSchemaTracking→BatchChannel per-record channel hop.
+	tracker := engine.NewSchemaTracker()
 	var inputCount atomic.Int64
-	batchedCh := engine.BatchChannel(recordCh, engine.DefaultBatchSize)
+	batchedCh := engine.BatchChannelFromRecords(
+		ctx,
+		recordCh,
+		func(rec engine.Record) bool {
+			inputCount.Add(1)
+			if err := tracker.Track(rec); err != nil {
+				if activeDLWriter != nil {
+					rawJSON, _ := json.Marshal(rec.Columns)
+					activeDLWriter.Write(err.Error(), rawJSON, 0, 0)
+				}
+				fmt.Fprintf(os.Stderr, "Error: %v (record skipped)\n", err)
+				return false
+			}
+			return true
+		},
+		engine.DefaultBatchSize,
+	)
 	return runAccumulatingFromBatches(ctx, stmt, batchedCh, &inputCount, flags)
 }
 

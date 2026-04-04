@@ -141,6 +141,70 @@ func BatchChannelFromRaw(
 	return out
 }
 
+// BatchChannelFromRecords merges schema tracking and batching into a single
+// goroutine, eliminating the unbuffered per-record channel hop that the
+// separate withSchemaTracking→BatchChannel pipeline requires.
+//
+// trackSchema is called for each record; returning false drops the record.
+// It executes in the same goroutine as the batcher — no synchronization needed.
+func BatchChannelFromRecords(
+	ctx context.Context,
+	in <-chan Record,
+	trackSchema func(Record) bool,
+	batchSize int,
+) <-chan Batch {
+	out := make(chan Batch, 4)
+	go func() {
+		defer close(out)
+		batch := make(Batch, 0, batchSize)
+		timer := time.NewTimer(batchFlushTimeout)
+		defer timer.Stop()
+		for {
+			select {
+			case rec, ok := <-in:
+				if !ok {
+					if len(batch) > 0 {
+						out <- batch
+					}
+					return
+				}
+				if !trackSchema(rec) {
+					continue
+				}
+				batch = append(batch, rec)
+				if len(batch) >= batchSize {
+					select {
+					case out <- batch:
+					case <-ctx.Done():
+						return
+					}
+					batch = make(Batch, 0, batchSize)
+					if !timer.Stop() {
+						select {
+						case <-timer.C:
+						default:
+						}
+					}
+					timer.Reset(batchFlushTimeout)
+				}
+			case <-timer.C:
+				if len(batch) > 0 {
+					select {
+					case out <- batch:
+					case <-ctx.Done():
+						return
+					}
+					batch = make(Batch, 0, batchSize)
+				}
+				timer.Reset(batchFlushTimeout)
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	return out
+}
+
 // CompactBatchThreshold is the minimum batch size before compaction is applied.
 // Small batches (e.g., timer-flushed partial batches) skip compaction since
 // the overhead isn't worth it.
